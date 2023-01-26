@@ -177,7 +177,7 @@ class SABTL(torch.nn.Module):
  
  
     def set_model_parameters(self, parameter):
-        for (name, module), param in zip(self.base.named_parameters(), parameter):
+        for (name, module), param in zip(self.params(), parameter):
             module.__setattr__(name.split("-")[-1], param.cuda())
 
 
