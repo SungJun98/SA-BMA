@@ -153,9 +153,12 @@ if args.method == 'dnn':
     args.bma_num_models = 1
 
 if args.method == "swag":
-    args.save_path = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}/{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"
+    if args.optim != "sgd":
+        args.save_path = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}/{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
+    else:
+        args.save_path = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}/{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"
 else:
-    args.save_path = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}"
+    args.save_path = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}/{args.lr_init}_{args.wd}_{args.momentum}_{args.rho}"
 
 print(f"Save Results on {args.save_path}")
 #----------------------------------------------------------------
@@ -165,7 +168,10 @@ print(f"Save Results on {args.save_path}")
 wandb.config.update(args)
 
 if args.method == "swag":
-    wandb.run.name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"
+    if args.optim != "sgd":
+        wandb.run.name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
+    else:
+        wandb.run.name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"
 else:
     wandb.run.name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}_{args.lr_init}_{args.wd}"
 #----------------------------------------------------------------
@@ -518,7 +524,7 @@ if args.method in ["sabtl", "swag"]:
         pickle.dump(unc, f)
 
     # Save Reliability Diagram 
-    utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, True, False)
+    utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, True)
 
 
 ### MAP Prediction
@@ -549,9 +555,9 @@ wandb.run.summary["test ece"]  = te_ece
 print(f"test ece : {te_ece:8.4f}")
 
 # Save ece for reliability diagram
-os.makedirs(f'./{args.save_path}/unc_result', exist_ok=True)
-with open(f"./{args.save_path}/unc_result/{args.method}-{args.optim}_uncertainty.pkl", 'wb') as f:
+os.makedirs(f'{args.save_path}/unc_result', exist_ok=True)
+with open(f"{args.save_path}/unc_result/{args.method}-{args.optim}_uncertainty.pkl", 'wb') as f:
     pickle.dump(unc, f)
 
 # Save Reliability Diagram 
-utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, False, False)
+utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, False)

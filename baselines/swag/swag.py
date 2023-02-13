@@ -21,11 +21,7 @@ class SWAG(torch.nn.Module):
 
         self.base = base
         self.init_swag_parameters(params=self.params, no_cov_mat=self.no_cov_mat)
-        # self.base.apply(
-        #     lambda module: swag_parameters(
-        #         module=module, params=self.params, no_cov_mat=self.no_cov_mat
-        #     )
-        # )
+
 
     def forward(self, *args, **kwargs):
         return self.base(*args, **kwargs)

@@ -51,6 +51,21 @@ def list_to_state_dict(model, sample_list):
     return ordDict
 
 
+def unflatten_like_size(vector, likeTensorSize):
+    # Takes a flat torch.tensor and unflattens it to a list of torch.tensors
+    # Input
+    #  - vector : flattened parameters
+    #  - likeTensorSize : list of torch.Size
+    outList = []
+    i = 0
+    for layer_size in likeTensorSize:
+        n = layer_size.numel()
+        outList.append(vector[i : i + n].view(layer_size))
+        i += n
+
+    return outList
+
+
 # NLL
 # https://github.com/wjmaddox/swa_gaussian/blob/master/experiments/uncertainty/uncertainty.py#L78
 def nll(outputs, labels):
@@ -85,7 +100,7 @@ class StepLR:
 
 
 
-# deactivate batchnorm to compute hessian
+# deactivate batchnorm
 # https://discuss.pytorch.org/t/how-to-close-batchnorm-when-using-torchvision-models/21812
 def deactivate_batchnorm(m):
     if isinstance(m, nn.BatchNorm2d):
@@ -166,33 +181,55 @@ def train_sam(dataloader, model, criterion, optimizer, device, batch_norm=True):
 
 
 # train BSAM
-def train_bsam(dataloader, model, criterion, optimizer, A, device, batch_norm=True):
+def train_bsam(dataloader, sabtl_model, criterion, optimizer, device, batch_norm=True):
     loss_sum = 0.0
     correct = 0.0
 
     num_objects_current = 0
     num_batches = len(dataloader)
 
-    model.train()
+    sabtl_model.backbone.train()
+    
+    # Set weight sample
+    sample_w, z_1, z_2 = sabtl_model.sample()
+
+    # Set Sampled weight to DNN model
+    sabtl_model.set_sampled_parameters(sample_w)
+    
     if batch_norm == False:
-        model.apply(deactivate_batchnorm)
+        sabtl_model.backbone.apply(deactivate_batchnorm)
         print("Deactivate batch normalization layers")
 
     for batch, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
 
+        # Making matrix A
+        if sabtl_model.diag_only:
+            '''
+            sparse matrix로
+            1. I_p
+            2. diag( z_1~z_p )
+            만들고
+            stack
+            '''
+        else:
+            raise "Not implemented yet"
+
         # first forward-backward pass
-        loss = criterion(model(X), y)
+        # pred = sabtl_model.backbone(X)
+        loss = criterion(sabtl_model.backbone(X), y)
         loss.backward()
-        optimizer.first_step(A, zero_grad=True)
+        optimizer.first_step(zero_grad=True)
 
         # second forward-backward pass
-        criterion(model(X), y).backward()
+        # pred = sabtl_model.backbone(X)
+        criterion(sabtl_model.backbone(X), y).backward()
         optimizer.second_step(zero_grad=True)
 
-        correct += (model(X).argmax(1) == y).type(torch.float).sum().item()
+        correct += (sabtl_model.backbone(X).argmax(1) == y).type(torch.float).sum().item()
         loss_sum += loss.data.item() * X.size(0)
         num_objects_current += X.size(0)
+        
     return {
         "loss": loss_sum / num_objects_current,
         "accuracy": correct / num_objects_current * 100.0,
@@ -365,7 +402,7 @@ def calibration_curve(predictions, targets, num_bins):
     return out
 
 
-def save_reliability_diagram(method, optim, save_path, unc, bma=False, source=False):
+def save_reliability_diagram(method, optim, save_path, unc, bma=False):
     plt.clf()
     plt.plot(unc['confidence'], unc['confidence'] - unc['accuracy'], 'r', label=f'{method}-{optim}')
     plt.xlabel("confidence")
@@ -374,13 +411,7 @@ def save_reliability_diagram(method, optim, save_path, unc, bma=False, source=Fa
     plt.title('Reliability Diagram')
     plt.legend()
     if bma:
-        if source:
-            plt.savefig(f'{save_path}/unc_result/{method}_{optim}_source_bma_reliability_diagram.png')    
-        else:
-            plt.savefig(f'{save_path}/unc_result/{method}_{optim}_bma_reliability_diagram.png')    
+        plt.savefig(f'{save_path}/unc_result/{method}_{optim}_bma_reliability_diagram.png')    
         
     else:
-        if source:
-            plt.savefig(f'{save_path}/unc_result/{method}_{optim}_source_reliability_diagram.png')    
-        else:
-            plt.savefig(f'{save_path}/unc_result/{method}_{optim}_reliability_diagram.png')    
+        plt.savefig(f'{save_path}/unc_result/{method}_{optim}_reliability_diagram.png')    

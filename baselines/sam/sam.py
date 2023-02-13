@@ -91,7 +91,7 @@ class FSAM(torch.optim.Optimizer):
                 e_w = e_w.view(p.grad.shape)
 
                 p.add_(e_w)  # climb to the local maximum "w + e(w)"
-            
+
         if zero_grad: self.zero_grad()
 
     @torch.no_grad()
@@ -104,62 +104,3 @@ class FSAM(torch.optim.Optimizer):
         self.base_optimizer.step()  # do the actual "sharpness-aware" update
 
         if zero_grad: self.zero_grad()
-
-
-
-## BSAM
-class BSAM(torch.optim.Optimizer):
-    def __init__(self, params, base_optimizer, rho=0.05, adaptive=False, **kwargs):
-        assert rho >= 0.0, f"Invalid rho, should be non-negative: {rho}"
-
-        defaults = dict(rho=rho, adaptive=adaptive, **kwargs)
-        super(BSAM, self).__init__(params, defaults)
-
-        self.base_optimizer = base_optimizer(self.param_groups, **kwargs)
-        self.param_groups = self.base_optimizer.param_groups
-        self.defaults.update(self.base_optimizer.defaults)
-
-    @torch.no_grad()
-    def first_step(self, eta=1.0, zero_grad=False):
-        for group in self.param_groups:
-            for p in group["params"]:
-                if p.grad is None: continue
-                self.state[p]["old_p"] = p.data.clone()
-
-                flat_grad = p.grad.view(-1) + 1e-8
-            
-                fish_inv = 1 / (1 + eta*(flat_grad**2))
-                e_w = group["rho"] * torch.mul(fish_inv, flat_grad)
-                e_w = e_w / torch.sqrt(torch.dot(fish_inv, (flat_grad**2)))
-
-                # unflatten fish_inv like p
-                e_w = e_w.view(p.grad.shape)
-
-                p.add_(e_w)  # climb to the local maximum "w + e(w)"
-            
-        if zero_grad: self.zero_grad()
-
-    @torch.no_grad()
-    def second_step(self, zero_grad=False):
-        for group in self.param_groups:
-            for p in group["params"]:
-                if p.grad is None: continue
-                p.data = self.state[p]["old_p"]  # get back to "w" from "w + e(w)"
-
-        self.base_optimizer.step()  # do the actual "sharpness-aware" update
-
-        if zero_grad: self.zero_grad()
-
-    @torch.no_grad()
-    def step(self, closure=None):
-        assert closure is not None, "Sharpness Aware Minimization requires closure, but it was not provided"
-        closure = torch.enable_grad()(closure)  # the closure should do a full forward-backward pass
-
-        self.first_step(zero_grad=True)
-        closure()
-        self.second_step()
-
-
-    def load_state_dict(self, state_dict):
-        super().load_state_dict(state_dict)
-        self.base_optimizer.param_groups = self.param_groups
