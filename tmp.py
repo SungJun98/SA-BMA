@@ -69,22 +69,31 @@ optimizer = sabtl.BSAM(sabtl_model.parameters(), base_optimizer, sabtl_model, rh
 # %%
 for batch, (X, y) in enumerate(tr_loader):
     X, y = X.to(device), y.to(device)
-
-    # sample_w, z_1, z_2 = sabtl_model.sample()
-    # sabtl_model.set_sampled_parameters(sample_w)
     
-    # first forward-backward pass
-    pred, z_1, z_2 = sabtl_model(X)
+    ### first forward-backward pass
+    # sample weight from bnn params
+    params, z_1, z_2 = sabtl_model.sample()
+    '''
+    # forward & backward
+    pred = sabtl_model(X)
     loss = criterion(pred, y)
     loss.backward()
+    '''
 
-    '''
-    gradient가 bnn param까지 안 흐른다..
-    '''
+    # BNN에 흐르니까 또 DNN에 안 흐르네...
+    ### first forward-backward pass
+    # sample weight from bnn params
+    params, z_1, z_2 = sabtl_model.sample()
+    
+    # forward & backward
+    pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
+    loss = criterion(pred, y)
+    loss.backward()
+    break
+
     optimizer.first_step(z_1=z_1, z_2=z_2, zero_grad=True)
-    
-    # second forward-backward pass
-    
+
+    ### second forward-backward pass
     criterion(sabtl_model.backbone(X), y).backward()
     optimizer.second_step(zero_grad=True)
     
