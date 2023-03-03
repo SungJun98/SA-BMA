@@ -20,7 +20,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # %%
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:7" if torch.cuda.is_available() else "cpu")
 
 tr_loader, val_loader, te_loader, num_classes = data.get_cifar10(data_path = "/DATA1/lsj9862/cifar10/",
                                                             batch_size = 128,
@@ -61,41 +61,44 @@ criterion = torch.nn.CrossEntropyLoss()
 #                 weight_decay=5e-4, nesterov=False)
 
 ## BSAM
+# base_optimizer = torch.optim.SGD
+# optimizer = sabtl.BSAM(sabtl_model.parameters(), base_optimizer, sabtl_model, rho=0.05, lr=0.01, momentum=0.9,
+#         weight_decay=5e-4, nesterov=False)
+
 base_optimizer = torch.optim.SGD
-optimizer = sabtl.BSAM(sabtl_model.parameters(), base_optimizer, sabtl_model, rho=0.05, lr=0.01, momentum=0.9,
+optimizer = sabtl.BSAM([sabtl_model.mean_param, sabtl_model.var_param, sabtl_model.cov_param], base_optimizer, sabtl_model, rho=0.05, lr=0.01, momentum=0.9,
         weight_decay=5e-4, nesterov=False)
+
+
 
 
 # %%
 for batch, (X, y) in enumerate(tr_loader):
     X, y = X.to(device), y.to(device)
     
-    ### first forward-backward pass
-    # sample weight from bnn params
-    params, z_1, z_2 = sabtl_model.sample()
-    '''
-    # forward & backward
-    pred = sabtl_model(X)
-    loss = criterion(pred, y)
-    loss.backward()
-    '''
 
-    # BNN에 흐르니까 또 DNN에 안 흐르네...
     ### first forward-backward pass
     # sample weight from bnn params
     params, z_1, z_2 = sabtl_model.sample()
-    
+    '''
+    first param
+    '''
+    print(f"first z_1 : {z_1}")
     # forward & backward
     pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
     loss = criterion(pred, y)
     loss.backward()
-    break
 
-    optimizer.first_step(z_1=z_1, z_2=z_2, zero_grad=True)
+    bnn_params = optimizer.first_step(zero_grad=True)
+    params = sabtl.second_sample(bnn_params, z_1, z_2, sabtl_model, scale=1.0)
+    print(f"second z_1 : {z_1}")
+    
+     ### second forward-backward pass
+    criterion(torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X), y).backward()
+    optimizer.second_step(zero_grad=True)  
 
-    ### second forward-backward pass
-    criterion(sabtl_model.backbone(X), y).backward()
-    optimizer.second_step(zero_grad=True)
+   
+
     
     
 
@@ -132,4 +135,3 @@ for epoch in range(300):
         table = table.split("\n")[2]
     print(table)
 '''
-# %%

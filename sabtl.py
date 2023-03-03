@@ -57,9 +57,13 @@ class SABTL(torch.nn.Module):
             if w_cov is not None:
                 if w_cov == list:
                     w_cov = torch.cat(w_cov, dim=1)         # cat covmat list as matrix
+                    #TODO: change self.low_rank to w_cov
+                    
                 self.cov_param = nn.Parameter(w_cov)
+                self.low_rank = w_cov.shape[0]
+                
             else:
-                self.cov_param = nn.Parameter(torch.ones(self.num_params) * self.prior_sigma_off_diag_scale)
+                self.cov_param = nn.Parameter(torch.ones(self.low_rank, self.num_params) * self.prior_sigma_off_diag_scale)
 
             self.bnn_param.update({"cov" : self.cov_param})
         # -----------------------------------------------------------------------------------------------------
@@ -67,10 +71,8 @@ class SABTL(torch.nn.Module):
 
 
     def forward(self, *args, **kwargs):
-        # parameter, z_1, z_2 = self.sample(scale=self.sampling_scale)
-        # self.set_sampled_parameters(parameter=parameter)
         # forward backbone model
-        return self.backbone(*args, **kwargs) # , z_1, z_2
+        return self.backbone(*args, **kwargs)
 
 
     def sample(self, scale=1.0, seed=None):
@@ -100,17 +102,15 @@ class SABTL(torch.nn.Module):
         sample = self.format_weights(sample)
       
         return sample, z_1, z_2
- 
+         
 
-        
     def format_weights(self, sample_w):
         state_dict = dict()
         for (name, _), w in zip(self.backbone.named_parameters(), sample_w):
             state_dict[name] = w
         return state_dict
-        
-
-
+    
+    
     def get_mean_vector(self):
         return utils.unflatten_like_size(self.bnn_param['mean'], self.backbone_shape)
 
@@ -140,10 +140,27 @@ class SABTL(torch.nn.Module):
     
     
     
+
+
+def second_sample(bnn_params, z_1, z_2, sabtl_model, scale=1.0):
+    rand_sample = bnn_params[1] * z_1
+
+    if sabtl_model.diag_only == False:
+        cov_sample = bnn_params[2].t().matmul(z_2)
+        cov_sample /= (sabtl_model.low_rank - 1) ** 0.5
+        rand_sample += cov_sample
     
-
-
-
+    # update sample with mean and scale
+    sample = bnn_params[0] + scale**0.5 * rand_sample
+    # unflatten like DNN model
+    
+    sample = utils.unflatten_like_size(sample, sabtl_model.backbone_shape)
+             
+    # change sampled weight type list to dict 
+    sample = sabtl_model.format_weights(sample)
+    
+    return sample
+      
 
 ## BSAM
 class BSAM(torch.optim.Optimizer):
@@ -159,70 +176,38 @@ class BSAM(torch.optim.Optimizer):
         
         self.num_params = sabtl_model.num_params
         self.backbone_shape = sabtl_model.backbone_shape
+        
+        self.diag_only = sabtl_model.diag_only
         self.low_rank = sabtl_model.low_rank
+        
 
     @torch.no_grad()
-    def first_step(self, z_1, z_2, eta=1.0, zero_grad=False):
+    def first_step(self, eta=1.0, zero_grad=False):
         for group in self.param_groups:
-            bnn_grad = list()
-            dnn_grad = list()
             for p in group["params"]:
                 if p.grad is None: continue
                 
-            ### Save BNN weight and Flatten DNN grad --------------------------------------
-                ## Save BNN weight
-                # Mean & Variance
-                if len(p) == self.num_params:
-                    self.state[p]["old_p"] = p.data.clone()
-                    bnn_grad.append(p.grad.view(-1))
-                # Covariance
-                elif p.shape  == torch.Size([self.low_rank, self.num_params]):
-                    set_cov = True
-                    self.state[p]["old_p"] = p.data.clone()
-                    bnn_grad.append(p.grad.view(-1))
+                self.state[p]["old_p"] = p.data.clone()
+                        
+                ### Calculate fisher inverse ------------------------------------------------
+                flat_grad = (p.grad)**2 + 1e-8      # add small value for numerical stability
+                fish_inv = 1 / (1 + eta*(flat_grad**2))
+                # ---------------------------------------------------------------------------
                 
-                ## Flatten DNN grad
-                else:
-                    dnn_grad.append(p.grad.view(-1))
-            
-            bnn_grad = torch.cat(bnn_grad)                  # [2p+Kp]
-            dnn_grad = torch.cat(dnn_grad)                  # [p]
-            print(f"BNN gradient shape : {bnn_grad.shape}")
-            print(f"DNN gardient shape : {dnn_grad.shape}")
-            break
-            # ---------------------------------------------------------------------------
-                    
-            ### Calculate gradient^T * A ------------------------------------------------
-            A_var = dnn_grad * z_1      # [p]
-            l_A = torch.cat([dnn_grad, A_var])
-            
-            if set_cov:
-                # draw low-rank covariance
-                A_cov = torch.outer(dnn_grad, z_2).view(-1)            # [Kp]
-                l_A =  torch.cat([l_A, A_cov])                         # [2p+Kp]
-            # ---------------------------------------------------------------------------
+                ### Calculate perturbation Delta_theta --------------------------------------
+                Delta_p = group["rho"] * fish_inv * p.grad
+                Delta_p = Delta_p / torch.sqrt(p.grad * fish_inv * p.grad)
+                # ---------------------------------------------------------------------------
                 
-        
-            ### Calculate fisher inverse ------------------------------------------------
-            bnn_grad += + 1e-8      # add small value for numerical stability
-        
-            fish_inv = 1 / (1 + eta*(bnn_grad**2))                      # [2p+Kp]
-            # ---------------------------------------------------------------------------
-            
-            ### Calculate perturbation Delta_theta --------------------------------------
-            Delta_theta = group["rho"] * fish_inv * l_A                         # [2p+Kp]
-            Delta_theta = Delta_theta / torch.sqrt(torch.dot(l_A * fish_inv, l_A.t()))  # [2p+Kp]
-            # ---------------------------------------------------------------------------
-            
-            ### theta + Delta_theta
-            bnn_grad.add_(Delta_theta)  # climb to the local maximum "w + e(w)"
-            # ---------------------------------------------------------------------------
-            
+                ### theta + Delta_theta
+                p.add_(Delta_p)  # climb to the local maximum "w + e(w)"
+                # ---------------------------------------------------------------------------
+                
         if zero_grad: self.zero_grad()
+        
+        return self.param_groups[0]["params"]
 
 
-
-    '''
     @torch.no_grad()
     def second_step(self, zero_grad=False):
         for group in self.param_groups:
@@ -234,9 +219,9 @@ class BSAM(torch.optim.Optimizer):
 
         if zero_grad: self.zero_grad()
 
+
     '''
-
-
     def load_state_dict(self, state_dict):
         super().load_state_dict(state_dict)
         self.base_optimizer.param_groups = self.param_groups
+    '''
