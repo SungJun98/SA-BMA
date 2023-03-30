@@ -55,7 +55,7 @@ class SABTL(torch.nn.Module):
         # Covariance (Off-Diagonal Covariance)
         if diag_only is False:
             if w_cov is not None:
-                if w_cov == list:
+                if type(w_cov) == list:
                     w_cov = torch.cat(w_cov, dim=1)         # cat covmat list as matrix
                     #TODO: change self.low_rank to w_cov
                     
@@ -111,20 +111,26 @@ class SABTL(torch.nn.Module):
         return state_dict
     
     
-    def get_mean_vector(self):
-        return utils.unflatten_like_size(self.bnn_param['mean'], self.backbone_shape)
+    def get_mean_vector(self, unflatten=False):
+        if unflatten:
+            return utils.unflatten_like_size(self.bnn_param['mean'], self.backbone_shape)
+        else:
+            return self.bnn_param['mean']
 
 
-    def get_variance_vector(self):
+    def get_variance_vector(self, unflatten=False):
         variances = torch.clamp(self.bnn_param['var'], self.var_clamp)
-        return utils.unflatten_like_size(variances, self.backbone_shape)
+        if unflatten:
+            return utils.unflatten_like_size(variances, self.backbone_shape)
+        else:
+            return variances
 
 
-    def get_covariance_matrix(self, full_cov_mat=False, eps=1e-10):
+    def get_covariance_matrix(self, unflatten=False, eps=1e-10):
         if self.diag_only:
             raise RuntimeError("No covariance matrix was estimated!")        
         
-        if full_cov_mat:
+        if unflatten:
             cov_mat = torch.matmul(self.bnn_param['cov'].t(), self.bnn_param['cov'])
             cov_mat /= (self.low_rank - 1)
             print(cov_mat.shape)
@@ -136,10 +142,18 @@ class SABTL(torch.nn.Module):
             return cov_mat
         
         else:
-            self.bnn_param['cov']
+            return self.bnn_param['cov']
     
     
-    
+    def load_state_dict(self, state_dict, strict=True):
+        # if not self.diag_only:
+        #     for module, name in self.params:
+        #         mean = module.__getattr__("%s_mean" % name)
+        #         module.__setattr__(
+        #             "%s_cov_mat_sqrt" % name,
+        #             mean.new_empty((rank, mean.numel())).zero_(),
+        #         )
+        super(SABTL, self).load_state_dict(state_dict, strict)
 
 
 def second_sample(bnn_params, z_1, z_2, sabtl_model, scale=1.0):
@@ -152,8 +166,8 @@ def second_sample(bnn_params, z_1, z_2, sabtl_model, scale=1.0):
     
     # update sample with mean and scale
     sample = bnn_params[0] + scale**0.5 * rand_sample
-    # unflatten like DNN model
     
+    # unflatten like DNN model
     sample = utils.unflatten_like_size(sample, sabtl_model.backbone_shape)
              
     # change sampled weight type list to dict 
@@ -191,12 +205,12 @@ class BSAM(torch.optim.Optimizer):
                         
                 ### Calculate fisher inverse ------------------------------------------------
                 flat_grad = (p.grad)**2 + 1e-8      # add small value for numerical stability
-                fish_inv = 1 / (1 + eta*(flat_grad**2))
+                fish_inv = 1 / (1 + eta*flat_grad)
                 # ---------------------------------------------------------------------------
                 
                 ### Calculate perturbation Delta_theta --------------------------------------
                 Delta_p = group["rho"] * fish_inv * p.grad
-                Delta_p = Delta_p / torch.sqrt(p.grad * fish_inv * p.grad)
+                Delta_p = Delta_p / (torch.sqrt(p.grad * fish_inv * p.grad) + 1e-8) # add small value for numericaly stability
                 # ---------------------------------------------------------------------------
                 
                 ### theta + Delta_theta

@@ -7,16 +7,15 @@ import data, utils
 import numpy as np
 
 from hessian_eigenthings import compute_hessian_eigenthings
-from pyhessian import hessian
 
 from baselines.swag import swag, swag_utils
 import warnings
 warnings.filterwarnings('ignore')
-
+# %%
 parser = argparse.ArgumentParser(description="Get Hessian of saved model")
 
 parser.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
-# %%
+
 ## Data ---------------------------------------------------------
 parser.add_argument(
     "--dataset", type=str, default="cifar10", choices=["mnist-source", "mnist-down", "cifar10", "cifar100"],
@@ -50,7 +49,7 @@ parser.add_argument(
 parser.add_argument("--swag_load_path", type=str, default=None,
     help="path to load saved swag model (default: None)",)
 
-parser.add_argument("--load_path", type=str, default=None, required=True,
+parser.add_argument("--load_path", type=str, default=None,
     help="path to load saved model (default: None)")
 
 parser.add_argument(
@@ -96,49 +95,14 @@ utils.set_seed(args.seed)
 
 # Load Data ------------------------------------------------------
 if args.dataset == 'cifar10':
-    if args.data_path is not None: 
-        tr_loader, _, te_loader, num_classes = data.get_cifar10(args.data_path, args.batch_size,
+    tr_loader, val_loader, te_loader, num_classes = data.get_cifar10(args.data_path, args.batch_size,
                                                                     args.num_workers,
                                                                     use_validation = args.use_validation)
-    else:
-        tr_loader, _, te_loader, num_classes = data.get_cifar10(batch_size = args.batch_size,
-                                                                    num_workers = args.num_workers,
+elif args.dataset == 'cifar100':
+    tr_loader, val_loader, te_loader, num_classes = data.get_cifar100(args.data_path, args.batch_size,
+                                                                    args.num_workers,
                                                                     use_validation = args.use_validation)
 
-elif args.dataset == 'mnist-source':
-    if args.data_path is not None:
-        tr_loader, _, te_loader, num_classes = data.get_mnist_source(args.data_path, args.batch_size,
-                                                                        args.num_workers,
-                                                                        use_validation = args.use_validation,
-                                                                        )
-    else:
-        tr_loader, _, te_loader, num_classes = data.get_mnist_source(batch_size = args.batch_size,
-                                                                        num_workers = args.num_workers,
-                                                                        use_validation = args.use_validation,
-                                                                        )
-
-elif args.dataset == 'mnist-down':
-    if args.data_path is not None:
-        _, _, source_te_loader, _ = data.get_mnist_source(args.data_path,
-                                                        args.batch_size,
-                                                        args.num_workers,
-                                                        use_validation = args.use_validation,
-                                                        )
-        tr_loader, _, te_loader, num_classes = data.get_mnist_down(args.data_path,
-                                                                        args.batch_size,
-                                                                        args.num_workers,
-                                                                        use_validation = args.use_validation,
-                                                                        )
-    else:
-        _, _, source_te_loader, _ = data.get_mnist_source(batch_size = args.batch_size,
-                                                        num_workers = args.num_workers,
-                                                        use_validation = args.use_validation,
-                                                        )
-        tr_loader, _, te_loader, num_classes = data.get_mnist_down(
-                                                                    batch_size = args.batch_size,
-                                                                    num_workers = args.num_workers,
-                                                                    use_validation = args.use_validation,
-                                                                    )
 if not args.use_validation:
     val_loader = te_loader
 
@@ -149,25 +113,7 @@ print(f"Load Data : {args.dataset}")
 
 
 ## Define Model------------------------------------------------------
-if args.model == "mlp":
-    from models import mlp
-    model = mlp.MLP(output_size=num_classes).to(args.device)
-elif args.model in ["resnet18", "resnet18-noBN"]:
-    from torchvision.models import resnet18
-    model = resnet18(pretrained=False, num_classes=num_classes).to(args.device)
-elif args.model in ["resnet50", "resnet50-noBN"]:
-    from torchvision.models import resnet50
-    model = resnet50(pretrained=False, num_classes=num_classes).to(args.device)
-elif args.model in ["wideresnet40x10", "wideresnet40x10-noBN"]:
-    from models import wide_resnet
-    model_cfg = getattr(wide_resnet, "WideResNet40x10")
-    model = model_cfg.base(num_classes=num_classes).to(args.device)
-elif args.model in ["wideresnet28x10", "wideresnet28x10-noBN"]:
-    from models import wide_resnet
-    model_cfg = getattr(wide_resnet, "WideResNet28x10")
-    model = model_cfg.base(num_classes=num_classes).to(args.device)
-
-print(f"Preparing model {args.model}")
+model = utils.get_backbone(args.model, num_classes, args.device)
 
 
 if args.swag:
@@ -175,7 +121,7 @@ if args.swag:
     swag_model = swag.SWAG(copy.deepcopy(model), no_cov_mat=args.diag_only, max_num_models=args.max_num_models).to(args.device)
 
     # Get bma weights list
-    bma_load_paths = os.listdir(args.swag_load_path)
+    bma_load_paths = sorted(os.listdir(args.swag_load_path))
 else:
     checkpoint = torch.load(args.load_path)
     model.load_state_dict(checkpoint["state_dict"])
@@ -183,29 +129,28 @@ else:
 
 model.eval()
 
-
 criterion = torch.nn.CrossEntropyLoss()
 
-
 if args.swag:
+    acc_list = list(); ece_list = list(); nll_list = list()
     tr_cum_eigenval_list = list() ; tr_max_eigenval_list = list()
     te_cum_eigenval_list = list() ; te_max_eigenval_list = list()
     for cnt, path in enumerate(bma_load_paths):
-        model.load_state_dict(torch.load(args.load_path))
-        model_state_dict = model.state_dict()
 
         # get sampled model
         bma_sample = torch.load(f"{args.swag_load_path}/{path}")
         bma_state_dict = utils.list_to_state_dict(model, bma_sample)
-
-        model_state_dict.update(bma_state_dict)
-        model.load_state_dict(model_state_dict)
-        if args.batch_norm:
-            swag_utils.bn_update(tr_loader, model)
-
-        res = utils.eval(te_loader, model, criterion, args.device)
-        print(f"Test Accuracy : {res['accuracy']:8.4f}%")
+        model.load_state_dict(bma_state_dict)
         
+        if args.batch_norm:
+          swag_utils.bn_update(tr_loader, model)
+        
+        res = utils.eval(te_loader, model, criterion, args.device)
+        print(f"Test Accuracy : {res['accuracy']:8.4f}% / ECE : {res['ece']} / NLL : {res['nll']}")
+        acc_list.append(res['accuracy']); ece_list.append(res['ece']); nll_list.append(res['nll'])
+        performance = dict({"accuracy": acc_list, "ece" : ece_list, "nll" : nll_list})
+        with open(f'{args.swag_load_path}/performance.pickle', 'wb') as f:
+            pickle.dump(performance, f)
         
         # get eigenvalue for train set
         try:
@@ -221,8 +166,6 @@ if args.swag:
                     use_gpu=True,
                 )
 
-            # tr_cum_eigenval = tr_cum_eigenval + tr_eigenvals
-            # tr_max_eigenval = tr_max_eigenval + max(tr_eigenvals)
             tr_cum_eigenval_list.append(tr_eigenvals)
             tr_max_eigenval_list.append(max(tr_eigenvals))
             print(f"Successfully get {cnt}-th swag bma model eigenvalues for train set")
@@ -230,6 +173,10 @@ if args.swag:
 
         except:
             print(f"Numerical Issue on {cnt}-th model with train data")
+        
+        ## save tr_eign as pickle
+        with open(f'{args.swag_load_path}/tr_eigenval_list.pickle', 'wb') as f:
+            pickle.dump(tr_cum_eigenval_list, f)
 
         print("-"*15)
 
@@ -247,8 +194,6 @@ if args.swag:
                     use_gpu=True,
                 )
             
-            # te_cum_eigenval = te_cum_eigenval + te_eigenvals
-            # te_max_eigenval = te_max_eigenval + max(te_eigenvals)
             te_cum_eigenval_list.append(te_eigenvals)
             te_max_eigenval_list.append(max(te_eigenvals))
             print(f"Successfully get {cnt}-th swag bma model eigenvalues for test set")
@@ -259,13 +204,9 @@ if args.swag:
         print("-"*15)
         print("-"*15)
     
-
-    ## Save pickle file
-    with open(f'{args.swag_load_path}/tr_eigenval_list.pickle', 'wb') as f:
-        pickle.dump(tr_cum_eigenval_list, f)
-
-    with open(f'{args.swag_load_path}/te_eigenval_list.pickle', 'wb') as f:
-        pickle.dump(te_cum_eigenval_list, f)
+        ## save te_eign as pickle
+        with open(f'{args.swag_load_path}/te_eigenval_list.pickle', 'wb') as f:
+            pickle.dump(te_cum_eigenval_list, f)
 
 
 else:
@@ -303,36 +244,14 @@ else:
     print("-"*15)
     print("-"*15)
 
+    if not os.path.isdir(args.load_path):
+        save_path = args.load_path.split('/')[:-1]
+        save_path = '/'.join(save_path)
+    
     ## Save pickle file
-    with open(f'{args.load_path}/tr_eigenval_list.pickle', 'wb') as f:
+    with open(f'{save_path}/tr_eigenval_list.pickle', 'wb') as f:
         pickle.dump(tr_eigenvals, f)
 
-    with open(f'{args.load_path}/te_eigenval_list.pickle', 'wb') as f:
+    with open(f'{save_path}/te_eigenval_list.pickle', 'wb') as f:
         pickle.dump(te_eigenvals, f)
 # -----------------------------------------------------------------------------
-
-'''
-### pyhessian
-# train set
-for inputs, targets in tr_loader:
-    break
-inputs, targets = inputs.to(args.device), targets.to(args.device)
-
-# create the hessian computation module
-hessian_comp = hessian(model, criterion, data=(inputs, targets), cuda=True)
-
-tr_top_eigenvalues, tr_top_eigenvector = hessian_comp.eigenvalues()
-print("The top Hessian eigenvalue of this model on train set is %.4f" %tr_top_eigenvalues[-1])
-
-
-# test set
-for inputs, targets in te_loader:
-    break
-inputs, targets = inputs.to(args.device), targets.to(args.device)
-
-# create the hessian computation module
-hessian_comp = hessian(model, criterion, data=(inputs, targets), cuda=True)
-
-te_top_eigenvalues, te_top_eigenvector = hessian_comp.eigenvalues()
-print("The top Hessian eigenvalue of this model on test set is %.4f" %te_top_eigenvalues[-1])
-'''

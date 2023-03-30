@@ -1,8 +1,8 @@
-# 150 epoch
-python3 hessian.py --seed=0 --dataset=cifar10 --model=resnet18-noBN --load_path="/home/lsj9862/BayesianSAM/exp_result/cifar10/resnet18-noBN/dnn-sgd_scratch/dnn-sgd_150_epoch.pt" --data_path=./data/cifar10
+## Constant
+CUDA_VISIBLE_DEVICES=3 python3 hessian.py --seed=0 --dataset=cifar10 --model=resnet18-noBN --load_path="/mlainas/lsj9862/exp_result/cifar10/resnet18-noBN/dnn-sgd/constant/dnn-sgd_best_val.pt" --data_path=/DATA1/lsj9862/cifar10
 
-# 300 epoch
-python3 hessian.py --seed=0 --dataset=cifar10 --model=resnet18-noBN --load_path="/home/lsj9862/BayesianSAM/exp_result/cifar10/resnet18-noBN/dnn-sgd_scratch/dnn-sgd_300_epoch.pt" --data_path=./data/cifar10
+## Cos Anneal
+CUDA_VISIBLE_DEVICES=3 python3 hessian.py --seed=0 --dataset=cifar10 --model=resnet18-noBN --load_path="/mlainas/lsj9862/exp_result/cifar10/resnet18-noBN/dnn-sgd/cos_anneal/dnn-sgd_best_val.pt" --data_path=/DATA1/lsj9862/cifar10
 
-# Best model
-python3 hessian.py --seed=0 --dataset=cifar10 --model=resnet18-noBN --load_path="/home/lsj9862/BayesianSAM/exp_result/cifar10/resnet18-noBN/dnn-sgd_scratch/dnn-sgd_best_val.pt" --data_path=./data/cifar10
+## SWAG lr
+CUDA_VISIBLE_DEVICES=3 python3 hessian.py --seed=0 --dataset=cifar10 --model=resnet18-noBN --load_path="/mlainas/lsj9862/exp_result/cifar10/resnet18-noBN/dnn-sgd/swag_lr/dnn-sgd_best_val.pt" --data_path=/DATA1/lsj9862/cifar10

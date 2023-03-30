@@ -26,8 +26,7 @@ def unflatten_like(vector, likeTensorList):
         n = tensor.numel()
         outList.append(vector[:, i : i + n].view(tensor.shape))
         i += n
-        
-        
+    
     return outList
 
 

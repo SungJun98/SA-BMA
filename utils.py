@@ -11,6 +11,7 @@ import torch.nn.functional as F
 
 from baselines.swag.swag_utils import bn_update, predict
 from baselines.swag import swag
+import sabtl
 
 
 def set_seed(RANDOM_SEED=0):
@@ -27,13 +28,40 @@ def set_seed(RANDOM_SEED=0):
     random.seed(RANDOM_SEED)
 
 
-def load_pkl_data(data_path):
-    '''
-    Load toy data saving as pickle file
-    '''
-    with open(data_path,'rb') as f:
-        tr_dat, down_dat, val_dat, te_dat  = pickle.load(f)
-    return tr_dat, down_dat, val_dat, te_dat
+from models import mlp, resnet, resnet_noBN, wide_resnet, wide_resnet_noBN
+def get_backbone(model_name, num_classes, device, pre_trained=False):
+    if model_name == "mlp":
+        model = mlp.MLP(output_size=num_classes)
+
+    elif model_name == "resnet18":
+        model = resnet.resnet18(pretrained=pre_trained, num_classes=num_classes)
+    elif model_name == "resnet18-noBN":
+        model = resnet_noBN.resnet18(num_classes=num_classes)
+
+    elif model_name == "resnet50":
+        model = resnet.resnet50(pretrained=pre_trained, num_classes=num_classes)
+    elif model_name == "resnet50-noBN":
+        model = resnet_noBN.resnet50(num_classes=num_classes)
+
+    elif model_name == "wideresnet28x10":
+        model_cfg = getattr(wide_resnet, "WideResNet28x10")
+        model = model_cfg.base(num_classes=num_classes)
+    elif model_name == "wideresnet28x10-noBN":
+        model_cfg = getattr(wide_resnet_noBN, "WideResNet28x10")
+        model = model_cfg.base(num_classes=num_classes)
+
+    elif model_name == "wideresnet40x10":
+        model_cfg = getattr(wide_resnet, "WideResNet40x10")
+        model = model_cfg.base(num_classes=num_classes)
+    elif model_name == "wideresnet40x10-noBN":
+        model_cfg = getattr(wide_resnet_noBN, "WideResNet40x10")
+        model = model_cfg.base(num_classes=num_classes)
+    
+    model.to(device)
+    
+    print(f"Preparing model {model_name}")
+    
+    return model
 
 
 # save model
@@ -75,6 +103,8 @@ def nll(outputs, labels):
     nll = -np.sum(np.log(ps))
     return nll
 
+    
+
 
 class StepLR:
     def __init__(self, optimizer, learning_rate: float, total_epochs: int):
@@ -102,6 +132,14 @@ class StepLR:
 
 # deactivate batchnorm
 # https://discuss.pytorch.org/t/how-to-close-batchnorm-when-using-torchvision-models/21812
+# def deactivate_batchnorm(m):
+#     if isinstance(m, nn.BatchNorm2d):
+#         m.reset_parameters()
+#         m.eval()
+#         with torch.no_grad():
+#             m.weight.fill_(1.0)
+#             m.bias.zero_()
+            
 def deactivate_batchnorm(m):
     if isinstance(m, nn.BatchNorm2d):
         m.reset_parameters()
@@ -110,10 +148,15 @@ def deactivate_batchnorm(m):
             m.weight.fill_(1.0)
             m.bias.zero_()
 
+        m.weight.requires_grad = False
+        m.bias.requires_grad = False
+
+        # print(f"Deactivate {m} Batch Normalization Layer")
+
 
 
 # train SGD
-def train_sgd(dataloader, model, criterion, optimizer, device, batch_norm=True):
+def train_sgd(dataloader, model, criterion, optimizer, device, batch_norm):
     loss_sum = 0.0
     correct = 0.0
 
@@ -121,17 +164,17 @@ def train_sgd(dataloader, model, criterion, optimizer, device, batch_norm=True):
     num_batches = len(dataloader)
 
     model.train()
-    if batch_norm == False:
-        model.apply(deactivate_batchnorm)
-        print("Deactivate batch normalization layers")
-
     for batch, (inputs, targets) in enumerate(dataloader):
         inputs, targets = inputs.to(device), targets.to(device)
+
+        if not batch_norm:
+            model.apply(deactivate_batchnorm)
+            # print("Deactivate Batchnorm Layer")
 
         pred = model(inputs)
         loss = criterion(pred, targets)
         correct += (pred.argmax(1) == targets).type(torch.float).sum().item()
-        
+    
         # Backprop
         optimizer.zero_grad()
         loss.backward()
@@ -145,8 +188,10 @@ def train_sgd(dataloader, model, criterion, optimizer, device, batch_norm=True):
     }
 
 
+
+
 # train SAM, FSAM
-def train_sam(dataloader, model, criterion, optimizer, device, batch_norm=True):
+def train_sam(dataloader, model, criterion, optimizer, device, batch_norm):
     loss_sum = 0.0
     correct = 0.0
 
@@ -154,13 +199,13 @@ def train_sam(dataloader, model, criterion, optimizer, device, batch_norm=True):
     num_batches = len(dataloader)
 
     model.train()
-    if batch_norm == False:
-        model.apply(deactivate_batchnorm)
-        print("Deactivate batch normalization layers")
-
     for batch, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
         # pred = model(X)
+
+        if not batch_norm:
+            model.apply(deactivate_batchnorm)
+            # print("Deactivate Batchnorm Layer")
 
         # first forward-backward pass
         loss = criterion(model(X), y)
@@ -180,53 +225,41 @@ def train_sam(dataloader, model, criterion, optimizer, device, batch_norm=True):
     }
 
 
-# train BSAM
-def train_bsam(dataloader, sabtl_model, criterion, optimizer, device, batch_norm=True):
+# train sabtl
+def train_sabtl(dataloader, sabtl_model, criterion, optimizer, device, batch_norm):
     loss_sum = 0.0
     correct = 0.0
 
     num_objects_current = 0
     num_batches = len(dataloader)
 
-    sabtl_model.backbone.train()
-    
-    # Set weight sample
-    sample_w, z_1, z_2 = sabtl_model.sample()
-
-    # Set Sampled weight to DNN model
-    sabtl_model.set_sampled_parameters(sample_w)
-    
-    if batch_norm == False:
-        sabtl_model.backbone.apply(deactivate_batchnorm)
-        print("Deactivate batch normalization layers")
+    sabtl_model.backbone.train() # 확인 필요
 
     for batch, (X, y) in enumerate(dataloader):
+        
         X, y = X.to(device), y.to(device)
+        
+        # Set weight sample
+        params, z_1, z_2 = sabtl_model.sample()
 
-        # Making matrix A
-        if sabtl_model.diag_only:
-            '''
-            sparse matrix로
-            1. I_p
-            2. diag( z_1~z_p )
-            만들고
-            stack
-            '''
-        else:
-            raise "Not implemented yet"
-
-        # first forward-backward pass
-        # pred = sabtl_model.backbone(X)
-        loss = criterion(sabtl_model.backbone(X), y)
+        ### first forward-backward pass
+        pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
+        loss = criterion(pred, y)
         loss.backward()
-        optimizer.first_step(zero_grad=True)
+        
+        bnn_params = optimizer.first_step(zero_grad=True)
+        params = sabtl.second_sample(bnn_params, z_1, z_2, sabtl_model, scale=1.0)
+        
+        ### second forward-backward pass
+        pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
+        criterion(pred, y).backward()
+        optimizer.second_step(zero_grad=True)  
 
-        # second forward-backward pass
-        # pred = sabtl_model.backbone(X)
-        criterion(sabtl_model.backbone(X), y).backward()
-        optimizer.second_step(zero_grad=True)
-
-        correct += (sabtl_model.backbone(X).argmax(1) == y).type(torch.float).sum().item()
+        ### Checking accuracy with MAP (Mean) solution
+        # params, _, _ = sabtl_model.sample(scale=0.0)
+        params = sabtl.second_sample(bnn_params, z_1, z_2, sabtl_model, scale=1.0)
+        pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
         loss_sum += loss.data.item() * X.size(0)
         num_objects_current += X.size(0)
         
@@ -237,29 +270,30 @@ def train_bsam(dataloader, sabtl_model, criterion, optimizer, device, batch_norm
 
 
 # Test
-def eval(loader, model, criterion, device):
-    loss_sum = 0.0
-    correct = 0.0
-    num_objects_total = len(loader.dataset)
+# def eval(loader, model, criterion, device):
+#     loss_sum = 0.0
+#     correct = 0.0
+#     num_objects_total = len(loader.dataset)
 
-    model.eval()
+#     model.eval()
     
-    with torch.no_grad():
-        for i, (inputs, targets) in enumerate(loader):
-            inputs, targets = inputs.to(device), targets.to(device)
-            pred = model(inputs)
-            loss = criterion(pred, targets)
-            loss_sum += loss.item() * inputs.size(0)
-            correct += (pred.argmax(1) == targets).type(torch.float).sum().item()
+#     with torch.no_grad():
+#         for i, (inputs, targets) in enumerate(loader):
+#             inputs, targets = inputs.to(device), targets.to(device)
+#             pred = model(inputs)
+#             loss = criterion(pred, targets)
+#             loss_sum += loss.item() * inputs.size(0)
+#             correct += (pred.argmax(1) == targets).type(torch.float).sum().item()
 
-    return {
-        "loss": loss_sum / num_objects_total,
-        "accuracy": correct / num_objects_total * 100.0,
-    }
+#     return {
+#         "loss": loss_sum / num_objects_total,
+#         "accuracy": correct / num_objects_total * 100.0,
+#     }
 
 
 
-def eval_metrics(loader, model, criterion, device, num_bins=50, eps=1e-8):
+# def eval_metrics(loader, model, criterion, device, num_bins=50, eps=1e-8):
+def eval(loader, model, criterion, device, num_bins=50, eps=1e-8):
     '''
     get loss, accuracy, nll and ece for every eval step
     '''
@@ -297,21 +331,63 @@ def eval_metrics(loader, model, criterion, device, num_bins=50, eps=1e-8):
     }
 
 
+
+
+def eval_metrics_sabtl(loader, sabtl_model, criterion, device, num_bins=50, eps=1e-8):
+    '''
+    get loss, accuracy, nll and ece for every eval step
+    ## MC로 evaluation하도록 바꾸자
+    '''
+    loss_sum = 0.0
+    num_objects_total = len(loader.dataset)
+
+    preds = list()
+    targets = list()
+
+    offset = 0
+    params, _, _ = sabtl_model.sample(scale=0.0)
+    with torch.no_grad():
+        for _, (input, target) in enumerate(loader):
+            input, target = input.to(device), target.to(device)
+            pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, input)
+            loss = criterion(pred, target)
+            loss_sum += loss.item() * input.size(0)
+
+            preds.append(F.softmax(pred, dim=1).cpu().numpy())
+            targets.append(target.cpu().numpy())
+            offset += input.size(0)
+    
+    preds = np.vstack(preds)
+    targets = np.concatenate(targets)
+
+    
+    print(f"prediction : {np.argmax(preds, axis=1)}")  ## 3만 나오네요
+    accuracy = np.mean(np.argmax(preds, axis=1) == targets)
+    nll = -np.mean(np.log(preds[np.arange(preds.shape[0]), targets] + eps))
+    ece = calibration_curve(preds, targets, num_bins)['ece']
+    
+    return {
+        "loss" : loss_sum / num_objects_total,
+        "accuracy" : accuracy * 100.0,
+        "nll" : nll,
+        "ece" : ece,
+    }
+
+
+
 def bma(tr_loader, te_loader, model, bma_num_models, num_classes, bma_save_path=None, eps=1e-8, batch_norm=True):
     '''
     run bayesian model averaging in test step
     '''
-    # Save mean weight of model as number 0
-    if bma_save_path is not None:
-        sample = model.sample(0)
-        torch.save(sample, f'{bma_save_path}/bma_model-0.pt')
-
 
     swag_predictions = np.zeros((len(te_loader.dataset), num_classes))
     with torch.no_grad():
         for i in range(bma_num_models):
-
-            sample = model.sample(1.0, cov=True)
+            
+            if i == 0:
+                sample = model.sample(0)
+            else:
+                sample = model.sample(1.0, cov=True)
             
             # print("SWAG Sample %d/%d. BN update" % (i + 1, bma_num_models))
             if batch_norm:
@@ -319,7 +395,7 @@ def bma(tr_loader, te_loader, model, bma_num_models, num_classes, bma_save_path=
             
             # save sampled weight for bma
             if bma_save_path is not None:
-                torch.save(sample,f'{bma_save_path}/bma_model-{i+1}.pt')
+                torch.save(sample, f'{bma_save_path}/bma_model-{i}.pt')
             
             # print("SWAG Sample %d/%d. EVAL" % (i + 1, bma_num_models))
             res = predict(te_loader, model, verbose=False)
