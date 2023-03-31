@@ -11,7 +11,11 @@ import torch.nn.functional as F
 
 from baselines.swag.swag_utils import bn_update, predict
 from baselines.swag import swag
+
+from baselines.sam import sam_utils
+
 import sabtl
+
 
 
 def set_seed(RANDOM_SEED=0):
@@ -28,8 +32,12 @@ def set_seed(RANDOM_SEED=0):
     random.seed(RANDOM_SEED)
 
 
-from models import mlp, resnet, resnet_noBN, wide_resnet, wide_resnet_noBN
+
 def get_backbone(model_name, num_classes, device, pre_trained=False):
+    '''
+    Define Backbone Model
+    '''
+    from models import mlp, resnet, resnet_noBN, wide_resnet, wide_resnet_noBN
     if model_name == "mlp":
         model = mlp.MLP(output_size=num_classes)
 
@@ -130,68 +138,10 @@ class StepLR:
 
 
 
-# deactivate batchnorm
-# https://discuss.pytorch.org/t/how-to-close-batchnorm-when-using-torchvision-models/21812
-# def deactivate_batchnorm(m):
-#     if isinstance(m, nn.BatchNorm2d):
-#         m.reset_parameters()
-#         m.eval()
-#         with torch.no_grad():
-#             m.weight.fill_(1.0)
-#             m.bias.zero_()
             
-def deactivate_batchnorm(m):
-    if isinstance(m, nn.BatchNorm2d):
-        m.reset_parameters()
-        m.eval()
-        with torch.no_grad():
-            m.weight.fill_(1.0)
-            m.bias.zero_()
-
-        m.weight.requires_grad = False
-        m.bias.requires_grad = False
-
-        # print(f"Deactivate {m} Batch Normalization Layer")
-
-
 
 # train SGD
-def train_sgd(dataloader, model, criterion, optimizer, device, batch_norm):
-    loss_sum = 0.0
-    correct = 0.0
-
-    num_objects_current = 0
-    num_batches = len(dataloader)
-
-    model.train()
-    for batch, (inputs, targets) in enumerate(dataloader):
-        inputs, targets = inputs.to(device), targets.to(device)
-
-        if not batch_norm:
-            model.apply(deactivate_batchnorm)
-            # print("Deactivate Batchnorm Layer")
-
-        pred = model(inputs)
-        loss = criterion(pred, targets)
-        correct += (pred.argmax(1) == targets).type(torch.float).sum().item()
-    
-        # Backprop
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        
-        loss_sum += loss.data.item() * inputs.size(0)
-        num_objects_current += inputs.size(0)
-    return {
-        "loss": loss_sum / num_objects_current,
-        "accuracy": correct / num_objects_current * 100.0,
-    }
-
-
-
-
-# train SAM, FSAM
-def train_sam(dataloader, model, criterion, optimizer, device, batch_norm):
+def train_sgd(dataloader, model, criterion, optimizer, device, scaler):
     loss_sum = 0.0
     correct = 0.0
 
@@ -201,21 +151,82 @@ def train_sam(dataloader, model, criterion, optimizer, device, batch_norm):
     model.train()
     for batch, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
-        # pred = model(X)
 
-        if not batch_norm:
-            model.apply(deactivate_batchnorm)
-            # print("Deactivate Batchnorm Layer")
+        with torch.cuda.amp.autocast():
+            pred = model(X)
+            loss = criterion(pred, y)
+        
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+    
+        # Backprop
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)  # optimizer.step()
+        scaler.update()
+        optimizer.zero_grad()
+        
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
+    return {
+        "loss": loss_sum / num_objects_current,
+        "accuracy": correct / num_objects_current * 100.0,
+    }
 
-        # first forward-backward pass
-        loss = criterion(model(X), y)
-        loss.backward()
-        optimizer.first_step(zero_grad=True)
 
-        # second forward-backward pass
-        criterion(model(X), y).backward()
-        optimizer.second_step(zero_grad=True)
 
+
+# train SAM, FSAM
+def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler, second_step_scaler):
+    # https://github.com/davda54/sam/issues/7
+    loss_sum = 0.0
+    correct = 0.0
+
+    num_objects_current = 0
+    num_batches = len(dataloader)
+
+    model.train()
+    for batch, (X, y) in enumerate(dataloader):
+        X, y = X.to(device), y.to(device)
+        optimizer.zero_grad()
+
+        sam_utils.enable_running_stats(model)
+        ### first forward-backward pass
+        with torch.cuda.amp.autocast():
+            pred = model(X)
+            loss = criterion(pred, y)
+        first_step_scaler.scale(loss).backward()
+        
+        first_step_scaler.unscale_(optimizer)
+        
+        optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
+        
+        inf_grad_cnt = sum(v.item() for v in optimizer_state["found_inf_per_device"].values())      # Check if any gradients are inf/nan
+        
+        if inf_grad_cnt == 0:
+            # if valid graident, apply sam_first_step
+            optimizer.first_step(zero_grad=True)
+            sam_first_step_applied = True
+        else:
+            # if invalid graident, skip sam and revert to single optimization step
+            optimizer.zero_grad()
+            sam_first_step_applied = False
+
+        first_step_scaler.update()
+
+        sam_utils.disable_running_stats(model)
+        
+        ### second forward-backward pass
+        with torch.cuda.amp.autocast():
+            pred = model(X)
+            loss = criterion(pred, y)
+        second_step_scaler.scale(loss).backward()
+
+        if sam_first_step_applied:
+            optimizer.second_step()
+        
+        second_step_scaler.step(optimizer)
+        second_step_scaler.update()
+        
+        # Calculate loss and accuracy
         correct += (model(X).argmax(1) == y).type(torch.float).sum().item()
         loss_sum += loss.data.item() * X.size(0)
         num_objects_current += X.size(0)
@@ -270,29 +281,6 @@ def train_sabtl(dataloader, sabtl_model, criterion, optimizer, device, batch_nor
 
 
 # Test
-# def eval(loader, model, criterion, device):
-#     loss_sum = 0.0
-#     correct = 0.0
-#     num_objects_total = len(loader.dataset)
-
-#     model.eval()
-    
-#     with torch.no_grad():
-#         for i, (inputs, targets) in enumerate(loader):
-#             inputs, targets = inputs.to(device), targets.to(device)
-#             pred = model(inputs)
-#             loss = criterion(pred, targets)
-#             loss_sum += loss.item() * inputs.size(0)
-#             correct += (pred.argmax(1) == targets).type(torch.float).sum().item()
-
-#     return {
-#         "loss": loss_sum / num_objects_total,
-#         "accuracy": correct / num_objects_total * 100.0,
-#     }
-
-
-
-# def eval_metrics(loader, model, criterion, device, num_bins=50, eps=1e-8):
 def eval(loader, model, criterion, device, num_bins=50, eps=1e-8):
     '''
     get loss, accuracy, nll and ece for every eval step
@@ -379,7 +367,6 @@ def bma(tr_loader, te_loader, model, bma_num_models, num_classes, bma_save_path=
     '''
     run bayesian model averaging in test step
     '''
-
     swag_predictions = np.zeros((len(te_loader.dataset), num_classes))
     with torch.no_grad():
         for i in range(bma_num_models):

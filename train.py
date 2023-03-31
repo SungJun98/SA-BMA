@@ -197,7 +197,7 @@ print(f"Load Data : {args.dataset}")
 
 # Define Model------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
-
+#----------------------------------------------------------------
 
 
 if args.method == "swag":
@@ -237,7 +237,7 @@ criterion = torch.nn.CrossEntropyLoss()
 #-------------------------------------------------------------------
 
 
-# Set Optimizer & Scheduler--------------------------------------
+# Set Optimizer--------------------------------------
 ## Optimizer
 if args.optim == "sgd":
     optimizer = torch.optim.SGD(model.parameters(),
@@ -253,10 +253,10 @@ elif args.optim == "fsam":
     base_optimizer = torch.optim.SGD
     optimizer = FSAM(model.parameters(), base_optimizer, rho=args.rho, lr=args.lr_init, momentum=args.momentum,
                     weight_decay=args.wd, nesterov=args.nesterov)
-
+#----------------------------------------------------------------
 
     
-## Scheduler-------------------------------------------------------
+## Set Scheduler-------------------------------------------------------
 if args.scheduler == "step_lr":
     from utils import StepLR
     scheduler = StepLR(optimizer, args.lr_init, args.epochs)
@@ -285,6 +285,18 @@ if args.method == "swag" and args.swag_resume is not None:
     #     scheduler = scheduler.state_dict()
     swag_model = swag.SWAG(copy.deepcopy(model), no_cov_mat=args.diag_only, max_num_models=args.max_num_models).to(args.device) 
     swag_model.load_state_dict(checkpoint["state_dict"])
+#------------------------------------------------------------------------------------
+
+
+## Set AMP --------------------------------------------------------------------------
+if args.optim == "sgd":
+    scaler = torch.cuda.amp.GradScaler()
+
+elif args.optim in ["sam", "fsam", "bsam"]:
+    first_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
+    second_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
+
+print(f"Set AMP Scaler for {args.optim}")
 #------------------------------------------------------------------------------------
 
 
@@ -320,15 +332,10 @@ for epoch in range(start_epoch, int(args.epochs)):
 
     ## train
     if args.optim == "sgd":
-        tr_res = utils.train_sgd(tr_loader, model, criterion, optimizer, args.device, args.batch_norm)
+        tr_res = utils.train_sgd(tr_loader, model, criterion, optimizer, args.device, scaler)
     elif args.optim in ["sam", "fsam"]:
-        tr_res = utils.train_sam(tr_loader, model, criterion, optimizer, args.device, args.batch_norm)
+        tr_res = utils.train_sam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
 
-    ## eval
-    # if args.metrics_step:
-    #     val_res = utils.eval_metrics(val_loader, model, criterion, args.device, args.num_bins, args.eps)
-    # else:
-    #     val_res = utils.eval(val_loader, model, criterion, args.device)
     val_res = utils.eval(val_loader, model, criterion, args.device, args.num_bins, args.eps)
 
 
@@ -339,11 +346,7 @@ for epoch in range(start_epoch, int(args.epochs)):
 
         if args.batch_norm == True:
             swag_utils.bn_update(tr_loader, swag_model)
-
-        # if args.metrics_step:
-        #     swag_res = utils.eval_metrics(val_loader, swag_model, criterion, args.device, args.num_bins, args.eps)
-        # else:
-        #     swag_res = utils.eval(val_loader, swag_model, criterion, args.device)
+            
         swag_res = utils.eval(val_loader, swag_model, criterion, args.device, args.num_bins, args.eps)
 
     time_ep = time.time() - time_ep
@@ -382,6 +385,9 @@ for epoch in range(start_epoch, int(args.epochs)):
 
 
     # Save best model (Early Stopping)
+    '''
+    이 부분도 함수로 정의해서 짧게 가져가자!!!
+    '''
     if (args.method == "swag") and ((epoch + 1) > args.swa_start) and(swag_res['loss'] is not None):
         if swag_res['loss'] < best_swag_val_loss:
             best_val_loss = val_res["loss"]
@@ -392,12 +398,23 @@ for epoch in range(start_epoch, int(args.epochs)):
 
             # save state_dict
             os.makedirs(args.save_path, exist_ok=True)
-            utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                epoch = epoch,
-                                state_dict = swag_model.state_dict(),
-                                optimizer = optimizer.state_dict(),
-                                # scheduler = scheduler.state_dict(),
-                                )
+            if args.optim == "sgd":
+                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                    epoch = epoch,
+                                    state_dict = swag_model.state_dict(),
+                                    optimizer = optimizer.state_dict(),
+                                    # scheduler = scheduler.state_dict(),
+                                    scaler = scaler.state_dict()
+                                    )
+            elif args.optim in ["sam", "fsam"]:
+                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                    epoch = epoch,
+                                    state_dict = swag_model.state_dict(),
+                                    optimizer = optimizer.state_dict(),
+                                    # scheduler = scheduler.state_dict(),
+                                    first_step_scaler = first_step_scaler.state_dict(),
+                                    second_step_scaler = second_step_scaler.state_dict()
+                                    )
             torch.save(model.state_dict(),f'{args.save_path}/{args.method}-{args.optim}_best_val_model.pt')
             
             # Save Mean, variance, Covariance matrix
@@ -418,11 +435,22 @@ for epoch in range(start_epoch, int(args.epochs)):
 
             # save state_dict
             os.makedirs(args.save_path,exist_ok=True)
-            utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+            if args.optim == "sgd":
+                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
                                 epoch = epoch,
                                 state_dict = model.state_dict(),
                                 optimizer = optimizer.state_dict(),
                                 # scheduler = scheduler.state_dict(),
+                                scaler = scaler.state_dict()
+                                )
+            elif args.optim in ["sam", "fsam"]:
+                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                epoch = epoch,
+                                state_dict = model.state_dict(),
+                                optimizer = optimizer.state_dict(),
+                                # scheduler = scheduler.state_dict(),
+                                first_step_scaler = first_step_scaler.state_dict(),
+                                second_step_scaler = second_step_scaler.state_dict()
                                 )
 
     if args.scheduler in ["cos_anneal", "step_lr"]:
