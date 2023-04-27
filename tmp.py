@@ -7,9 +7,6 @@ import pickle
 import torch
 import torch.nn.functional as F
 
-import matplotlib.pyplot as plt
-import numpy as np
-
 import utils, data
 
 from baselines.sam.sam import SAM, FSAM
@@ -21,26 +18,35 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # %%
-device = torch.device("cuda:4" if torch.cuda.is_available() else "cpu")
+seed = 0
+utils.set_seed(seed)
 
-tr_loader, val_loader, te_loader, num_classes = data.get_cifar10(data_path = "/DATA1/lsj9862/cifar10/",
+device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+
+tr_loader, val_loader, te_loader, num_classes = data.get_cifar10(data_path = "/data1/lsj9862/data/cifar10/",
                                                             batch_size = 64,
                                                             num_workers = 4,
                                                             use_validation = True)
 
 from models import resnet_noBN
 model = resnet_noBN.resnet18(num_classes=num_classes).to(device)
+utils.freeze_fe(model)
 
 # %%
-w_mean = torch.load("/home/lsj9862/BayesianSAM/exp_result/swag-sgd_best_val_mean.pt")
+## BNN
+# w_mean = torch.load("/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_mean.pt")
+# w_var = torch.load("/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_variance.pt") 
+# w_covmat = torch.load("/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_covmat.pt")
 
-w_var_sqrt = torch.load("/home/lsj9862/BayesianSAM/exp_result/swag-sgd_best_val_variance.pt") 
-
-w_covmat = torch.load("/home/lsj9862/BayesianSAM/exp_result/swag-sgd_best_val_covmat.pt")
+## DNN
+w_mean = torch.load("/home/lsj9862/BayesianSAM/exp_result/last-swag/cifar10/resnet18-noBN/constant/dnn-sgd_best_val.pt") ## 왜 cuda:0에 올라가지?
 
 # %%
-sabtl_model = sabtl.SABTL(copy.deepcopy(model),  w_mean = w_mean,
-                        w_var = w_var_sqrt, diag_only=False, w_cov=w_covmat).to(device)
+## BNN
+# sabtl_model = sabtl.SABTL(copy.deepcopy(model), src_model_type='bnn', w_mean = w_mean, w_var=w_var, w_cov_sqrt=w_covmat).to(device)
+
+## DNN
+sabtl_model = sabtl.SABTL(copy.deepcopy(model), w_mean = w_mean).to(device)
 
 
 # %%
@@ -48,96 +54,20 @@ criterion = torch.nn.CrossEntropyLoss()
 
 # %%
 ## BSAM
-lr_init = 5e-4 ; rho = 0.01
+lr_init = 0.05 ; rho = 0.05
 
 base_optimizer = torch.optim.SGD
-optimizer = sabtl.BSAM([sabtl_model.mean_param, sabtl_model.var_param, sabtl_model.cov_param], base_optimizer, sabtl_model, rho=rho, lr=lr_init, momentum=0.9,
-        weight_decay=5e-4, nesterov=False)
+optimizer = sabtl.BSAM(sabtl_model.bnn_param.values(), base_optimizer, rho=rho, lr=lr_init, momentum=0.9,
+        weight_decay=5e-4)
 
-
-# %%
-'''
-### Check Model Load
-loss_sum = 0.0
-correct = 0.0
-
-num_objects_current = 0
-
-sabtl_model.backbone.train() 
-# sabtl_model.apply(utils.deactivate_batchnorm)
-# print("Deactivate Batch Norm")
-for batch, (X, y) in enumerate(te_loader):
-    
-    X, y = X.to(device), y.to(device)
-    
-    # Set weight sample
-    params, z_1, z_2 = sabtl_model.sample(scale=0.0)
-
-    ### first forward-backward pass
-    pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
-    loss = criterion(pred, y)
-    
-    correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-    loss_sum += loss.data.item() * X.size(0)
-    num_objects_current += X.size(0)
-
-print(f"loss : {loss_sum / num_objects_current}")
-print(f"accuracy :{correct / num_objects_current * 100}%")
-'''
-
-# %%
-'''
-### 1 epoch test
-loss_sum = 0.0
-correct = 0.0
-
-num_objects_current = 0
-
-# sabtl_model.apply(utils.deactivate_batchnorm)
-# sabtl_model.apply(utils.deactivate_batchnorm_v2)
-# print("Deactivate Batch Norm")
-for batch, (X, y) in enumerate(tr_loader):
-    X, y = X.to(device), y.to(device)
-    
-    ### first forward-backward pass
-    # sample weight from bnn params
-    params, z_1, z_2 = sabtl_model.sample(1.0)
-
-    # forward & backward
-    pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
-    loss = criterion(pred, y)
-    loss.backward()
-
-    bnn_params = optimizer.first_step(zero_grad=True)
-    params = sabtl.second_sample(bnn_params, z_1, z_2, sabtl_model, scale=1.0)
-
-    ### second forward-backward pass
-    pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
-
-    criterion(pred, y).backward()
-    optimizer.second_step(zero_grad=True)  
-
-    ### Checking accuracy with MAP (Mean) solution
-    params, _, _ = sabtl_model.sample(scale=0.0)
-    pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
-    correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-    loss_sum += loss.data.item() * X.size(0)
-    num_objects_current += X.size(0)
-
-print(f"loss : {loss_sum / num_objects_current}")
-print(f"accuracy : {correct / num_objects_current * 100}%")
-# ------''-------------------------------------------------------------------
-'''
+first_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
+second_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
 
 # %%
 ### Full Training
-epochs = 50
+epochs = 100
 
-
-columns = ["epoch", "method", "lr", "tr_loss", "tr_acc", "val_loss", "val_acc", "val_nll", "val_ece", "time"]
-if True == True:
-    columns = columns[:-1] + ["mc_val_loss", "mc_val_acc", "mc_val_nll", "mc_val_ece"] + columns[-1:]
-    mc_res = {"loss": None, "accuracy": None, "nll" : None, "ece" : None}
+columns = ["epoch", "method", "lr", "tr_loss", "tr_acc", "val_loss (MAP)", "val_acc (MAP)", "time"]
 
 
 best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; cnt=0; best_val_loss=9999
@@ -145,82 +75,162 @@ print("Start Training!!")
 for epoch in range(int(epochs)):
     time_ep = time.time()
 
-    '''
-    ## lr scheduling
-    if args.scheduler == "swag_lr":
-        if args.method == "swag":
-            lr = swag_utils.schedule(epoch, args.lr_init, args.epochs, True, args.swa_start, args.swa_lr)
-        else:
-            lr = swag_utils.schedule(epoch, args.lr_init, args.epochs, False, None, None)
-        swag_utils.adjust_learning_rate(optimizer, lr)
-    else:
-        lr = optimizer.param_groups[0]['lr']
-    '''
-
     # train
     loss_sum = 0.0
     correct = 0.0
-
     num_objects_current = 0
-
     for batch, (X, y) in enumerate(tr_loader):
         X, y = X.to(device), y.to(device)
+           
+        # Sample weight
+        params, z_ = sabtl_model.sample(1.0)
+        # compute Fisher inverse
+        fish_inv = sabtl_model.fish_inv(params)
+        # Change weight sample shape to input model
+        params = utils.format_weights(params, sabtl_model)
+
+        # first forward & backward -------------------------------------------
+        with torch.cuda.amp.autocast():
+            pred = sabtl_model(params, X)
+            loss = criterion(pred, y)
+        first_step_scaler.scale(loss).backward()
+
+        first_step_scaler.unscale_(optimizer)
         
-        ### first forward-backward pass
-        # sample weight from bnn params
-        params, z_1, z_2 = sabtl_model.sample(1.0)
-
-        # forward & backward
-        pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
-        loss = criterion(pred, y)
-        loss.backward()
-
-        bnn_params = optimizer.first_step(zero_grad=True)
-        params = sabtl.second_sample(bnn_params, z_1, z_2, sabtl_model, scale=1.0)
+        optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
+        
+        inf_grad_cnt = sum(v.item() for v in optimizer_state["found_inf_per_device"].values())      # Check if any gradients are inf/nan
+        if inf_grad_cnt == 0:
+            # if valid graident, apply sam_first_step
+            optimizer.first_step(fish_inv, zero_grad=True)
+            sam_first_step_applied = True
+        else:
+            # if invalid graident, skip sam and revert to single optimization step
+            optimizer.zero_grad()
+            sam_first_step_applied = False  
+        first_step_scaler.update()
+        # --------------------------------------------------------------
 
         ### second forward-backward pass
-        pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
+        params = optimizer.second_sample(z_, sabtl_model, scale=1.0)
+        
+        with torch.cuda.amp.autocast():
+            pred = sabtl_model(params, X)
+            loss = criterion(pred, y)
+        second_step_scaler.scale(loss).backward()
+        
+        if sam_first_step_applied:
+            optimizer.second_step()  
+        
+        second_step_scaler.step(optimizer)
+        second_step_scaler.update()
 
-        criterion(pred, y).backward()
-        optimizer.second_step(zero_grad=True)  
-
-        ### Checking accuracy with MAP (Mean) solution
-        params, _, _ = sabtl_model.sample(scale=0.0)
-        pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
+        # ### Checking accuracy with MAP (Mean) solution
+        params, _ = sabtl_model.sample(0.0)
+        params = utils.format_weights(params, sabtl_model)
+        pred = sabtl_model(params, X)
         correct += (pred.argmax(1) == y).type(torch.float).sum().item()
         loss_sum += loss.data.item() * X.size(0)
         num_objects_current += X.size(0)
-    print(f"Epoch {epoch} / Tr loss : {loss_sum / num_objects_current} / Tr accuracy : {correct / num_objects_current * 100}%")
+        
+    tr_loss = loss_sum / num_objects_current
+    tr_acc = correct / num_objects_current * 100
+
+    
+    # print(f"BSAM : {num} times / Skip BSAM : {skip_num} times")
+    print(f"max(mean) : {torch.max(sabtl_model.bnn_param['mean'])}   \
+            / min(mean) :{torch.min(sabtl_model.bnn_param['mean'])} \
+            / nan(mean) {torch.sum(torch.isnan(sabtl_model.bnn_param['mean']))}") 
+    print(f"max(var) : {torch.max(sabtl_model.bnn_param['var'])}   \
+            / min(var) :{torch.min(sabtl_model.bnn_param['var'])} \
+            / nan(var) {torch.sum(torch.isnan(sabtl_model.bnn_param['var']))}") 
+    print(f"max(cov) : {torch.max(sabtl_model.bnn_param['cov_sqrt'])}   \
+            / min(cov) :{torch.min(sabtl_model.bnn_param['cov_sqrt'])} \
+            / nan(cov) {torch.sum(torch.isnan(sabtl_model.bnn_param['cov_sqrt']))}") 
     
     
     # eval
     loss_sum = 0.0
     correct = 0.0
-
     num_objects_current = 0
+    with torch.no_grad():
+        for batch, (X, y) in enumerate(val_loader):
+            X, y = X.to(device), y.to(device)
 
-    for batch, (X, y) in enumerate(te_loader):
-        X, y = X.to(device), y.to(device)
+            ### Checking accuracy with MAP (Mean) solution
+            pred = sabtl_model(params, X)
+            loss = criterion(pred, y)
+            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+            loss_sum += loss.data.item() * X.size(0)
+            num_objects_current += X.size(0)
         
-        ### Checking accuracy with MAP (Mean) solution
-        pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
-        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-        loss_sum += loss.data.item() * X.size(0)
-        num_objects_current += X.size(0)
-    print(f"Epoch {epoch} / Te loss : {loss_sum / num_objects_current} / Te accuracy : {correct / num_objects_current * 100}%") 
+        val_loss = loss_sum / num_objects_current
+        val_acc = correct / num_objects_current * 100
+        
+        time_ep = time.time() - time_ep
+        values = [epoch + 1, f"sabtl-bsam", lr_init,
+                tr_loss, tr_acc,
+                val_loss, val_acc,
+                time_ep]
     
-    # if True == True:
-    #     values = [epoch + 1, f"sabtl-bsam", lr_init, tr_res["loss"], tr_res["accuracy"],
-    #         val_res["loss"], val_res["accuracy"], val_res["nll"], val_res["ece"],
-    #         mc_res["loss"], mc_res["accuracy"], mc_res["nll"], mc_res["ece"],   # 코딩 필요
-    #             time_ep]
+    table = tabulate.tabulate([values], columns, tablefmt="simple", floatfmt="8.4f")
+    if epoch % 10 == 0:
+        table = table.split("\n")
+        table = "\n".join([table[1]] + table)
+    else:
+        table = table.split("\n")[2]
+    print(table)
+    
+    
+    # if val_loss < best_val_loss: #### 지금 loss scale이...
+    #     best_val_loss = val_loss
+    #     best_val_acc = val_acc
+    #     best_epoch = epoch + 1
 
-    # table = tabulate.tabulate([values], columns, tablefmt="simple", floatfmt="8.4f")
-    # if epoch % 10 == 0:
-    #     table = table.split("\n")
-    #     table = "\n".join([table[1]] + table)
-    # else:
-    #     table = table.split("\n")[2]
-    # print(table)
+    #     # save state_dict
+    #     utils.save_checkpoint(file_path = f"./exp_result/bsam_best_val.pt",
+    #                     epoch = epoch,
+    #                     state_dict = model.state_dict(),
+    #                     optimizer = optimizer.state_dict(),
+    #                     # scheduler = scheduler.state_dict(),
+    #                     first_step_scaler = first_step_scaler.state_dict(),
+    #                     second_step_scaler = second_step_scaler.state_dict()
+    #                     )
+
+
+# %%        
+'''
+## Test ------------------------------------------------------------------------------------------------------
+##### Get test nll, Entropy, ece, Reliability Diagram on best model
+# Load Best Model
+print("Load Best Validation Model (Lowest Loss)")
+state_dict_path = "./exp_result/bsam_best_val.pt"
+checkpoint = torch.load(state_dict_path)
+
+sabtl_model.load_state_dict(checkpoint["state_dict"])
+model.to(args.device)
+
+
+### BMA prediction
+bma_save_path = f"./exp_result/bma_models"
+os.makedirs(bma_save_path, exist_ok=True)
+
+bma_res = utils.bma(tr_loader, te_loader, swag_model, args.bma_num_models, num_classes, bma_save_path=bma_save_path, eps=args.eps, batch_norm=args.batch_norm)
+bma_predictions = bma_res["predictions"]
+bma_targets = bma_res["targets"]
+
+# Acc
+bma_accuracy = bma_res["bma_accuracy"] * 100
+print(f"bma accuracy : {bma_accuracy:8.4f}")
+
+# nll
+bma_nll = bma_res["nll"]
+print(f"bma nll : {bma_nll:8.4f}")       
+
+# ece
+unc = utils.calibration_curve(bma_predictions, bma_targets, args.num_bins)
+bma_ece = unc["ece"]
+print(f"bma ece : {bma_ece:8.4f}")
+'''
 
 # %%

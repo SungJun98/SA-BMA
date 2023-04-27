@@ -18,7 +18,7 @@ parser.add_argument("--seed", type=int, default=0, help="random seed (default: 0
 
 ## Data ---------------------------------------------------------
 parser.add_argument(
-    "--dataset", type=str, default="cifar10", choices=["mnist-source", "mnist-down", "cifar10", "cifar100"],
+    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100"],
                     help="dataset name")
 
 parser.add_argument(
@@ -61,8 +61,8 @@ parser.add_argument(
 
 
 ## SWAG ---------------------------------------------------------
-parser.add_argument("--diag_only", action="store_true", default=False, help="Calculate only diagonal covariance")
-parser.add_argument("--max_num_models", type=int, default=20, help="Number of models to get SWAG statistics")
+# parser.add_argument("--diag_only", action="store_true", default=False, help="Calculate only diagonal covariance")
+# parser.add_argument("--max_num_models", type=int, default=20, help="Number of models to get SWAG statistics")
 #----------------------------------------------------------------
 
 
@@ -114,12 +114,16 @@ print(f"Load Data : {args.dataset}")
 
 ## Define Model------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device)
-
+last = False
 
 if args.swag:
     # Load SWAG weight 
-    swag_model = swag.SWAG(copy.deepcopy(model), no_cov_mat=args.diag_only, max_num_models=args.max_num_models).to(args.device)
-
+    # swag_model = swag.SWAG(copy.deepcopy(model), no_cov_mat=args.diag_only, max_num_models=args.max_num_models).to(args.device)
+    if args.load_path is not None:
+        last = True
+        checkpoint = torch.load(args.load_path)    
+        model.load_state_dict(checkpoint["state_dict"])
+        
     # Get bma weights list
     bma_load_paths = sorted(os.listdir(args.swag_load_path))
 else:
@@ -134,13 +138,13 @@ criterion = torch.nn.CrossEntropyLoss()
 if args.swag:
     acc_list = list(); ece_list = list(); nll_list = list()
     tr_cum_eigenval_list = list() ; tr_max_eigenval_list = list()
-    te_cum_eigenval_list = list() ; te_max_eigenval_list = list()
+    # te_cum_eigenval_list = list() ; te_max_eigenval_list = list()
     for cnt, path in enumerate(bma_load_paths):
 
         # get sampled model
         bma_sample = torch.load(f"{args.swag_load_path}/{path}")
-        bma_state_dict = utils.list_to_state_dict(model, bma_sample)
-        model.load_state_dict(bma_state_dict)
+        bma_state_dict = utils.list_to_state_dict(model, bma_sample, last=last)
+        model.load_state_dict(bma_state_dict, strict=False)
         
         if args.batch_norm:
           swag_utils.bn_update(tr_loader, model)
@@ -180,36 +184,40 @@ if args.swag:
 
         print("-"*15)
 
-        # get eigenvalue for test set
-        try: 
-            te_eigenvals, _ = compute_hessian_eigenthings(
-                    model,
-                    te_loader,
-                    criterion,
-                    num_eigenthings=args.num_eigen,
-                    mode="lanczos",
-                    # power_iter_steps=args.num_steps,
-                    max_possible_gpu_samples=args.max_possible_gpu_samples,
-                    # momentum=args.momentum,
-                    use_gpu=True,
-                )
+        # # get eigenvalue for test set
+        # try: 
+        #     te_eigenvals, _ = compute_hessian_eigenthings(
+        #             model,
+        #             te_loader,
+        #             criterion,
+        #             num_eigenthings=args.num_eigen,
+        #             mode="lanczos",
+        #             # power_iter_steps=args.num_steps,
+        #             max_possible_gpu_samples=args.max_possible_gpu_samples,
+        #             # momentum=args.momentum,
+        #             use_gpu=True,
+        #         )
             
-            te_cum_eigenval_list.append(te_eigenvals)
-            te_max_eigenval_list.append(max(te_eigenvals))
-            print(f"Successfully get {cnt}-th swag bma model eigenvalues for test set")
-            print(f"Test Eigenvalues for {cnt}-th bma model : {te_eigenvals}")
-        except:
-            print(f"Numerical Issue on {cnt}-th model with test data")
+        #     te_cum_eigenval_list.append(te_eigenvals)
+        #     te_max_eigenval_list.append(max(te_eigenvals))
+        #     print(f"Successfully get {cnt}-th swag bma model eigenvalues for test set")
+        #     print(f"Test Eigenvalues for {cnt}-th bma model : {te_eigenvals}")
+        # except:
+        #     print(f"Numerical Issue on {cnt}-th model with test data")
             
-        print("-"*15)
-        print("-"*15)
+        # print("-"*15)
+        # print("-"*15)
     
-        ## save te_eign as pickle
-        with open(f'{args.swag_load_path}/te_eigenval_list.pickle', 'wb') as f:
-            pickle.dump(te_cum_eigenval_list, f)
+        # ## save te_eign as pickle
+        # with open(f'{args.swag_load_path}/te_eigenval_list.pickle', 'wb') as f:
+        #     pickle.dump(te_cum_eigenval_list, f)
 
 
 else:
+    # check performance
+    res = utils.eval(te_loader, model, criterion, args.device)
+    print(f"Test Accuracy : {res['accuracy']:8.4f}% / ECE : {res['ece']} / NLL : {res['nll']}")
+    
     # get eigenvalue for train set
     tr_eigenvals, _ = compute_hessian_eigenthings(
                 model,
@@ -226,23 +234,23 @@ else:
     print(f"Max Train Eigenvalue : {max(tr_eigenvals)}")
     print("-"*15)
 
-    # get eigenvalue for test set
-    te_eigenvals, _ = compute_hessian_eigenthings(
-                model,
-                te_loader,
-                criterion,
-                num_eigenthings=args.num_eigen,
-                mode="lanczos",
-                # power_iter_steps=args.num_steps,
-                max_possible_gpu_samples=args.max_possible_gpu_samples,
-                # momentum=args.momentum,
-                use_gpu=True,
-            )
+    # # get eigenvalue for test set
+    # te_eigenvals, _ = compute_hessian_eigenthings(
+    #             model,
+    #             te_loader,
+    #             criterion,
+    #             num_eigenthings=args.num_eigen,
+    #             mode="lanczos",
+    #             # power_iter_steps=args.num_steps,
+    #             max_possible_gpu_samples=args.max_possible_gpu_samples,
+    #             # momentum=args.momentum,
+    #             use_gpu=True,
+    #         )
     
-    print(f"Test Eigenvalues : {te_eigenvals}")
-    print(f"Max Test Eigenvalue : {max(te_eigenvals)}")
-    print("-"*15)
-    print("-"*15)
+    # print(f"Test Eigenvalues : {te_eigenvals}")
+    # print(f"Max Test Eigenvalue : {max(te_eigenvals)}")
+    # print("-"*15)
+    # print("-"*15)
 
     if not os.path.isdir(args.load_path):
         save_path = args.load_path.split('/')[:-1]
@@ -252,6 +260,6 @@ else:
     with open(f'{save_path}/tr_eigenval_list.pickle', 'wb') as f:
         pickle.dump(tr_eigenvals, f)
 
-    with open(f'{save_path}/te_eigenval_list.pickle', 'wb') as f:
-        pickle.dump(te_eigenvals, f)
+    # with open(f'{save_path}/te_eigenval_list.pickle', 'wb') as f:
+    #     pickle.dump(te_eigenvals, f)
 # -----------------------------------------------------------------------------

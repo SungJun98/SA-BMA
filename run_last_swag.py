@@ -14,27 +14,27 @@ import wandb
 
 import utils, data #, losses
 
-from baselines.sam.sam import SAM, FSAM
+from baselines.sam.sam import SAM
 from baselines.swag import swag, swag_utils
 
 import warnings
 warnings.filterwarnings('ignore')
-# %%
+
 # wandb
 wandb.init(project="SA-BTL", entity='sungjun98')
 
-parser = argparse.ArgumentParser(description="training baselines")
+parser = argparse.ArgumentParser(description="training last swag")
 
 parser.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
 
-parser.add_argument("--method", type=str, default="dnn",
-                    choices=["dnn", "swag"],
-                    help="Learning Method")
+parser.add_argument("--method", type=str, default="last-swag",
+                    choices=["last-swag"],
+                    help="Optimization options")
 
 parser.add_argument("--print_epoch", type=int, default=10, help="Printing epoch")
 
 parser.add_argument("--resume", type=str, default=None,
-    help="path to load saved model to resume training (default: None)",)
+    help="path to load saved DNN model to run swag (default: None)",)
 
 ## Data ---------------------------------------------------------
 parser.add_argument(
@@ -61,8 +61,8 @@ parser.add_argument("--use_validation", action='store_true',
 parser.add_argument(
     "--model",
     type=str, default='mlp', required=True,
-    choices=['mlp', 'resnet18', 'resnet50', 'wideresnet28x10', 'wideresnet40x10',
-            'resnet18-noBN', 'resnet50-noBN', 'wideresnet28x10-noBN', 'wideresnet40x10-noBN'],
+    choices=['mlp', 'resnet18', 'wideresnet28x10',
+            'resnet18-noBN', 'wideresnet28x10-noBN'],
     help="model name (default : mlp)")
 
 parser.add_argument(
@@ -71,13 +71,13 @@ parser.add_argument(
     )
 
 parser.add_argument("--save_path",
-            type=str, default="./exp_result/",
+            type=str, default="/data2/lsj9862/exp_result/",
             help="Path to save best model dict")
 #----------------------------------------------------------------
 
 ## Optimizer Hyperparameter --------------------------------------
 parser.add_argument("--optim", type=str, default="sgd",
-                    choices=["sgd", "sam", "fsam"],
+                    choices=["sgd", "sam", "bsam"],
                     help="Optimization options")
 
 parser.add_argument("--lr_init", type=float, default=0.01,
@@ -88,29 +88,23 @@ parser.add_argument("--momentum", type=float, default=0.9,
 
 parser.add_argument("--nesterov", action='store_true',  help="Nesterov (Default : False)")
 
-parser.add_argument("--epochs", type=int, default=300, metavar="N",
-    help="number epochs to train (default : 300)")
+parser.add_argument("--swag_epochs", type=int, default=10, metavar="N",
+    help="number epochs to train (default : 10)")
 
 parser.add_argument("--wd", type=float, default=5e-4, help="weight decay (default: 5e-4)")
 
 parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation ball for SAM / FSAM / BSAM")
 
-parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "step_lr", "cos_anneal", "swag_lr"])
+parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "cos_anneal", "swag_lr"])
 
 parser.add_argument("--t_max", type=int, default=300, help="T_max for Cosine Annealing Learning Rate Scheduler")
 #----------------------------------------------------------------
 
 ## SWAG ---------------------------------------------------------
-parser.add_argument("--swa_start", type=int, default=161, help="Start epoch of SWAG")
 parser.add_argument("--swa_lr", type=float, default=0.05, help="Learning rate for SWAG")
 parser.add_argument("--diag_only", action="store_true", help="Calculate only diagonal covariance")
 parser.add_argument("--swa_c_epochs", type=int, default=1, help="Cycle to calculate SWAG statistics")
 parser.add_argument("--max_num_models", type=int, default=20, help="Number of models to get SWAG statistics")
-
-parser.add_argument("--last_layer", action="store_true", default=False, help="Run SWAG on only last layer")
-
-parser.add_argument("--swag_resume", type=str, default=None,
-    help="path to load saved swag model to resume training (default: None)",)
 #----------------------------------------------------------------
 
 
@@ -120,17 +114,6 @@ parser.add_argument("--eps", type=float, default=1e-8, help="small float to calc
 parser.add_argument("--bma_num_models", type=int, default=30, help="Number of models for bma")
 
 parser.add_argument("--num_bins", type=int, default=50, help="bin number for ece")
-#----------------------------------------------------------------
-
-## Transfer Learning --------------------------------------------
-parser.add_argument("--load", type=str, default=None,
-    help="path to load saved mosdel for transfer learning (default: None)",)
-parser.add_argument("--swag_mean_load", type=str, default=None,
-    help="path to load saved mean of swag model for transfer learning (default: None)")
-parser.add_argument("--swag_var_load", type=str, default=None,
-    help="path to load saved variance of swag model for transfer learning (default: None)")
-parser.add_argument("--swag_covmat_load", type=str, default=None,
-    help="path to load saved covariance matrix of swag model for transfer learning (default: None)")
 #----------------------------------------------------------------
 
 
@@ -151,22 +134,10 @@ utils.set_seed(args.seed)
 
 
 # Set BMA and Save Setting--------------------------------------------
-if args.method == 'dnn':
-    args.bma_num_models = 1
-
-if args.method == "swag":
-    if args.last_layer:
-        if args.optim != "sgd":
-            args.save_path = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}_last-{args.optim}_{args.scheduler}/{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
-        else:
-            args.save_path = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}_last-{args.optim}_{args.scheduler}/{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"    
-    else:
-        if args.optim != "sgd":
-            args.save_path = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}/{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
-        else:
-            args.save_path = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}/{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"
+if args.optim != "sgd":
+    args.save_path = f"{args.save_path}/{args.dataset}/{args.model}/swag_last-{args.optim}_{args.scheduler}/{args.max_num_models}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
 else:
-    args.save_path = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}/{args.lr_init}_{args.wd}_{args.momentum}_{args.rho}"
+    args.save_path = f"{args.save_path}/{args.dataset}/{args.model}/swag_last-{args.optim}_{args.scheduler}/{args.max_num_models}_{args.swa_c_epochs}_{args.swa_lr}"    
 
 print(f"Save Results on {args.save_path}")
 #----------------------------------------------------------------
@@ -174,20 +145,11 @@ print(f"Save Results on {args.save_path}")
 
 # wandb config---------------------------------------------------
 wandb.config.update(args)
-
-if args.method == "swag":
-    if args.last_layer:
-        if args.optim != "sgd":
-            wandb.run.name = f"last_{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
-        else:
-            wandb.run.name = f"last_{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"    
-    else:
-        if args.optim != "sgd":
-            wandb.run.name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
-        else:
-            wandb.run.name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"
+if args.optim != "sgd":
+    wandb.run.name = f"last_swag-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
 else:
-    wandb.run.name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}_{args.lr_init}_{args.wd}"
+    wandb.run.name = f"last_swag-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_c_epochs}_{args.swa_lr}"    
+
 #----------------------------------------------------------------
 
 # Load Data ------------------------------------------------------
@@ -211,44 +173,14 @@ print(f"Load Data : {args.dataset}")
 
 # Define Model------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
-#----------------------------------------------------------------
 
-
-if args.method == "swag":
-    swag_model = swag.SWAG(copy.deepcopy(model),
-                        no_cov_mat=args.diag_only,
-                        max_num_models=args.max_num_models,
-                        last_layer=args.last_layer).to(args.device)
+swag_model = swag.SWAG(copy.deepcopy(model),
+                    no_cov_mat=args.diag_only,
+                    max_num_models=args.max_num_models,
+                    last_layer=True).to(args.device)
     
-    min_duration = 0 if args.last_layer else 0 ################################################## last layer SWAG의 duration
-    print("Preparing SWAG model")
-
-'''
-elif args.method =="sabtl":
-    # Load Pre-Train Mean using SWAG (Set Prior)
-    if args.swag_mean_load is not None:
-        w_mean = torch.load(args.swag_mean_load)
-    else:
-        w_mean = None
-        
-    # Load Pre-Train Variance Sqrt using SWAG (Set Prior)
-    if args.swag_var_load is not None:
-        w_var = torch.load(args.swag_var_load)
-    else:
-        w_var = None
-    
-    # Load Pre-Train Covariance using SWAG (Set Prior)
-    if args.swag_covmat_load is not None:
-        w_cov = torch.load(args.swag_covmat_load)
-    else:
-        w_cov = None    
-    
-    # Load Sharpness-aware Bayesian Transfer Learning Module
-    sabtl_model = sabtl.SABTL(copy.deepcopy(model),  w_mean = w_mean,
-                        w_var = w_var, no_cov_mat=args.diag_only).to(args.device)
-    
-    print(f"Preparing SABTL Model")    
-'''
+min_duration = 0  ################################################## last layer SWAG의 duration
+print("Preparing SWAG model")
 #-------------------------------------------------------------------
 
 # Set Criterion------------------------------------------------------
@@ -268,21 +200,16 @@ elif args.optim == "sam":
     optimizer = SAM(model.parameters(), base_optimizer, rho=args.rho, lr=args.lr_init, momentum=args.momentum,
                     weight_decay=args.wd, nesterov=args.nesterov)
     
-elif args.optim == "fsam":
-    base_optimizer = torch.optim.SGD
-    optimizer = FSAM(model.parameters(), base_optimizer, rho=args.rho, lr=args.lr_init, momentum=args.momentum,
-                    weight_decay=args.wd, nesterov=args.nesterov)
+elif args.optim == "bsam":
+    raise RuntimeError("You have to add BSAM optimizer code!!")
 #----------------------------------------------------------------
 
     
 ## Set Scheduler-------------------------------------------------------
-if args.scheduler == "step_lr":
-    from utils import StepLR
-    scheduler = StepLR(optimizer, args.lr_init, args.epochs)
-elif args.scheduler == "cos_anneal":
+if args.scheduler == "cos_anneal":
     if args.optim == "sgd":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.t_max)    
-    elif args.optim in ["sam", "fsam"]:
+    elif args.optim in ["sam", "bsam"]:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer.base_optimizer, T_max=args.t_max)
 #-------------------------------------------------------------------
 
@@ -290,20 +217,11 @@ elif args.scheduler == "cos_anneal":
 ## Resume ---------------------------------------------------------------------------
 start_epoch = 0
 
-if args.resume is not None:
-    print(f"Resume training from {args.resume}")
-    checkpoint = torch.load(args.resume)
-    model.load_state_dict(checkpoint["state_dict"])
-
-if args.method == "swag" and args.swag_resume is not None:
-    print(f"Resume swag training from {args.swag_resume}")
-    checkpoint = torch.load(args.swag_resume)
-    start_epoch = checkpoint["epoch"]
-    optimizer.load_state_dict(checkpoint["optimizer"])
-    # if args.scheduler != "swag_lr":
-    #     scheduler = scheduler.state_dict()
-    swag_model = swag.SWAG(copy.deepcopy(model), no_cov_mat=args.diag_only, max_num_models=args.max_num_models).to(args.device) 
-    swag_model.load_state_dict(checkpoint["state_dict"])
+print(f"Resume training from {args.resume}")
+checkpoint = torch.load(args.resume)
+model.load_state_dict(checkpoint["state_dict"])
+swag_model.base.load_state_dict(checkpoint["state_dict"], strict=False)
+utils.freeze_fe(model)
 #------------------------------------------------------------------------------------
 
 
@@ -311,7 +229,7 @@ if args.method == "swag" and args.swag_resume is not None:
 if args.optim == "sgd":
     scaler = torch.cuda.amp.GradScaler()
 
-elif args.optim in ["sam", "fsam", "bsam"]:
+elif args.optim in ["sam", "bsam"]:
     first_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
     second_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
 
@@ -320,73 +238,56 @@ print(f"Set AMP Scaler for {args.optim}")
 
 
 ## Training -------------------------------------------------------------------------
-print(f"Start training {args.method} with {args.optim} optimizer from {start_epoch} epoch!")
+print(f"Start training last SWAG with {args.optim} optimizer from {start_epoch} epoch!")
 
 ## print setting
 columns = ["epoch", "method", "lr", "tr_loss", "tr_acc", "val_loss", "val_acc", "val_nll", "val_ece", "time"]
-if args.method in "swag":
-    columns = columns[:-1] + ["swag_val_loss", "swag_val_acc", "swag_val_nll", "swag_val_ece"] + columns[-1:]
-    swag_res = {"loss": None, "accuracy": None, "nll" : None, "ece" : None}
+columns = columns[:-1] + ["swag_val_loss", "swag_val_acc", "swag_val_nll", "swag_val_ece"] + columns[-1:]
+swag_res = {"loss": None, "accuracy": None, "nll" : None, "ece" : None}
 
-    if args.swa_c_epochs is None:
-        raise RuntimeError("swa_c_epochs must not be None!")
+if args.swa_c_epochs is None:
+    raise RuntimeError("swa_c_epochs must not be None!")
     
-    print(f"Running SWAG...")
+print(f"Running SWAG...")
 
 
 best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; cnt=0; best_swag_val_loss=9999
 print("Start Training!!")
-for epoch in range(start_epoch, int(args.epochs)):
+for epoch in range(start_epoch, int(args.swag_epochs)):
     time_ep = time.time()
 
     ## lr scheduling
     if args.scheduler == "swag_lr":
-        if args.method == "swag":
-            lr = swag_utils.schedule(epoch, args.lr_init, args.epochs, True, args.swa_start, args.swa_lr)
-        else:
-            lr = swag_utils.schedule(epoch, args.lr_init, args.epochs, False, None, None)
+        lr = swag_utils.schedule(epoch, args.lr_init, args.swag_epochs, True, 1, args.swa_lr)
         swag_utils.adjust_learning_rate(optimizer, lr)
     else:
         lr = optimizer.param_groups[0]['lr']
-
-    
-    if (args.method == "swag") and (args.last_layer == True) and ((epoch) == args.swa_start):
-        print("Load best model for SWAG")
-        checkpoint = torch.load(f"{args.save_path}/{args.method}-{args.optim}_best_val.pt")
-        swag_model.base.load_state_dict(checkpoint['state_dict'])
-        utils.freeze_fe(model)
-        # swag_model.base.load_state_dict(model.state_dict(), strict=False)
         
     
     ## train
     if args.optim == "sgd":
         tr_res = utils.train_sgd(tr_loader, model, criterion, optimizer, args.device, scaler)
-    elif args.optim in ["sam", "fsam"]:
+    elif args.optim == "sam":
         tr_res = utils.train_sam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
 
     val_res = utils.eval(val_loader, model, criterion, args.device, args.num_bins, args.eps)
 
 
-    if (args.method=="swag") and ((epoch + 1) > args.swa_start) and ((epoch + 1 - args.swa_start) % args.swa_c_epochs == 0):
+    if ((epoch + 1) % args.swa_c_epochs == 0):
 
         swag_model.collect_model(model)
         swag_model.sample(0.0)
         
-        if (args.batch_norm == True) and (not args.last_layer):
+        if (args.batch_norm == True): # and (not args.last_layer):
             swag_utils.bn_update(tr_loader, swag_model)
             
         swag_res = utils.eval(val_loader, swag_model, criterion, args.device, args.num_bins, args.eps)
 
     time_ep = time.time() - time_ep
 
-    if args.method == "swag":
-        values = [epoch + 1, f"{args.method}-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
-            val_res["loss"], val_res["accuracy"], val_res["nll"], val_res["ece"],
-            swag_res["loss"], swag_res["accuracy"], swag_res["nll"], swag_res["ece"],
-                time_ep]
-    else:
-        values = [epoch + 1, f"{args.method}-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
-            val_res["loss"], val_res["accuracy"], val_res["nll"], val_res["ece"],
+    values = [epoch + 1, f"{args.method}-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
+        val_res["loss"], val_res["accuracy"], val_res["nll"], val_res["ece"],
+        swag_res["loss"], swag_res["accuracy"], swag_res["nll"], swag_res["ece"],
             time_ep]
     
     table = tabulate.tabulate([values], columns, tablefmt="simple", floatfmt="8.4f")
@@ -399,24 +300,15 @@ for epoch in range(start_epoch, int(args.epochs)):
 
 
     ## wandb
-    if args.method == "swag":
-        wandb.log({"Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
-            "Validation loss" : val_res["loss"], "Validation Accuracy" : val_res["accuracy"],
-            "SWAG Validation loss" : swag_res["loss"], "SWAG Validation Accuracy" : swag_res["accuracy"],
-            "SWAG Validation nll" : swag_res["nll"], "SWAG Validation ece" : swag_res["ece"],
-            "lr" : lr,})
-    else:
-        wandb.log({"Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
-            "Validation loss" : val_res["loss"], "Validation Accuracy" : val_res["accuracy"],
-            "Validation nll" : val_res["nll"], "Validation ece" : val_res["ece"],
-            "lr" : lr,})
+    wandb.log({"Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
+        "Validation loss" : val_res["loss"], "Validation Accuracy" : val_res["accuracy"],
+        "SWAG Validation loss" : swag_res["loss"], "SWAG Validation Accuracy" : swag_res["accuracy"],
+        "SWAG Validation nll" : swag_res["nll"], "SWAG Validation ece" : swag_res["ece"],
+        "lr" : lr,})
 
 
     # Save best model (Early Stopping)
-    '''
-    이 부분도 함수로 정의해서 짧게 가져가자!!!
-    '''
-    if (args.method == "swag") and ((epoch + 1) > args.swa_start + min_duration) and(swag_res['loss'] is not None):
+    if  ((epoch + 1) > min_duration) and (swag_res['loss'] is not None):
         if swag_res['loss'] < best_swag_val_loss:
             best_val_loss = val_res["loss"]
             best_val_acc = val_res['accuracy']
@@ -434,7 +326,7 @@ for epoch in range(start_epoch, int(args.epochs)):
                                     # scheduler = scheduler.state_dict(),
                                     scaler = scaler.state_dict()
                                     )
-            elif args.optim in ["sam", "fsam"]:
+            elif args.optim in ["sam", "bsam"]:
                 utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
                                     epoch = epoch,
                                     state_dict = swag_model.state_dict(),
@@ -454,32 +346,7 @@ for epoch in range(start_epoch, int(args.epochs)):
             torch.save(mean,f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
             torch.save(variance, f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
             torch.save(cov_mat_list, f'{args.save_path}/{args.method}-{args.optim}_best_val_covmat.pt')
-    
-    else:
-        if val_res["loss"] < best_val_loss:
-            best_val_loss = val_res["loss"]
-            best_val_acc = val_res["accuracy"]
-            best_epoch = epoch + 1
 
-            # save state_dict
-            os.makedirs(args.save_path,exist_ok=True)
-            if args.optim == "sgd":
-                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                epoch = epoch,
-                                state_dict = model.state_dict(),
-                                optimizer = optimizer.state_dict(),
-                                # scheduler = scheduler.state_dict(),
-                                scaler = scaler.state_dict()
-                                )
-            elif args.optim in ["sam", "fsam"]:
-                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                epoch = epoch,
-                                state_dict = model.state_dict(),
-                                optimizer = optimizer.state_dict(),
-                                # scheduler = scheduler.state_dict(),
-                                first_step_scaler = first_step_scaler.state_dict(),
-                                second_step_scaler = second_step_scaler.state_dict()
-                                )
 
     if args.scheduler in ["cos_anneal", "step_lr"]:
         scheduler.step()
@@ -494,56 +361,51 @@ for epoch in range(start_epoch, int(args.epochs)):
 print("Load Best Validation Model (Lowest Loss)")
 state_dict_path = f'{args.save_path}/{args.method}-{args.optim}_best_val.pt'
 checkpoint = torch.load(state_dict_path)
-if args.method == "swag":
-    swag_model.load_state_dict(checkpoint["state_dict"])
-    swag_model.to(args.device)
-else:
-    model.load_state_dict(checkpoint["state_dict"])
-    model.to(args.device)
+swag_model.load_state_dict(checkpoint["state_dict"])
+swag_model.to(args.device)
+
 
 
 ### BMA prediction
-if args.method == "swag":
-    bma_save_path = f"{args.save_path}/bma_models"
-    os.makedirs(bma_save_path, exist_ok=True)
-    
-    bma_res = utils.bma(tr_loader, te_loader, swag_model, args.bma_num_models, num_classes, bma_save_path=bma_save_path, eps=args.eps, batch_norm=args.batch_norm)
-    bma_predictions = bma_res["predictions"]
-    bma_targets = bma_res["targets"]
+bma_save_path = f"{args.save_path}/bma_models"
+os.makedirs(bma_save_path, exist_ok=True)
 
-    # Acc
-    bma_accuracy = bma_res["bma_accuracy"] * 100
-    wandb.run.summary['bma accuracy'] = bma_accuracy
-    print(f"bma accuracy : {bma_accuracy:8.4f}")
-    
-    # nll
-    bma_nll = bma_res["nll"]
-    wandb.run.summary['bma nll'] = bma_nll
-    print(f"bma nll : {bma_nll:8.4f}")       
+bma_res = utils.bma(tr_loader, te_loader, swag_model, args.bma_num_models, num_classes, bma_save_path=bma_save_path, eps=args.eps, batch_norm=args.batch_norm)
+bma_predictions = bma_res["predictions"]
+bma_targets = bma_res["targets"]
 
-    # ece
-    unc = utils.calibration_curve(bma_predictions, bma_targets, args.num_bins)
-    bma_ece = unc["ece"]
-    wandb.run.summary['bma ece'] = bma_ece
-    print(f"bma ece : {bma_ece:8.4f}")
+# Acc
+bma_accuracy = bma_res["bma_accuracy"] * 100
+wandb.run.summary['bma accuracy'] = bma_accuracy
+print(f"bma accuracy : {bma_accuracy:8.4f}")
 
-    # Save ece for reliability diagram
-    os.makedirs(f'{args.save_path}/unc_result', exist_ok=True)
-    with open(f"{args.save_path}/unc_result/{args.method}-{args.optim}_bma_uncertainty.pkl", 'wb') as f:
-        pickle.dump(unc, f)
+# nll
+bma_nll = bma_res["nll"]
+wandb.run.summary['bma nll'] = bma_nll
+print(f"bma nll : {bma_nll:8.4f}")       
 
-    # Save Reliability Diagram 
-    utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, True)
+# ece
+unc = utils.calibration_curve(bma_predictions, bma_targets, args.num_bins)
+bma_ece = unc["ece"]
+wandb.run.summary['bma ece'] = bma_ece
+print(f"bma ece : {bma_ece:8.4f}")
+
+# Save ece for reliability diagram
+os.makedirs(f'{args.save_path}/unc_result', exist_ok=True)
+with open(f"{args.save_path}/unc_result/{args.method}-{args.optim}_bma_uncertainty.pkl", 'wb') as f:
+    pickle.dump(unc, f)
+
+# Save Reliability Diagram 
+utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, True)
+
 
 
 ### MAP Prediction
-if args.method == "swag":
-    sample = swag_model.sample(0)
-    if args.batch_norm:
-        swag_utils.bn_update(tr_loader, swag_model, verbose=False, subset=1.0)
-    res = swag_utils.predict(te_loader, swag_model)
-else:
-    res = swag_utils.predict(te_loader, model)
+sample = swag_model.sample(0)
+if args.batch_norm:
+    swag_utils.bn_update(tr_loader, swag_model, verbose=False, subset=1.0)
+res = swag_utils.predict(te_loader, swag_model)
+
 
 predictions = res["predictions"]
 targets = res["targets"]

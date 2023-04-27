@@ -37,17 +37,18 @@ def get_backbone(model_name, num_classes, device, pre_trained=False):
     '''
     Define Backbone Model
     '''
-    from models import mlp, resnet, resnet_noBN, wide_resnet, wide_resnet_noBN
+    from models import mlp, resnet_noBN, wide_resnet, wide_resnet_noBN
+    from torchvision.models import resnet18, resnet50
     if model_name == "mlp":
         model = mlp.MLP(output_size=num_classes)
 
     elif model_name == "resnet18":
-        model = resnet.resnet18(pretrained=pre_trained, num_classes=num_classes)
+        model = resnet18(pretrained=pre_trained, num_classes=num_classes)
     elif model_name == "resnet18-noBN":
         model = resnet_noBN.resnet18(num_classes=num_classes)
 
     elif model_name == "resnet50":
-        model = resnet.resnet50(pretrained=pre_trained, num_classes=num_classes)
+        model = resnet50(pretrained=pre_trained, num_classes=num_classes)
     elif model_name == "resnet50-noBN":
         model = resnet_noBN.resnet50(num_classes=num_classes)
 
@@ -72,18 +73,41 @@ def get_backbone(model_name, num_classes, device, pre_trained=False):
     return model
 
 
-# save model
+
+def freeze_fe(model):
+    '''
+    Freezing Feature Extractor
+    '''
+    for name, param in model.named_parameters():
+        if name.split('.')[0] in ['fc', 'linear', 'classifier']:
+            continue
+        param.requires_grad = False
+    
+    print("Freeze Feature Extractor for last-layer Training")
+
+
+
 def save_checkpoint(file_path, epoch, **kwargs):
+    '''
+    Save Model Checkpoint
+    '''
     state = {"epoch": epoch}
     state.update(kwargs)
     torch.save(state, file_path)
 
 
 # parameter list to state_dict(ordered Dict)
-def list_to_state_dict(model, sample_list):
+def list_to_state_dict(model, sample_list, last=False):
+    '''
+    Change sample list to state dict
+    '''
     ordDict = collections.OrderedDict()
-    for sample, (name, param) in zip(sample_list, model.named_parameters()):
-        ordDict[name] = sample
+    if last:
+        ordDict["fc.weight"] = sample_list[0]
+        ordDict["fc.bias"] = sample_list[1]   
+    else:        
+        for sample, (name, param) in zip(sample_list, model.named_parameters()):
+                ordDict[name] = sample
     return ordDict
 
 
@@ -100,6 +124,23 @@ def unflatten_like_size(vector, likeTensorSize):
         i += n
 
     return outList
+
+
+def format_weights(sample, sabtl_model):
+    '''
+    Format sampled vector to state dict
+    '''  
+    sample = unflatten_like_size(sample, sabtl_model.backbone_shape)
+    
+    if True: # last_layer만
+        state_dict = sabtl_model.backbone.state_dict()
+        state_dict[f"{sabtl_model.last_layer_name}.weight"] = sample[0]
+        state_dict[f"{sabtl_model.last_layer_name}.bias"] = sample[1]    
+    else:
+        state_dict = dict()
+        for (name, _), w in zip(sabtl_model.backbone.named_parameters(), sample):
+                state_dict[name] = w
+    return state_dict
 
 
 # NLL
@@ -236,49 +277,6 @@ def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler
     }
 
 
-# train sabtl
-def train_sabtl(dataloader, sabtl_model, criterion, optimizer, device, batch_norm):
-    loss_sum = 0.0
-    correct = 0.0
-
-    num_objects_current = 0
-    num_batches = len(dataloader)
-
-    sabtl_model.backbone.train() # 확인 필요
-
-    for batch, (X, y) in enumerate(dataloader):
-        
-        X, y = X.to(device), y.to(device)
-        
-        # Set weight sample
-        params, z_1, z_2 = sabtl_model.sample()
-
-        ### first forward-backward pass
-        pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
-        loss = criterion(pred, y)
-        loss.backward()
-        
-        bnn_params = optimizer.first_step(zero_grad=True)
-        params = sabtl.second_sample(bnn_params, z_1, z_2, sabtl_model, scale=1.0)
-        
-        ### second forward-backward pass
-        pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
-        criterion(pred, y).backward()
-        optimizer.second_step(zero_grad=True)  
-
-        ### Checking accuracy with MAP (Mean) solution
-        # params, _, _ = sabtl_model.sample(scale=0.0)
-        params = sabtl.second_sample(bnn_params, z_1, z_2, sabtl_model, scale=1.0)
-        pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, X)
-        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-        loss_sum += loss.data.item() * X.size(0)
-        num_objects_current += X.size(0)
-        
-    return {
-        "loss": loss_sum / num_objects_current,
-        "accuracy": correct / num_objects_current * 100.0,
-    }
-
 
 # Test
 def eval(loader, model, criterion, device, num_bins=50, eps=1e-8):
@@ -307,49 +305,6 @@ def eval(loader, model, criterion, device, num_bins=50, eps=1e-8):
     preds = np.vstack(preds)
     targets = np.concatenate(targets)
 
-    accuracy = np.mean(np.argmax(preds, axis=1) == targets)
-    nll = -np.mean(np.log(preds[np.arange(preds.shape[0]), targets] + eps))
-    ece = calibration_curve(preds, targets, num_bins)['ece']
-    
-    return {
-        "loss" : loss_sum / num_objects_total,
-        "accuracy" : accuracy * 100.0,
-        "nll" : nll,
-        "ece" : ece,
-    }
-
-
-
-
-def eval_metrics_sabtl(loader, sabtl_model, criterion, device, num_bins=50, eps=1e-8):
-    '''
-    get loss, accuracy, nll and ece for every eval step
-    ## MC로 evaluation하도록 바꾸자
-    '''
-    loss_sum = 0.0
-    num_objects_total = len(loader.dataset)
-
-    preds = list()
-    targets = list()
-
-    offset = 0
-    params, _, _ = sabtl_model.sample(scale=0.0)
-    with torch.no_grad():
-        for _, (input, target) in enumerate(loader):
-            input, target = input.to(device), target.to(device)
-            pred = torch.nn.utils.stateless.functional_call(sabtl_model.backbone, params, input)
-            loss = criterion(pred, target)
-            loss_sum += loss.item() * input.size(0)
-
-            preds.append(F.softmax(pred, dim=1).cpu().numpy())
-            targets.append(target.cpu().numpy())
-            offset += input.size(0)
-    
-    preds = np.vstack(preds)
-    targets = np.concatenate(targets)
-
-    
-    print(f"prediction : {np.argmax(preds, axis=1)}")  ## 3만 나오네요
     accuracy = np.mean(np.argmax(preds, axis=1) == targets)
     nll = -np.mean(np.log(preds[np.arange(preds.shape[0]), targets] + eps))
     ece = calibration_curve(preds, targets, num_bins)['ece']
