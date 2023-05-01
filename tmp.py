@@ -21,7 +21,7 @@ warnings.filterwarnings('ignore')
 seed = 0
 utils.set_seed(seed)
 
-device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 
 tr_loader, val_loader, te_loader, num_classes = data.get_cifar10(data_path = "/data1/lsj9862/data/cifar10/",
                                                             batch_size = 64,
@@ -33,20 +33,12 @@ model = resnet_noBN.resnet18(num_classes=num_classes).to(device)
 utils.freeze_fe(model)
 
 # %%
-## BNN
-# w_mean = torch.load("/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_mean.pt")
-# w_var = torch.load("/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_variance.pt") 
-# w_covmat = torch.load("/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_covmat.pt")
-
-## DNN
-w_mean = torch.load("/home/lsj9862/BayesianSAM/exp_result/last-swag/cifar10/resnet18-noBN/constant/dnn-sgd_best_val.pt") ## 왜 cuda:0에 올라가지?
+w_mean = torch.load("/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_mean.pt")
+w_var = torch.load("/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_variance.pt") 
+w_covmat = torch.load("/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_covmat.pt")
 
 # %%
-## BNN
-# sabtl_model = sabtl.SABTL(copy.deepcopy(model), src_model_type='bnn', w_mean = w_mean, w_var=w_var, w_cov_sqrt=w_covmat).to(device)
-
-## DNN
-sabtl_model = sabtl.SABTL(copy.deepcopy(model), w_mean = w_mean).to(device)
+sabtl_model = sabtl.SABTL(copy.deepcopy(model), src_model_type='swag', w_mean = w_mean, w_var=w_var, w_cov_sqrt=w_covmat).to(device)
 
 
 # %%
@@ -69,13 +61,12 @@ epochs = 100
 
 columns = ["epoch", "method", "lr", "tr_loss", "tr_acc", "val_loss (MAP)", "val_acc (MAP)", "time"]
 
-
 best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; cnt=0; best_val_loss=9999
 print("Start Training!!")
 for epoch in range(int(epochs)):
     time_ep = time.time()
-
-    # train
+    ### train --------------------------------------------------
+    # (나중에 train_sabtl 함수화 예정)
     loss_sum = 0.0
     correct = 0.0
     num_objects_current = 0
@@ -94,7 +85,6 @@ for epoch in range(int(epochs)):
             pred = sabtl_model(params, X)
             loss = criterion(pred, y)
         first_step_scaler.scale(loss).backward()
-
         first_step_scaler.unscale_(optimizer)
         
         optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
@@ -121,7 +111,6 @@ for epoch in range(int(epochs)):
         
         if sam_first_step_applied:
             optimizer.second_step()  
-        
         second_step_scaler.step(optimizer)
         second_step_scaler.update()
 
@@ -133,31 +122,50 @@ for epoch in range(int(epochs)):
         loss_sum += loss.data.item() * X.size(0)
         num_objects_current += X.size(0)
         
-    tr_loss = loss_sum / num_objects_current
-    tr_acc = correct / num_objects_current * 100
-
-    
-    # print(f"BSAM : {num} times / Skip BSAM : {skip_num} times")
-    print(f"max(mean) : {torch.max(sabtl_model.bnn_param['mean'])}   \
+        print(f"max(mean) : {torch.max(sabtl_model.bnn_param['mean'])}   \
             / min(mean) :{torch.min(sabtl_model.bnn_param['mean'])} \
             / nan(mean) {torch.sum(torch.isnan(sabtl_model.bnn_param['mean']))}") 
-    print(f"max(var) : {torch.max(sabtl_model.bnn_param['var'])}   \
-            / min(var) :{torch.min(sabtl_model.bnn_param['var'])} \
-            / nan(var) {torch.sum(torch.isnan(sabtl_model.bnn_param['var']))}") 
-    print(f"max(cov) : {torch.max(sabtl_model.bnn_param['cov_sqrt'])}   \
+        print(f"max(var) : {torch.max(utils.softclip(sabtl_model.bnn_param['log_var']))}   \
+            / min(var) :{torch.min(utils.softclip(sabtl_model.bnn_param['log_var']))} \
+            / nan(var) {torch.sum(torch.isnan((utils.softclip(sabtl_model.bnn_param['log_var']))))}") 
+        print(f"max(cov) : {torch.max(sabtl_model.bnn_param['cov_sqrt'])}   \
             / min(cov) :{torch.min(sabtl_model.bnn_param['cov_sqrt'])} \
             / nan(cov) {torch.sum(torch.isnan(sabtl_model.bnn_param['cov_sqrt']))}") 
+        
+        
+    tr_loss = loss_sum / num_objects_current
+    tr_acc = correct / num_objects_current * 100
+    # -------------------------------------------------------------------
     
     
-    # eval
+    ## Check parameter scales (Debugging) -------------------------------------------
+    # print(f"BSAM : {num} times / Skip BSAM : {skip_num} times")
+    # print(f"max(mean) : {torch.max(sabtl_model.bnn_param['mean'])}   \
+    #         / min(mean) :{torch.min(sabtl_model.bnn_param['mean'])} \
+    #         / nan(mean) {torch.sum(torch.isnan(sabtl_model.bnn_param['mean']))}") 
+    # print(f"max(var) : {torch.max(sabtl_model.bnn_param['var'])}   \
+    #         / min(var) :{torch.min(sabtl_model.bnn_param['var'])} \
+    #         / nan(var) {torch.sum(torch.isnan(sabtl_model.bnn_param['var']))}") 
+    # print(f"max(cov) : {torch.max(sabtl_model.bnn_param['cov_sqrt'])}   \
+    #         / min(cov) :{torch.min(sabtl_model.bnn_param['cov_sqrt'])} \
+    #         / nan(cov) {torch.sum(torch.isnan(sabtl_model.bnn_param['cov_sqrt']))}") 
+    # --------------------------------------------------------------------
+
+
+    ## eval --------------------------------------------------------------
+    # (eval_sabtl로 옮겨질 함수화 예정)
+    params, _ = sabtl_model.sample(0.0)
+    params = utils.format_weights(params, sabtl_model)
+    
     loss_sum = 0.0
     correct = 0.0
     num_objects_current = 0
     with torch.no_grad():
-        for batch, (X, y) in enumerate(val_loader):
+        for batch, (X, y) in enumerate(te_loader):
             X, y = X.to(device), y.to(device)
 
             ### Checking accuracy with MAP (Mean) solution
+
             pred = sabtl_model(params, X)
             loss = criterion(pred, y)
             correct += (pred.argmax(1) == y).type(torch.float).sum().item()
@@ -166,7 +174,7 @@ for epoch in range(int(epochs)):
         
         val_loss = loss_sum / num_objects_current
         val_acc = correct / num_objects_current * 100
-        
+
         time_ep = time.time() - time_ep
         values = [epoch + 1, f"sabtl-bsam", lr_init,
                 tr_loss, tr_acc,
@@ -180,6 +188,7 @@ for epoch in range(int(epochs)):
     else:
         table = table.split("\n")[2]
     print(table)
+    # --------------------------------------------------------------------------
     
     
     # if val_loss < best_val_loss: #### 지금 loss scale이...

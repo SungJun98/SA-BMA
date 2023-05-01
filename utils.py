@@ -143,6 +143,21 @@ def format_weights(sample, sabtl_model):
     return state_dict
 
 
+def softclip(log_var, min=-6):
+    """
+    Clips the tensor values at the minimum value min in a softway. Taken from Handful of Trials
+    https://github.com/orybkin/sigma-vae-pytorch/blob/master/model.py
+    """
+    ## Variance Version
+    log_var = torch.exp(log_var)          # variance
+    soft_var = min + F.softplus(log_var - min)
+    return soft_var
+
+    ## Standard Deviation Version
+    # log_std = torch.exp(0.5 * log_var)          # std
+    # soft_std = min + F.softplus(log_std - min)
+    # return soft_std
+
 # NLL
 # https://github.com/wjmaddox/swa_gaussian/blob/master/experiments/uncertainty/uncertainty.py#L78
 def nll(outputs, labels):
