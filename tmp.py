@@ -21,7 +21,7 @@ warnings.filterwarnings('ignore')
 seed = 0
 utils.set_seed(seed)
 
-device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
 
 tr_loader, val_loader, te_loader, num_classes = data.get_cifar10(data_path = "/data1/lsj9862/data/cifar10/",
                                                             batch_size = 64,
@@ -64,6 +64,20 @@ columns = ["epoch", "method", "lr", "tr_loss", "tr_acc", "val_loss (MAP)", "val_
 best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; cnt=0; best_val_loss=9999
 print("Start Training!!")
 for epoch in range(int(epochs)):
+    ## Check parameter scales (Debugging) -------------------------------------------
+    # print(f"BSAM : {num} times / Skip BSAM : {skip_num} times")
+    print(f"max(mean) : {torch.max(sabtl_model.bnn_param['mean'])}   \
+            / min(mean) :{torch.min(sabtl_model.bnn_param['mean'])} \
+            / nan(mean) {torch.sum(torch.isnan(sabtl_model.bnn_param['mean']))}") 
+    print(f"max(std) : {torch.max(torch.exp(utils.softclip(sabtl_model.bnn_param['log_std'])))}   \
+            / min(std) :{torch.min(torch.exp(utils.softclip(sabtl_model.bnn_param['log_std'])))} \
+            / nan(std) {torch.sum(torch.isnan(torch.exp((utils.softclip(sabtl_model.bnn_param['log_std'])))))}") 
+    print(f"max(cov_sqrt) : {torch.max(sabtl_model.bnn_param['cov_sqrt'])}   \
+            / min(cov_sqrt) :{torch.min(sabtl_model.bnn_param['cov_sqrt'])} \
+            / nan(cov_sqrt) {torch.sum(torch.isnan(sabtl_model.bnn_param['cov_sqrt']))}") 
+    # --------------------------------------------------------------------
+
+
     time_ep = time.time()
     ### train --------------------------------------------------
     # (나중에 train_sabtl 함수화 예정)
@@ -125,31 +139,17 @@ for epoch in range(int(epochs)):
         print(f"max(mean) : {torch.max(sabtl_model.bnn_param['mean'])}   \
             / min(mean) :{torch.min(sabtl_model.bnn_param['mean'])} \
             / nan(mean) {torch.sum(torch.isnan(sabtl_model.bnn_param['mean']))}") 
-        print(f"max(var) : {torch.max(utils.softclip(sabtl_model.bnn_param['log_var']))}   \
-            / min(var) :{torch.min(utils.softclip(sabtl_model.bnn_param['log_var']))} \
-            / nan(var) {torch.sum(torch.isnan((utils.softclip(sabtl_model.bnn_param['log_var']))))}") 
-        print(f"max(cov) : {torch.max(sabtl_model.bnn_param['cov_sqrt'])}   \
-            / min(cov) :{torch.min(sabtl_model.bnn_param['cov_sqrt'])} \
-            / nan(cov) {torch.sum(torch.isnan(sabtl_model.bnn_param['cov_sqrt']))}") 
+        print(f"max(std) : {torch.max(torch.exp(utils.softclip(sabtl_model.bnn_param['log_std'])))}   \
+            / min(std) :{torch.min(torch.exp(utils.softclip(sabtl_model.bnn_param['log_std'])))} \
+            / nan(std) {torch.sum(torch.isnan(torch.exp((utils.softclip(sabtl_model.bnn_param['log_std'])))))}") 
+        print(f"max(cov_sqrt) : {torch.max(sabtl_model.bnn_param['cov_sqrt'])}   \
+            / min(cov_sqrt) :{torch.min(sabtl_model.bnn_param['cov_sqrt'])} \
+            / nan(cov_sqrt) {torch.sum(torch.isnan(sabtl_model.bnn_param['cov_sqrt']))}") 
         
         
     tr_loss = loss_sum / num_objects_current
     tr_acc = correct / num_objects_current * 100
     # -------------------------------------------------------------------
-    
-    
-    ## Check parameter scales (Debugging) -------------------------------------------
-    # print(f"BSAM : {num} times / Skip BSAM : {skip_num} times")
-    # print(f"max(mean) : {torch.max(sabtl_model.bnn_param['mean'])}   \
-    #         / min(mean) :{torch.min(sabtl_model.bnn_param['mean'])} \
-    #         / nan(mean) {torch.sum(torch.isnan(sabtl_model.bnn_param['mean']))}") 
-    # print(f"max(var) : {torch.max(sabtl_model.bnn_param['var'])}   \
-    #         / min(var) :{torch.min(sabtl_model.bnn_param['var'])} \
-    #         / nan(var) {torch.sum(torch.isnan(sabtl_model.bnn_param['var']))}") 
-    # print(f"max(cov) : {torch.max(sabtl_model.bnn_param['cov_sqrt'])}   \
-    #         / min(cov) :{torch.min(sabtl_model.bnn_param['cov_sqrt'])} \
-    #         / nan(cov) {torch.sum(torch.isnan(sabtl_model.bnn_param['cov_sqrt']))}") 
-    # --------------------------------------------------------------------
 
 
     ## eval --------------------------------------------------------------
