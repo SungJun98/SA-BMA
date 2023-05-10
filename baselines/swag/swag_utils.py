@@ -41,37 +41,6 @@ def adjust_learning_rate(optimizer, lr):
     return lr
 
 
-# def train_epoch(loader, model, criterion, optimizer, device):
-#     loss_sum = 0.0
-#     correct = 0.0
-
-#     num_objects_current = 0
-#     num_batches = len(loader)
-
-#     model.train()
-
-#     for i, (inputs, targets) in enumerate(loader):
-#         inputs = inputs.to(device)
-#         targets = targets.to(device)
-
-#         pred = model(inputs)
-
-#         loss = criterion(pred, targets)
-#         correct += (pred.argmax(1) == targets).type(torch.float).sum().item()
-
-#         optimizer.zero_grad()
-#         loss.backward()
-#         optimizer.step()
-
-#         loss_sum += loss.data.item() * inputs.size(0)
-
-#         num_objects_current += inputs.size(0)
-
-#     return {
-#         "loss": loss_sum / num_objects_current,
-#         "accuracy": correct / num_objects_current * 100.0,
-#     }
-
 
 def predict(loader, model, verbose=False):
     preds = list()
@@ -194,7 +163,10 @@ def predictions(test_loader, model, device, seed=None, **kwargs):
 
 
 def schedule(epoch, lr_init, epochs, swa, swa_start=None, swa_lr=None):
-    t = (epoch) / (swa_start if swa else epochs)
+    try:
+      t = (epoch) / (swa_start if swa else epochs)
+    except:
+      t = (epoch) / (swa_start+1 if swa else epochs)
     lr_ratio = swa_lr / lr_init if swa else 0.01
     if t <= 0.5:
         factor = 1.0

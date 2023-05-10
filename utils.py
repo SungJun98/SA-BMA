@@ -16,8 +16,8 @@ from baselines.sam import sam_utils
 
 import sabtl
 
-
-
+## ------------------------------------------------------------------------------------
+## Setting Configs --------------------------------------------------------------------
 def set_seed(RANDOM_SEED=0):
     '''
     Set seed for reproduction
@@ -33,6 +33,87 @@ def set_seed(RANDOM_SEED=0):
 
 
 
+def set_save_path(args):
+    '''
+    Set save path following the method / model / dataset / optimizer / hyperparameters
+    '''
+    if args.method == "swag":
+        if args.optim != "sgd":
+            save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}/{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
+        else:
+            save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}/{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"    
+    elif args.method == "last_swag":
+        if args.optim != "sgd":
+            save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}_{args.t_max}/{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
+        else:
+            save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}_{args.t_max}/{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"    
+    elif args.method == 'sabtl':
+        if args.optim != "sgd":
+            save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}_{args.src_bnn}_{args.optim}_{args.scheduler}_{args.t_max}/{args.lr_init}_{args.wd}_{args.momentum}_{args.rho}"
+        else:
+            save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}_{args.src_bnn}_{args.optim}_{args.scheduler}_{args.t_max}/{args.lr_init}_{args.wd}_{args.momentum}"
+    else:
+        save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}/{args.lr_init}_{args.wd}_{args.momentum}_{args.rho}"    
+    
+    return save_path_
+
+
+
+def set_wandb_runname(args):
+    '''
+    Set wandb run name following the method / model / dataset / optimizer / hyperparameters
+    '''
+    if args.method == "swag":
+        if args.optim != "sgd":
+            run_name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
+        else:
+            run_name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"    
+
+    elif args.method == 'last_swag':
+        if args.optim != "sgd":
+            run_name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
+        else:
+            run_name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"    
+
+    elif args.method == 'sabtl':
+        if args.optim != "sgd":
+            run_name = f"{args.method}_{args.src_bnn}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})_{args.lr_init}_{args.wd}_{args.rho}"
+        else:
+            run_name = f"{args.method}_{args.src_bnn}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})_{args.lr_init}_{args.wd}"
+    else:
+        run_name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})_{args.lr_init}_{args.wd}"
+
+    return run_name
+
+
+
+def get_dataset(dataset, data_path, batch_size, num_workers, use_validation):
+    '''
+    Load Dataset
+    '''
+    import data
+    if dataset == 'cifar10':
+        tr_loader, val_loader, te_loader, num_classes = data.get_cifar10(data_path, batch_size,
+                                                                        num_workers,
+                                                                        use_validation = use_validation)
+    elif dataset == 'cifar100':
+        tr_loader, val_loader, te_loader, num_classes = data.get_cifar100(data_path, batch_size,
+                                                                        num_workers,
+                                                                        use_validation = use_validation)
+    elif dataset == 'oxfordflower':
+        raise RuntimeError("You need to add code for this dataset")
+    
+    elif dataset == 'oxfordcars':
+        raise RuntimeError("You need to add code for this dataset")
+
+
+    if not use_validation:
+        val_loader = te_loader
+    
+    return tr_loader, val_loader, te_loader, num_classes
+
+
+
 def get_backbone(model_name, num_classes, device, pre_trained=False):
     '''
     Define Backbone Model
@@ -43,15 +124,31 @@ def get_backbone(model_name, num_classes, device, pre_trained=False):
         model = mlp.MLP(output_size=num_classes)
 
     elif model_name == "resnet18":
-        model = resnet18(pretrained=pre_trained, num_classes=num_classes)
+        if pre_trained:
+            model = resnet18(pretrained=True)
+            freeze_fe(model)
+            in_features = model.fc.in_features
+            model.fc = nn.Linear(in_features, num_classes)
+        else:
+            model = resnet18(pretrained=False, num_classes=num_classes)
     elif model_name == "resnet18-noBN":
         model = resnet_noBN.resnet18(num_classes=num_classes)
 
     elif model_name == "resnet50":
-        model = resnet50(pretrained=pre_trained, num_classes=num_classes)
+        if pre_trained:
+            model = resnet50(pretrained=True)
+            freeze_fe(model)
+            in_features = model.fc.in_features
+            model.fc = nn.Linear(in_features, num_classes)
+        else:
+            model = resnet50(pretrained=False, num_classes=num_classes)
     elif model_name == "resnet50-noBN":
         model = resnet_noBN.resnet50(num_classes=num_classes)
 
+
+        """
+        add code for pre-trained model
+        """
     elif model_name == "wideresnet28x10":
         model_cfg = getattr(wide_resnet, "WideResNet28x10")
         model = model_cfg.base(num_classes=num_classes)
@@ -72,7 +169,8 @@ def get_backbone(model_name, num_classes, device, pre_trained=False):
     
     return model
 
-
+## ------------------------------------------------------------------------------------
+## ------------------------------------------------------------------------------------
 
 def freeze_fe(model):
     '''
@@ -95,6 +193,7 @@ def save_checkpoint(file_path, epoch, **kwargs):
     state.update(kwargs)
     torch.save(state, file_path)
 
+                    
 
 # parameter list to state_dict(ordered Dict)
 def list_to_state_dict(model, sample_list, last=False):
@@ -142,24 +241,6 @@ def format_weights(sample, sabtl_model):
                 state_dict[name] = w
     return state_dict
 
-
-def softclip(log_std, min=-4, std=True):
-    """
-    Clips the tensor values at the minimum value min in a softway. Taken from Handful of Trials
-    https://github.com/orybkin/sigma-vae-pytorch/blob/master/model.py
-    """
-    if std:
-        ## Standard Deviation Version
-        log_std = torch.exp(log_std)          # std
-        soft_std = min + F.softplus(log_std - min)
-        return soft_std
-
-    else:
-        ## Variance Version
-        log_var = torch.exp(2 * log_std)          # variance
-        soft_var = min + F.softplus(log_var - min)
-        return soft_var
-
     
 # NLL
 # https://github.com/wjmaddox/swa_gaussian/blob/master/experiments/uncertainty/uncertainty.py#L78
@@ -169,8 +250,6 @@ def nll(outputs, labels):
     ps = outputs[idx]
     nll = -np.sum(np.log(ps))
     return nll
-
-    
 
 
 class StepLR:
@@ -195,9 +274,6 @@ class StepLR:
     def lr(self) -> float:
         return self.optimizer.param_groups[0]["lr"]
 
-
-
-            
 
 # train SGD
 def train_sgd(dataloader, model, criterion, optimizer, device, scaler):
@@ -232,8 +308,7 @@ def train_sgd(dataloader, model, criterion, optimizer, device, scaler):
 
 
 
-
-# train SAM, FSAM
+# train SAM
 def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler, second_step_scaler):
     # https://github.com/davda54/sam/issues/7
     loss_sum = 0.0
@@ -296,6 +371,167 @@ def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler
 
 
 
+def train_sabtl_sgd(dataloader, sabtl_model, criterion, optimizer, device, scaler):
+    loss_sum = 0.0
+    correct = 0.0
+    num_objects_current = 0
+    for batch, (X, y) in enumerate(dataloader):
+        X, y = X.to(device), y.to(device)
+           
+        # Sample weight
+        params, _ = sabtl_model.sample(1.0)
+        # Change weight sample shape to input model
+        params = format_weights(params, sabtl_model)
+
+        with torch.cuda.amp.autocast():
+            pred = sabtl_model(params, X)
+            loss = criterion(pred, y)
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)  # optimizer.step()
+        scaler.update()
+        optimizer.zero_grad()
+        
+        # ### Checking accuracy with MAP (Mean) solution
+        params, _ = sabtl_model.sample(0.0)
+        params = format_weights(params, sabtl_model)
+        pred = sabtl_model(params, X)
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
+        
+    return{
+        "loss" : loss_sum / num_objects_current,
+        "accuracy" : correct / num_objects_current * 100.0,
+    }
+
+
+def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first_step_scaler, second_step_scaler):
+    loss_sum = 0.0
+    correct = 0.0
+    num_objects_current = 0
+    for batch, (X, y) in enumerate(dataloader):
+        X, y = X.to(device), y.to(device)
+           
+        # Sample weight
+        params, z_ = sabtl_model.sample(1.0)        
+        # Change weight sample shape to input model
+        params = format_weights(params, sabtl_model)
+
+        ## first forward & backward
+        with torch.cuda.amp.autocast():
+            pred = sabtl_model(params, X)
+            loss = criterion(pred, y)        
+        first_step_scaler.scale(loss).backward()
+        first_step_scaler.unscale_(optimizer)
+        
+        optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
+        
+        inf_grad_cnt = sum(v.item() for v in optimizer_state["found_inf_per_device"].values())      # Check if any gradients are inf/nan
+        if inf_grad_cnt == 0:
+            # if valid graident, apply sam_first_step
+            optimizer.first_step(zero_grad=True)
+            sam_first_step_applied = True
+        else:
+            # if invalid graident, skip sam and revert to single optimization step
+            optimizer.zero_grad()
+            sam_first_step_applied = False  
+        first_step_scaler.update()
+
+        
+        ## second forward-backward pass
+        params = optimizer.second_sample(z_, sabtl_model, scale=1.0)
+        params = format_weights(params, sabtl_model)
+        
+        with torch.cuda.amp.autocast():
+            pred = sabtl_model(params, X)
+            loss = criterion(pred, y)
+        second_step_scaler.scale(loss).backward()
+        
+        if sam_first_step_applied:
+            optimizer.second_step()  
+        second_step_scaler.step(optimizer)
+        second_step_scaler.update()
+
+        # ### Checking accuracy with MAP (Mean) solution
+        params, _ = sabtl_model.sample(0.0)
+        params = format_weights(params, sabtl_model)
+        pred = sabtl_model(params, X)
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
+        
+    return{
+        "loss" : loss_sum / num_objects_current,
+        "accuracy" : correct / num_objects_current * 100.0,
+    }
+
+
+
+def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, first_step_scaler, second_step_scaler):
+    loss_sum = 0.0
+    correct = 0.0
+    num_objects_current = 0
+    for batch, (X, y) in enumerate(dataloader):
+        X, y = X.to(device), y.to(device)
+           
+        # Sample weight
+        params, z_ = sabtl_model.sample(1.0)
+        # compute Fisher inverse
+        fish_inv = sabtl_model.fish_inv(params)
+        # Change weight sample shape to input model
+        params = format_weights(params, sabtl_model)
+
+
+        ## first forward & backward
+        with torch.cuda.amp.autocast():
+            pred = sabtl_model(params, X)
+            loss = criterion(pred, y)
+        
+        first_step_scaler.scale(loss).backward()
+        first_step_scaler.unscale_(optimizer)
+        
+        optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
+        
+        inf_grad_cnt = sum(v.item() for v in optimizer_state["found_inf_per_device"].values())      # Check if any gradients are inf/nan
+        if inf_grad_cnt == 0:
+            # if valid graident, apply sam_first_step
+            optimizer.first_step(fish_inv, zero_grad=True)
+            sam_first_step_applied = True
+        else:
+            # if invalid graident, skip sam and revert to single optimization step
+            optimizer.zero_grad()
+            sam_first_step_applied = False  
+        first_step_scaler.update()
+
+        
+        ## second forward-backward pass
+        params = optimizer.second_sample(z_, sabtl_model, scale=1.0)
+        
+        with torch.cuda.amp.autocast():
+            pred = sabtl_model(params, X)
+            loss = criterion(pred, y)
+        second_step_scaler.scale(loss).backward()
+        
+        if sam_first_step_applied:
+            optimizer.second_step()  
+        second_step_scaler.step(optimizer)
+        second_step_scaler.update()
+
+        # ### Checking accuracy with MAP (Mean) solution
+        params, _ = sabtl_model.sample(0.0)
+        params = format_weights(params, sabtl_model)
+        pred = sabtl_model(params, X)
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
+        
+    return{
+        "loss" : loss_sum / num_objects_current,
+        "accuracy" : correct / num_objects_current * 100.0,
+    }
+
+
+
 # Test
 def eval(loader, model, criterion, device, num_bins=50, eps=1e-8):
     '''
@@ -332,6 +568,48 @@ def eval(loader, model, criterion, device, num_bins=50, eps=1e-8):
         "accuracy" : accuracy * 100.0,
         "nll" : nll,
         "ece" : ece,
+    }
+
+
+
+def eval_sabtl(loader, sabtl_model, params, criterion, device, num_bins=50, eps=1e-8):
+    '''
+    get loss, accuracy, nll and ece for every eval step
+    '''
+    
+    loss_sum = 0.0
+    num_objects_total = len(loader.dataset)
+
+    preds = list()
+    targets = list()
+
+    sabtl_model.eval()
+    offset = 0
+    with torch.no_grad():
+        for _, (input, target) in enumerate(loader):
+            input, target = input.to(device), target.to(device)
+            pred = sabtl_model(params, input)
+            loss = criterion(pred, target)
+            loss_sum += loss.item() * input.size(0)
+            
+            preds.append(F.softmax(pred, dim=1).cpu().numpy())
+            targets.append(target.cpu().numpy())
+            offset += input.size(0)
+    
+    preds = np.vstack(preds)
+    targets = np.concatenate(targets)
+
+    accuracy = np.mean(np.argmax(preds, axis=1) == targets)
+    nll = -np.mean(np.log(preds[np.arange(preds.shape[0]), targets] + eps))
+    ece = calibration_curve(preds, targets, num_bins)['ece']
+    
+    return {
+        "predictions" : preds,
+        "targets" : targets,
+        "loss" : loss_sum / num_objects_total,
+        "accuracy" : accuracy * 100.0,
+        "nll" : nll,
+        "ece" : ece
     }
 
 
@@ -398,6 +676,62 @@ def bma(tr_loader, te_loader, model, bma_num_models, num_classes, bma_save_path=
             "nll" : swag_nll
     }
 
+
+def bma_sabtl(te_loader, sabtl_model, bma_num_models,
+            num_classes, criterion, device,
+            bma_save_path=None, eps=1e-8,
+            ):
+    '''
+    run bayesian model averaging in test step
+    '''
+    sabtl_predictions = np.zeros((len(te_loader.dataset), num_classes))
+    with torch.no_grad():
+        for i in range(bma_num_models):
+            
+            if i == 0:
+                params, _ = sabtl_model.sample(0)
+            else:
+                params, _ = sabtl_model.sample(1.0)
+            
+            # save sampled weight for bma
+            if bma_save_path is not None:
+                torch.save(params, f'{bma_save_path}/bma_model-{i}.pt')
+            
+            params = format_weights(params, sabtl_model)
+            res = eval_sabtl(te_loader, sabtl_model, params, criterion, device, num_bins=50, eps=1e-8)
+            
+            print(
+                "SABTL Sample %d/%d. Accuracy: %.2f%% NLL: %.4f"
+                % (i + 1, bma_num_models, res['accuracy'], res['nll'])
+            )
+
+            sabtl_predictions += res["predictions"]
+
+            ens_accuracy = np.mean(np.argmax(sabtl_predictions, axis=1) == res["targets"])
+            ens_nll = -np.mean(
+                np.log(
+                    sabtl_predictions[np.arange(sabtl_predictions.shape[0]), res["targets"]] / (i + 1)
+                    + eps
+                )
+            )
+            print(
+                "Ensemble %d/%d. Accuracy: %.2f%% NLL: %.4f"
+                % (i + 1, bma_num_models, ens_accuracy * 100, ens_nll)
+            )
+
+        sabtl_predictions /= bma_num_models
+
+        sabtl_accuracy = np.mean(np.argmax(sabtl_predictions, axis=1) == res["targets"])
+        sabtl_nll = -np.mean(
+            np.log(sabtl_predictions[np.arange(sabtl_predictions.shape[0]), res["targets"]] + eps)
+        )
+
+    print(f"bma Accuracy using {bma_num_models} model : {sabtl_accuracy * 100:.2f}% / NLL : {sabtl_nll:.4f}")
+    return {"predictions" : sabtl_predictions,
+            "targets" : res["targets"],
+            "bma_accuracy" : sabtl_accuracy,
+            "nll" : sabtl_nll
+    }
 
 
 def calibration_curve(predictions, targets, num_bins):

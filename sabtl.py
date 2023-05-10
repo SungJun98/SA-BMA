@@ -14,28 +14,28 @@ class SABTL(torch.nn.Module):
     def __init__(
         self,
         backbone,
-        src_model_type = 'swag',
+        src_bnn = 'swag',
         w_mean = None,
         w_var=None,
         prior_var_scale = 1,
-        # diag_only = False, 
         w_cov_sqrt=None,
         prior_cov_scale = 1,
-        var_clamp = 1e-4
-        # last_layer=True
+        var_clamp = 1e-4,
     ):
         super(SABTL, self).__init__()
         
+        for p in backbone.parameters():
+            p.requires_grad = False
+
+        
         # setting for covariance
-        # self.diag_only = diag_only
         self.var_clamp = var_clamp
         self.backbone = backbone        
-        # self.last_layer = last_layer
         self.full_model_shape = [p.shape for p in backbone.parameters()]
         
         ## Load Pre-Trained Model
         if w_mean is not None:
-            self.load_full_backbone(w_mean, src_model_type)
+            self.load_full_backbone(w_mean, src_bnn)
         else:
             raise RuntimeError("We need pre-trained weight to define model")
         
@@ -53,7 +53,7 @@ class SABTL(torch.nn.Module):
         ### Add Mean, Var, Cov layer ---------------------------------------------------------------
         self.bnn_param = nn.ParameterDict()
 
-        if src_model_type == 'swag':
+        if src_bnn == 'swag':
             ## Mean
             w_mean = w_mean[-self.num_params:]
             self.bnn_param.update({"mean" : nn.Parameter(w_mean)})
@@ -64,8 +64,8 @@ class SABTL(torch.nn.Module):
             else:
                 w_var = torch.rand(self.num_params)
             w_var = torch.clamp(w_var * prior_var_scale, self.var_clamp)
-            w_var = torch.log(w_var)
-            self.bnn_param.update({"log_std" : nn.Parameter(w_var)})        
+            w_std = 0.5*torch.log(w_var)    # log_std       
+            self.bnn_param.update({"log_std" : nn.Parameter(w_std)})      
 
             ## Covariance
             if w_cov_sqrt is not None:
@@ -74,36 +74,37 @@ class SABTL(torch.nn.Module):
                     w_cov_sqrt = torch.cat(w_cov_sqrt, dim=1)         
                 w_cov_sqrt = w_cov_sqrt[:, -self.num_params:]
                 L = w_cov_sqrt.t().matmul(w_cov_sqrt)
-                L += torch.diag(utils.softclip(w_var, std=False))
+                L += torch.diag(w_var)
                 L = torch.cholesky(L)
                 L = torch.tril(L, diagonal=-1)
                 self.bnn_param.update({"cov_sqrt" : nn.Parameter(L)})
                 if torch.sum(torch.isnan(self.bnn_param['cov_sqrt'])) != 0:
                     raise RuntimeError("There's NaN value in lower traingular matrix")
 
-        elif src_model_type == 'la':
+        elif src_bnn == 'la':
             raise RuntimeError("Add Load for Laplace Approximation")
         
-        elif src_model_type == 'vi':
+        elif src_bnn == 'vi':
             raise RuntimeError("Add Load for Variational Inference")
         
-        print(f"Load covariance of weight from pre-trained {src_model_type} model")
+        print(f"Load covariance of weight from pre-trained {src_bnn} model")
         # -----------------------------------------------------------------------------------------------------
         
     
 
-    def load_full_backbone(self, w_mean, src_model_type):
+    def load_full_backbone(self, w_mean, src_bnn):
         '''
         Reform Saved Weight As State Dict
         and Load Pre-Trained Backbone Model
         '''
-        if src_model_type == 'swag':
+        if src_bnn == 'swag':
             unflatten_mean_list = utils.unflatten_like_size(w_mean, self.full_model_shape)
             st_dict = dict()
             for (name, _), w in zip(self.backbone.named_parameters(), unflatten_mean_list):
                 st_dict[name] = w
                 
-        self.backbone.load_state_dict(st_dict)
+        self.backbone.load_state_dict(st_dict, strict=False)
+        ## bn의 running_mean, running_var는 trainable parameter가 아니라 save할 때 제대로 안 됨
 
 
     def forward(self, params, input):
@@ -114,11 +115,12 @@ class SABTL(torch.nn.Module):
         '''
         Sample weight from bnn params
         '''
-        z_ = self.bnn_param['cov_sqrt'].new_empty((self.bnn_param['cov_sqrt'].size(0),), requires_grad=False).normal_()
-        # rand_sample = F.softplus(self.bnn_param['var']) + self.var_clamp # softplus version
-        rand_sample = torch.exp(utils.softclip(self.bnn_param['log_std'])) + self.var_clamp
-        rand_sample = torch.tril(self.bnn_param['cov_sqrt'], diagonal=-1) + torch.diag(rand_sample)
-        rand_sample = rand_sample.matmul(z_)
+        # z_ = self.bnn_param['cov_sqrt'].new_empty((self.bnn_param['cov_sqrt'].size(0),), requires_grad=False).normal_(std=1e-4)
+        z_ = self.bnn_param['cov_sqrt'].new_empty((self.bnn_param['cov_sqrt'].size(0),), requires_grad=False).normal_(std=1e-2) ###
+        
+        rand_sample = (torch.exp(self.bnn_param['log_std']) + self.var_clamp**0.5) * z_
+        rand_sample += self.bnn_param['cov_sqrt'].matmul(z_)
+        
         # update sample with mean and scale
         sample = self.bnn_param['mean'] + scale**0.5 * rand_sample
         return sample, z_
@@ -128,28 +130,15 @@ class SABTL(torch.nn.Module):
         '''
         Compute gradient of log probability w.r.t bnn params
         '''
-        # soft_var = F.softplus(self.bnn_param['var']) + self.var_clamp # softplus version
-        soft_std = torch.exp(utils.softclip(self.bnn_param['log_std'])) +self.var_clamp
-
+        # soft_std = torch.exp(utils.softclip(self.bnn_param['log_std'])) + 1e-1
+        soft_std = torch.exp(self.bnn_param['log_std']) + self.var_clamp**0.5
         covar = torch.tril(self.bnn_param['cov_sqrt'], diagonal=-1) + torch.diag(soft_std)
         covar = covar.matmul(covar.t())
-        covar += torch.diag(torch.ones_like(soft_std) * self.var_clamp)
-
-        log_prob = torch.log(torch.det(covar))
-        dev = (params - self.bnn_param['mean']).reshape(-1, 1)
-        try:
-            tmp = torch.inverse(covar) * (dev.matmul(dev.t()))
-        except:
-            tmp = torch.linalg.pinv(covar) * (dev.matmul(dev.t()))
-        log_prob += torch.trace(tmp)
-        log_prob = -0.5 * log_prob
         
+        qdist = MultivariateNormal(self.bnn_param['mean'], covar)
+        with gpytorch.settings.num_trace_samples(10) and gpytorch.settings.max_cg_iterations(25):
+            log_prob =  qdist.log_prob(params)
         
-        # qdist = MultivariateNormal(self.bnn_param['mean'], covar)
-        # with gpytorch.settings.num_trace_samples(10) and gpytorch.settings.max_cg_iterations(25):
-        #     log_prob =  qdist.log_prob(params)
-        
-
         ## Fisher Inverse w.r.t. mean
         # \nabla_\mean p(w | \theta)
         mean_fi = torch.autograd.grad(log_prob, self.bnn_param['mean'], retain_graph=True)
@@ -157,7 +146,8 @@ class SABTL(torch.nn.Module):
         mean_fi = 1 / (1 + eta * mean_fi)
 
         # # ## Fisher Inverse w.r.t. variance
-        std_fi = torch.autograd.grad(log_prob, soft_std, retain_graph=True)
+        # std_fi = torch.autograd.grad(log_prob, soft_std, retain_graph=True)
+        std_fi = torch.autograd.grad(log_prob, self.bnn_param['log_std'], retain_graph=True)
         std_fi = std_fi[0]**2
         std_fi = 1 / (1 + eta * std_fi)
         
@@ -185,8 +175,8 @@ class SABTL(torch.nn.Module):
         '''
         Load variance vector (Not std)
         '''
-        # variance = F.softplus(self.bnn_param['var']) + self.var_clamp # softplus version
-        variance = torch.exp(2 * self.bnn_param['log_std'])
+        # variance = torch.exp(utils.softclip(self.bnn_param['log_std'], std=False))
+        variance = torch.exp(2*self.bnn_param['log_std']) + self.var_clamp**0.5
         if unflatten:
             return utils.unflatten_like_size(variance, self.backbone_shape)
         else:
@@ -197,8 +187,8 @@ class SABTL(torch.nn.Module):
         '''
         Load covariance vector
         '''
-        if self.diag_only:
-            raise RuntimeError("No covariance matrix was estimated!")        
+        # if self.diag_only:
+        #     raise RuntimeError("No covariance matrix was estimated!")        
     
         return self.bnn_param['cov_sqrt']
     
@@ -255,10 +245,12 @@ class BSAM(torch.optim.Optimizer):
         '''
         Sample from perturbated bnn parameters with pre-selected z_1, z_2
         '''
-        # rand_sample = F.softplus(self.param_groups[0]['params'][1]) + sabtl_model.var_clamp      # softplus version
-        rand_sample = torch.tril(self.param_groups[0]['params'][2], diagonal=-1)
-        rand_sample += torch.diag(torch.exp(utils.softclip(self.param_groups[0]['params'][1])))
-        rand_sample = rand_sample.matmul(z_)
+        # rand_sample = torch.tril(self.param_groups[0]['params'][2], diagonal=-1)
+        # rand_sample += torch.diag(torch.exp(utils.softclip(self.param_groups[0]['params'][1]))+ sabtl_model.var_clamp**0.5)
+        # rand_sample = rand_sample.matmul(z_)
+        # rand_sample = (torch.exp(utils.softclip(self.param_groups[0]['params'][1])) + 1e-1) * z_
+        rand_sample = (torch.exp(self.param_groups[0]['params'][1]) + sabtl_model.var_clamp**0.5) * z_
+        rand_sample += self.param_groups[0]['params'][2].matmul(z_)
         
         # update sample with mean and scale
         sample = self.param_groups[0]['params'][0] + scale**0.5 * rand_sample

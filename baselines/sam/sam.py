@@ -62,7 +62,21 @@ class SAM(torch.optim.Optimizer):
         self.base_optimizer.param_groups = self.param_groups
 
 
+    def second_sample(self, z_, sabtl_model, scale=1.0):
+        '''
+        Sample from perturbated bnn parameters with pre-selected z_1, z_2
+        '''
+        rand_sample = (torch.exp(self.param_groups[0]['params'][1]) + sabtl_model.var_clamp**0.5) * z_
+        rand_sample += self.param_groups[0]['params'][2].matmul(z_)
+        
+        # update sample with mean and scale
+        sample = self.param_groups[0]['params'][0] + scale**0.5 * rand_sample
+        # change sampled weight type list to dict 
+        return sample
 
+
+
+"""
 ## FisherSAM
 class FSAM(torch.optim.Optimizer):
     def __init__(self, params, base_optimizer, rho=0.05, **kwargs):
@@ -106,3 +120,4 @@ class FSAM(torch.optim.Optimizer):
     @torch.no_grad()
     def step(self, closure=None):
         self.base_optimizer.step(closure)
+"""

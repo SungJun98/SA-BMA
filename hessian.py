@@ -1,4 +1,3 @@
-# %%
 import argparse
 import torch
 import pickle
@@ -11,7 +10,7 @@ from hessian_eigenthings import compute_hessian_eigenthings
 from baselines.swag import swag, swag_utils
 import warnings
 warnings.filterwarnings('ignore')
-# %%
+
 parser = argparse.ArgumentParser(description="Get Hessian of saved model")
 
 parser.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
@@ -24,11 +23,11 @@ parser.add_argument(
 parser.add_argument(
     "--data_path",
     type=str,
-    default=None,
+    default='/data1/lsj9862/data/cifar10',
     help="path to datasets location (default: None)",)
 
-parser.add_argument("--batch_size", type=int, default = 128,
-            help="batch size (default : 128)")
+parser.add_argument("--batch_size", type=int, default = 64,
+            help="batch size (default : 64)")
 
 parser.add_argument("--num_workers", type=int, default=4,
             help="number of workers (default : 4)")
@@ -57,14 +56,13 @@ parser.add_argument(
     action='store_true',
     help ="When model trained with swag (Default : False)"
 )
+
+parser.add_argument(
+    "--last_layer",
+    action='store_true',
+    help ="Calculate the hessian of last layer only"
+)
 #----------------------------------------------------------------
-
-
-## SWAG ---------------------------------------------------------
-# parser.add_argument("--diag_only", action="store_true", default=False, help="Calculate only diagonal covariance")
-# parser.add_argument("--max_num_models", type=int, default=20, help="Number of models to get SWAG statistics")
-#----------------------------------------------------------------
-
 
 ## Arguments for hessian approximate ------------------------------
 parser.add_argument("--num_eigen", type=int, default=5,
@@ -94,35 +92,24 @@ utils.set_seed(args.seed)
 
 
 # Load Data ------------------------------------------------------
-if args.dataset == 'cifar10':
-    tr_loader, val_loader, te_loader, num_classes = data.get_cifar10(args.data_path, args.batch_size,
-                                                                    args.num_workers,
-                                                                    use_validation = args.use_validation)
-elif args.dataset == 'cifar100':
-    tr_loader, val_loader, te_loader, num_classes = data.get_cifar100(args.data_path, args.batch_size,
-                                                                    args.num_workers,
-                                                                    use_validation = args.use_validation)
-
-if not args.use_validation:
-    val_loader = te_loader
+tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(args.dataset,
+                                                            args.data_path,
+                                                            args.batch_size,
+                                                            args.num_workers,
+                                                            args.use_validation)
 
 print(f"Load Data : {args.dataset}")
 #----------------------------------------------------------------
 
-
-
-
 ## Define Model------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device)
-last = False
 
 if args.swag:
     # Load SWAG weight 
     # swag_model = swag.SWAG(copy.deepcopy(model), no_cov_mat=args.diag_only, max_num_models=args.max_num_models).to(args.device)
     if args.load_path is not None:
-        last = True
         checkpoint = torch.load(args.load_path)    
-        model.load_state_dict(checkpoint["state_dict"])
+        model.load_state_dict(checkpoint)
         
     # Get bma weights list
     bma_load_paths = sorted(os.listdir(args.swag_load_path))
@@ -143,7 +130,7 @@ if args.swag:
 
         # get sampled model
         bma_sample = torch.load(f"{args.swag_load_path}/{path}")
-        bma_state_dict = utils.list_to_state_dict(model, bma_sample, last=last)
+        bma_state_dict = utils.list_to_state_dict(model, bma_sample, last=args.last_layer)
         model.load_state_dict(bma_state_dict, strict=False)
         
         if args.batch_norm:
@@ -163,8 +150,8 @@ if args.swag:
                     tr_loader,
                     criterion,
                     num_eigenthings=args.num_eigen,
-                    mode="lanczos",
-                    # power_iter_steps=args.num_steps,
+                    mode="lanczos", #"power_iter"
+                    # power_iter_steps=50,
                     max_possible_gpu_samples=args.max_possible_gpu_samples,
                     # momentum=args.momentum,
                     use_gpu=True,
@@ -176,7 +163,7 @@ if args.swag:
             print(f"Train Eigenvalues for {cnt}-th bma model : {tr_eigenvals}")
 
         except:
-            print(f"Numerical Issue on {cnt}-th model with train data")
+           print(f"Numerical Issue on {cnt}-th model with train data")
         
         ## save tr_eign as pickle
         with open(f'{args.swag_load_path}/tr_eigenval_list.pickle', 'wb') as f:
@@ -191,8 +178,8 @@ if args.swag:
         #             te_loader,
         #             criterion,
         #             num_eigenthings=args.num_eigen,
-        #             mode="lanczos",
-        #             # power_iter_steps=args.num_steps,
+        #             mode="power_iter", #"lanczos",
+        #             power_iter_steps=50,
         #             max_possible_gpu_samples=args.max_possible_gpu_samples,
         #             # momentum=args.momentum,
         #             use_gpu=True,
@@ -214,10 +201,6 @@ if args.swag:
 
 
 else:
-    # check performance
-    res = utils.eval(te_loader, model, criterion, args.device)
-    print(f"Test Accuracy : {res['accuracy']:8.4f}% / ECE : {res['ece']} / NLL : {res['nll']}")
-    
     # get eigenvalue for train set
     tr_eigenvals, _ = compute_hessian_eigenthings(
                 model,

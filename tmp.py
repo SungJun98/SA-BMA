@@ -21,24 +21,31 @@ warnings.filterwarnings('ignore')
 seed = 0
 utils.set_seed(seed)
 
-device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:4" if torch.cuda.is_available() else "cpu")
 
 tr_loader, val_loader, te_loader, num_classes = data.get_cifar10(data_path = "/data1/lsj9862/data/cifar10/",
                                                             batch_size = 64,
                                                             num_workers = 4,
                                                             use_validation = True)
 
-from models import resnet_noBN
-model = resnet_noBN.resnet18(num_classes=num_classes).to(device)
+# from models import resnet_noBN
+# model = resnet_noBN.resnet18(num_classes=num_classes).to(device)
+
+import torch.nn as nn
+from torchvision.models import resnet18
+model = resnet18(pretrained=True)
+in_features = model.fc.in_features
+model.fc = nn.Linear(in_features, num_classes)
+
 utils.freeze_fe(model)
 
 # %%
-w_mean = torch.load("/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_mean.pt")
-w_var = torch.load("/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_variance.pt") 
-w_covmat = torch.load("/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_covmat.pt")
+w_mean = torch.load("/data2/lsj9862/exp_result/cifar10/resnet18/last_swag-sgd_swag_lr_300/20_51_1_0.0005/last_swag-sgd_best_val_mean.pt")
+w_var = torch.load("/data2/lsj9862/exp_result/cifar10/resnet18/last_swag-sgd_swag_lr_300/20_51_1_0.0005/last_swag-sgd_best_val_variance.pt") 
+w_covmat = torch.load("/data2/lsj9862/exp_result/cifar10/resnet18/last_swag-sgd_swag_lr_300/20_51_1_0.0005/last_swag-sgd_best_val_covmat.pt")
 
 # %%
-sabtl_model = sabtl.SABTL(copy.deepcopy(model), src_model_type='swag', w_mean = w_mean, w_var=w_var, w_cov_sqrt=w_covmat).to(device)
+sabtl_model = sabtl.SABTL(copy.deepcopy(model), src_bnn='swag', w_mean = w_mean, w_var=w_var, w_cov_sqrt=w_covmat).to(device)
 
 
 # %%
@@ -46,7 +53,7 @@ criterion = torch.nn.CrossEntropyLoss()
 
 # %%
 ## BSAM
-lr_init = 0.05 ; rho = 0.05
+lr_init = 0.01 ; rho = 0.1
 
 base_optimizer = torch.optim.SGD
 optimizer = sabtl.BSAM(sabtl_model.bnn_param.values(), base_optimizer, rho=rho, lr=lr_init, momentum=0.9,
@@ -65,12 +72,11 @@ best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; cnt=0; best_val_loss=9999
 print("Start Training!!")
 for epoch in range(int(epochs)):
     ## Check parameter scales (Debugging) -------------------------------------------
-    # print(f"BSAM : {num} times / Skip BSAM : {skip_num} times")
     print(f"max(mean) : {torch.max(sabtl_model.bnn_param['mean'])}   \
             / min(mean) :{torch.min(sabtl_model.bnn_param['mean'])} \
             / nan(mean) {torch.sum(torch.isnan(sabtl_model.bnn_param['mean']))}") 
-    print(f"max(std) : {torch.max(torch.exp(utils.softclip(sabtl_model.bnn_param['log_std'])))}   \
-            / min(std) :{torch.min(torch.exp(utils.softclip(sabtl_model.bnn_param['log_std'])))} \
+    print(f"max(std) : {torch.max(torch.exp(sabtl_model.bnn_param['log_std']))}   \
+            / min(std) :{torch.min(torch.exp(sabtl_model.bnn_param['log_std']))} \
             / nan(std) {torch.sum(torch.isnan(torch.exp((utils.softclip(sabtl_model.bnn_param['log_std'])))))}") 
     print(f"max(cov_sqrt) : {torch.max(sabtl_model.bnn_param['cov_sqrt'])}   \
             / min(cov_sqrt) :{torch.min(sabtl_model.bnn_param['cov_sqrt'])} \
@@ -135,16 +141,6 @@ for epoch in range(int(epochs)):
         correct += (pred.argmax(1) == y).type(torch.float).sum().item()
         loss_sum += loss.data.item() * X.size(0)
         num_objects_current += X.size(0)
-        
-        print(f"max(mean) : {torch.max(sabtl_model.bnn_param['mean'])}   \
-            / min(mean) :{torch.min(sabtl_model.bnn_param['mean'])} \
-            / nan(mean) {torch.sum(torch.isnan(sabtl_model.bnn_param['mean']))}") 
-        print(f"max(std) : {torch.max(torch.exp(utils.softclip(sabtl_model.bnn_param['log_std'])))}   \
-            / min(std) :{torch.min(torch.exp(utils.softclip(sabtl_model.bnn_param['log_std'])))} \
-            / nan(std) {torch.sum(torch.isnan(torch.exp((utils.softclip(sabtl_model.bnn_param['log_std'])))))}") 
-        print(f"max(cov_sqrt) : {torch.max(sabtl_model.bnn_param['cov_sqrt'])}   \
-            / min(cov_sqrt) :{torch.min(sabtl_model.bnn_param['cov_sqrt'])} \
-            / nan(cov_sqrt) {torch.sum(torch.isnan(sabtl_model.bnn_param['cov_sqrt']))}") 
         
         
     tr_loss = loss_sum / num_objects_current
