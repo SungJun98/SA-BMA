@@ -48,7 +48,7 @@ parser.add_argument(
     default='/data1/lsj9862/data/cifar10',
     help="path to datasets location",)
 
-parser.add_argument("--batch_size", type=int, default=64,
+parser.add_argument("--batch_size", type=int, default=256,
             help="batch size")
 
 parser.add_argument("--num_workers", type=int, default=4,
@@ -102,11 +102,12 @@ parser.add_argument("--t_max", type=int, default=300, help="T_max for Cosine Ann
 
 ## SABTL ---------------------------------------------------------
 parser.add_argument("--swa_lr", type=float, default=0.05, help="Learning rate for SWAG")
-
-# parser.add_argument("--z_scale", type=float, default=1e-2, help="Sampling scale for weight")
-
 parser.add_argument("--src_bnn", type=str, default="swag", choices=["swag", "la", "vi"],
         help="Type of pre-trained BNN model")
+# parser.add_argument("--z_scale", type=float, default=1e-2, help="Sampling scale for weight")
+parser.add_argument("--diag_only", action="store_true", default=False, help="Consider only diagonal variance")
+parser.add_argument("--low_rank", type=int, default=20, help="Low-rank component")
+
 parser.add_argument("--mean_path", type=str, default="/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_mean.pt",
     help="path to load saved mean of swag model for transfer learning (default: None)")
 parser.add_argument("--var_path", type=str, default="/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_variance.pt",
@@ -159,7 +160,6 @@ print(f"Load Data : {args.dataset}")
 
 # Define Model------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
-utils.freeze_fe(model)
 
 w_mean = torch.load(args.mean_path)
 w_var = torch.load(args.var_path) 
@@ -167,7 +167,9 @@ w_covmat = torch.load(args.covmat_path)
 sabtl_model = sabtl.SABTL(copy.deepcopy(model),
                         src_bnn=args.src_bnn,
                         w_mean = w_mean,
+                        diag_only=args.diag_only,
                         w_var=w_var,
+                        low_rank=args.low_rank,
                         w_cov_sqrt=w_covmat,
                         ).to(args.device)
 #----------------------------------------------------------------
@@ -244,7 +246,7 @@ for epoch in range(start_epoch, int(args.epochs)):
     else:
         lr = optimizer.param_groups[0]['lr']
         
-    # train
+    ## train
     if args.optim == "sgd":
         tr_res = utils.train_sabtl_sgd(tr_loader, sabtl_model, criterion, optimizer, args.device, scaler)
     elif args.optim == "sam":
@@ -253,7 +255,7 @@ for epoch in range(start_epoch, int(args.epochs)):
         tr_res = utils.train_sabtl_bsam(tr_loader, sabtl_model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
         
     # validation / test
-    params, _ = sabtl_model.sample(0.0)
+    params, _, _ = sabtl_model.sample(0.0)
     params = utils.format_weights(params, sabtl_model)
     val_res = utils.eval_sabtl(val_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
 
@@ -281,9 +283,10 @@ for epoch in range(start_epoch, int(args.epochs)):
         "min(mean)" : torch.min(sabtl_model.bnn_param['mean']),
         "max(std)" : torch.max(torch.exp(sabtl_model.bnn_param['log_std'])),
         "min(std)" : torch.min(torch.exp(sabtl_model.bnn_param['log_std'])),
-        "max(cov_sqrt)" : torch.max(sabtl_model.bnn_param['cov_sqrt']),
-        "min(cov_sqrt)" : torch.min(sabtl_model.bnn_param['cov_sqrt']),
         })
+    if not args.diag_only:
+        wandb.log({"max(cov_sqrt)" : torch.max(sabtl_model.bnn_param['cov_sqrt']),
+            "min(cov_sqrt)" : torch.min(sabtl_model.bnn_param['cov_sqrt']),})
 
     # Save best model (Early Stopping)
     if val_res['loss'] < best_val_loss: #### 지금 loss scale이...
@@ -377,7 +380,7 @@ utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, Tru
 
 
 ### MAP Prediction
-params, _ = sabtl_model.sample(0)
+params, _, _ = sabtl_model.sample(0)
 params = utils.format_weights(params, sabtl_model)
 
 res = utils.eval_sabtl(te_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)

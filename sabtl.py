@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import numpy as np
 
 import utils
-from baselines.swag import swag_utils
 
 import gpytorch
 from gpytorch.lazy import RootLazyTensor, DiagLazyTensor, AddedDiagLazyTensor
@@ -16,21 +15,24 @@ class SABTL(torch.nn.Module):
         backbone,
         src_bnn = 'swag',
         w_mean = None,
+        diag_only = False,
         w_var=None,
         prior_var_scale = 1,
+        low_rank = 20,
         w_cov_sqrt=None,
         prior_cov_scale = 1,
         var_clamp = 1e-4,
     ):
         super(SABTL, self).__init__()
         
-        for p in backbone.parameters():
-            p.requires_grad = False
-
-        
         # setting for covariance
         self.var_clamp = var_clamp
-        self.backbone = backbone        
+        self.diag_only = diag_only
+        self.low_rank = low_rank
+        
+        self.backbone = backbone
+        for p in backbone.parameters():
+            p.requires_grad = False
         self.full_model_shape = [p.shape for p in backbone.parameters()]
         
         ## Load Pre-Trained Model
@@ -68,18 +70,23 @@ class SABTL(torch.nn.Module):
             self.bnn_param.update({"log_std" : nn.Parameter(w_std)})      
 
             ## Covariance
-            if w_cov_sqrt is not None:
-                if type(w_cov_sqrt) == list:
-                    # cat covmat list as matrix
-                    w_cov_sqrt = torch.cat(w_cov_sqrt, dim=1)         
-                w_cov_sqrt = w_cov_sqrt[:, -self.num_params:]
-                L = w_cov_sqrt.t().matmul(w_cov_sqrt)
-                L += torch.diag(w_var)
-                L = torch.cholesky(L)
-                L = torch.tril(L, diagonal=-1)
-                self.bnn_param.update({"cov_sqrt" : nn.Parameter(L)})
-                if torch.sum(torch.isnan(self.bnn_param['cov_sqrt'])) != 0:
-                    raise RuntimeError("There's NaN value in lower traingular matrix")
+            if not self.diag_only:
+                if w_cov_sqrt is not None:
+                    if type(w_cov_sqrt) == list:
+                        # cat covmat list as matrix
+                        w_cov_sqrt = torch.cat(w_cov_sqrt, dim=1)         
+                    w_cov_sqrt = w_cov_sqrt[:, -self.num_params:]
+                    if self.low_rank == 0:
+                        L = w_cov_sqrt.t().matmul(w_cov_sqrt)
+                        L += torch.diag(w_var)
+                        L = torch.cholesky(L)
+                        L = torch.tril(L, diagonal=-1)
+                        self.bnn_param.update({"cov_sqrt" : nn.Parameter(L)})
+                        if torch.sum(torch.isnan(self.bnn_param['cov_sqrt'])) != 0:
+                            raise RuntimeError("There's NaN value in lower traingular matrix")
+                    else:
+                        self.low_rank = w_cov_sqrt.size(0)
+                        self.bnn_param.update({"cov_sqrt" : nn.Parameter(w_cov_sqrt)})
 
         elif src_bnn == 'la':
             raise RuntimeError("Add Load for Laplace Approximation")
@@ -111,32 +118,54 @@ class SABTL(torch.nn.Module):
         return nn.utils.stateless.functional_call(self.backbone, params, input)
     
     
-    def sample(self, scale=1.0):
+    def sample(self, z_scale=1.0):
         '''
         Sample weight from bnn params
         '''
-        # z_ = self.bnn_param['cov_sqrt'].new_empty((self.bnn_param['cov_sqrt'].size(0),), requires_grad=False).normal_(std=1e-4)
-        z_ = self.bnn_param['cov_sqrt'].new_empty((self.bnn_param['cov_sqrt'].size(0),), requires_grad=False).normal_(std=1e-2) ###
+        if not self.diag_only:
+            if self.low_rank == 0:
+                z_1 = self.bnn_param['cov_sqrt'].new_empty((self.bnn_param['cov_sqrt'].size(0),), requires_grad=False).normal_(std=z_scale) ###
+                rand_sample = (torch.exp(self.bnn_param['log_std']) + self.var_clamp**0.5) * z_1
+                rand_sample += self.bnn_param['cov_sqrt'].matmul(z_1)
+                z_2 = None
+                sample = self.bnn_param['mean'] + rand_sample
+
+            else:
+                z_1 = torch.randn_like(self.bnn_param['log_std'], requires_grad=False) * z_scale
+                rand_sample = torch.exp(self.bnn_param['log_std']) * z_1
+                z_2 = self.bnn_param['cov_sqrt'].new_empty((self.bnn_param['cov_sqrt'].size(0),), requires_grad=False).normal_(std=z_scale)
+                cov_sample = self.bnn_param['cov_sqrt'].t().matmul(z_2)
+                cov_sample /= (self.low_rank - 1)**0.5
+                rand_sample += cov_sample
+                sample = self.bnn_param['mean'] + 0.5**0.5 * rand_sample
+                
+        else:
+            z_1 = torch.randn_like(self.bnn_param['log_std'], requires_grad=False) * z_scale
+            rand_sample = torch.exp(self.bnn_param['log_std']) * z_1
+            z_2 = None
+            sample = self.bnn_param['mean'] + rand_sample
         
-        rand_sample = (torch.exp(self.bnn_param['log_std']) + self.var_clamp**0.5) * z_
-        rand_sample += self.bnn_param['cov_sqrt'].matmul(z_)
-        
-        # update sample with mean and scale
-        sample = self.bnn_param['mean'] + scale**0.5 * rand_sample
-        return sample, z_
+        return sample, z_1, z_2
         
         
     def fish_inv(self, params, eta=1.0):
         '''
         Compute gradient of log probability w.r.t bnn params
         '''
-        # soft_std = torch.exp(utils.softclip(self.bnn_param['log_std'])) + 1e-1
         soft_std = torch.exp(self.bnn_param['log_std']) + self.var_clamp**0.5
-        covar = torch.tril(self.bnn_param['cov_sqrt'], diagonal=-1) + torch.diag(soft_std)
-        covar = covar.matmul(covar.t())
+        if not self.diag_only:
+            if self.low_rank == 0:
+                covar = torch.tril(self.bnn_param['cov_sqrt'], diagonal=-1) + torch.diag(soft_std)
+                covar = covar.matmul(covar.t())
+            else:
+                cov_mat_lt = RootLazyTensor(self.bnn_param['cov_sqrt'].t())
+                var_lt = DiagLazyTensor(2*soft_std + self.var_clamp)
+                covar = AddedDiagLazyTensor(var_lt, cov_mat_lt)
+        else:
+            covar = torch.diag(soft_std**2)
         
         qdist = MultivariateNormal(self.bnn_param['mean'], covar)
-        with gpytorch.settings.num_trace_samples(10) and gpytorch.settings.max_cg_iterations(25):
+        with gpytorch.settings.num_trace_samples(1) and gpytorch.settings.max_cg_iterations(25):
             log_prob =  qdist.log_prob(params)
         
         ## Fisher Inverse w.r.t. mean
@@ -153,13 +182,19 @@ class SABTL(torch.nn.Module):
         
         ## Fisher Inverse w.r.t. covariance
         # \nabla_\cov p(w | \theta)
-        cov_fi = torch.autograd.grad(log_prob, self.bnn_param['cov_sqrt'], retain_graph=True)
-        cov_fi = cov_fi[0]**2
-        cov_fi = 1 / (1 + eta * cov_fi)
-        cov_fi = torch.tril(cov_fi, diagonal=-1)
+        if not self.diag_only:
+            cov_fi = torch.autograd.grad(log_prob, self.bnn_param['cov_sqrt'], retain_graph=True)
+            cov_fi = cov_fi[0]**2
+            cov_fi = 1 / (1 + eta * cov_fi)
+            if self.low_rank == 0:
+                cov_fi = torch.tril(cov_fi, diagonal=-1)
         
-        return [mean_fi, std_fi, cov_fi]
+            return [mean_fi, std_fi, cov_fi]
 
+        else:
+            return [mean_fi, std_fi]
+
+    
     
     def get_mean_vector(self, unflatten=False):
         '''
@@ -176,7 +211,7 @@ class SABTL(torch.nn.Module):
         Load variance vector (Not std)
         '''
         # variance = torch.exp(utils.softclip(self.bnn_param['log_std'], std=False))
-        variance = torch.exp(2*self.bnn_param['log_std']) + self.var_clamp**0.5
+        variance = torch.exp(2*self.bnn_param['log_std']) + self.var_clamp
         if unflatten:
             return utils.unflatten_like_size(variance, self.backbone_shape)
         else:
@@ -187,10 +222,10 @@ class SABTL(torch.nn.Module):
         '''
         Load covariance vector
         '''
-        # if self.diag_only:
-        #     raise RuntimeError("No covariance matrix was estimated!")        
-    
-        return self.bnn_param['cov_sqrt']
+        if self.diag_only:
+            return None
+        else:
+            return self.bnn_param['cov_sqrt']
     
     
     def load_state_dict(self, state_dict, strict=True):
@@ -241,19 +276,23 @@ class BSAM(torch.optim.Optimizer):
             if zero_grad: self.zero_grad()
 
 
-    def second_sample(self, z_, sabtl_model, scale=1.0):
+    def second_sample(self, z_1, z_2, sabtl_model):
         '''
         Sample from perturbated bnn parameters with pre-selected z_1, z_2
         '''
-        # rand_sample = torch.tril(self.param_groups[0]['params'][2], diagonal=-1)
-        # rand_sample += torch.diag(torch.exp(utils.softclip(self.param_groups[0]['params'][1]))+ sabtl_model.var_clamp**0.5)
-        # rand_sample = rand_sample.matmul(z_)
-        # rand_sample = (torch.exp(utils.softclip(self.param_groups[0]['params'][1])) + 1e-1) * z_
-        rand_sample = (torch.exp(self.param_groups[0]['params'][1]) + sabtl_model.var_clamp**0.5) * z_
-        rand_sample += self.param_groups[0]['params'][2].matmul(z_)
+        if not sabtl_model.diag_only:
+            rand_sample = (torch.exp(self.param_groups[0]['params'][1]) + sabtl_model.var_clamp**0.5) * z_1
+            if sabtl_model.low_rank != 0:
+                rand_sample += (self.param_groups[0]['params'][2].t().matmul(z_2)) / (sabtl_model.low_rank - 1)**0.5
+                sample = self.param_groups[0]['params'][0] + 0.5**0.5 * rand_sample
+            else:
+                rand_sample += self.param_groups[0]['params'][2].matmul(z_1)
+                sample = self.param_groups[0]['params'][0] + rand_sample
+            
+        else:
+            rand_sample = torch.exp(self.param_groups[0]['params'][1]) * z_1
+            sample = self.param_groups[0]['params'][0] + rand_sample    
         
-        # update sample with mean and scale
-        sample = self.param_groups[0]['params'][0] + scale**0.5 * rand_sample
         # change sampled weight type list to dict 
         sample = utils.format_weights(sample, sabtl_model)
         return sample

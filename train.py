@@ -46,7 +46,7 @@ parser.add_argument(
     default='/data1/lsj9862/data/cifar10',
     help="path to datasets location",)
 
-parser.add_argument("--batch_size", type=int, default=64,
+parser.add_argument("--batch_size", type=int, default=256,
             help="batch size")
 
 parser.add_argument("--num_workers", type=int, default=4,

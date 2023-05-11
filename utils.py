@@ -379,7 +379,7 @@ def train_sabtl_sgd(dataloader, sabtl_model, criterion, optimizer, device, scale
         X, y = X.to(device), y.to(device)
            
         # Sample weight
-        params, _ = sabtl_model.sample(1.0)
+        params, _, _ = sabtl_model.sample(1.0)
         # Change weight sample shape to input model
         params = format_weights(params, sabtl_model)
 
@@ -392,7 +392,7 @@ def train_sabtl_sgd(dataloader, sabtl_model, criterion, optimizer, device, scale
         optimizer.zero_grad()
         
         # ### Checking accuracy with MAP (Mean) solution
-        params, _ = sabtl_model.sample(0.0)
+        params, _, _ = sabtl_model.sample(0.0)
         params = format_weights(params, sabtl_model)
         pred = sabtl_model(params, X)
         correct += (pred.argmax(1) == y).type(torch.float).sum().item()
@@ -413,7 +413,7 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
         X, y = X.to(device), y.to(device)
            
         # Sample weight
-        params, z_ = sabtl_model.sample(1.0)        
+        params, z_1, z_2 = sabtl_model.sample(1.0)        
         # Change weight sample shape to input model
         params = format_weights(params, sabtl_model)
 
@@ -439,7 +439,7 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
 
         
         ## second forward-backward pass
-        params = optimizer.second_sample(z_, sabtl_model, scale=1.0)
+        params = optimizer.second_sample(z_1, z_2, sabtl_model)
         params = format_weights(params, sabtl_model)
         
         with torch.cuda.amp.autocast():
@@ -453,7 +453,7 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
         second_step_scaler.update()
 
         # ### Checking accuracy with MAP (Mean) solution
-        params, _ = sabtl_model.sample(0.0)
+        params, _, _ = sabtl_model.sample(0.0)
         params = format_weights(params, sabtl_model)
         pred = sabtl_model(params, X)
         correct += (pred.argmax(1) == y).type(torch.float).sum().item()
@@ -473,14 +473,13 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, firs
     num_objects_current = 0
     for batch, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
-           
         # Sample weight
-        params, z_ = sabtl_model.sample(1.0)
+        params, z_1, z_2 = sabtl_model.sample(1.0)    
+
         # compute Fisher inverse
         fish_inv = sabtl_model.fish_inv(params)
         # Change weight sample shape to input model
         params = format_weights(params, sabtl_model)
-
 
         ## first forward & backward
         with torch.cuda.amp.autocast():
@@ -500,12 +499,11 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, firs
         else:
             # if invalid graident, skip sam and revert to single optimization step
             optimizer.zero_grad()
-            sam_first_step_applied = False  
+            sam_first_step_applied = False
         first_step_scaler.update()
-
         
         ## second forward-backward pass
-        params = optimizer.second_sample(z_, sabtl_model, scale=1.0)
+        params = optimizer.second_sample(z_1, z_2, sabtl_model)
         
         with torch.cuda.amp.autocast():
             pred = sabtl_model(params, X)
@@ -518,13 +516,13 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, firs
         second_step_scaler.update()
 
         # ### Checking accuracy with MAP (Mean) solution
-        params, _ = sabtl_model.sample(0.0)
+        params, _, _ = sabtl_model.sample(0.0)
         params = format_weights(params, sabtl_model)
         pred = sabtl_model(params, X)
         correct += (pred.argmax(1) == y).type(torch.float).sum().item()
         loss_sum += loss.data.item() * X.size(0)
         num_objects_current += X.size(0)
-        
+            
     return{
         "loss" : loss_sum / num_objects_current,
         "accuracy" : correct / num_objects_current * 100.0,
@@ -689,9 +687,9 @@ def bma_sabtl(te_loader, sabtl_model, bma_num_models,
         for i in range(bma_num_models):
             
             if i == 0:
-                params, _ = sabtl_model.sample(0)
+                params, _, _ = sabtl_model.sample(0)
             else:
-                params, _ = sabtl_model.sample(1.0)
+                params, _, _  = sabtl_model.sample(1.0)
             
             # save sampled weight for bma
             if bma_save_path is not None:
@@ -734,6 +732,7 @@ def bma_sabtl(te_loader, sabtl_model, bma_num_models,
     }
 
 
+
 def calibration_curve(predictions, targets, num_bins):
     confidences = np.max(predictions, 1)
     step = (confidences.shape[0] + num_bins - 1) // num_bins
@@ -770,6 +769,7 @@ def calibration_curve(predictions, targets, num_bins):
 
     out = {"confidence": xs, "accuracy": ys, "p": zs, "ece": ece}
     return out
+
 
 
 def save_reliability_diagram(method, optim, save_path, unc, bma=False):
