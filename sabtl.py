@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 
 import utils
+from baselines.swag.swag_utils import flatten
 
 import gpytorch
 from gpytorch.lazy import RootLazyTensor, DiagLazyTensor, AddedDiagLazyTensor
@@ -14,6 +15,7 @@ class SABTL(torch.nn.Module):
         self,
         backbone,
         src_bnn = 'swag',
+        pre_trained = True,
         w_mean = None,
         diag_only = False,
         w_var=None,
@@ -31,15 +33,18 @@ class SABTL(torch.nn.Module):
         self.low_rank = low_rank
         
         self.backbone = backbone
+        
+        self.full_model_shape = list()
         for p in backbone.parameters():
             p.requires_grad = False
-        self.full_model_shape = [p.shape for p in backbone.parameters()]
+            self.full_model_shape.append(p.shape)
         
         ## Load Pre-Trained Model
-        if w_mean is not None:
-            self.load_full_backbone(w_mean, src_bnn)
-        else:
-            raise RuntimeError("We need pre-trained weight to define model")
+        if pre_trained == False:
+            if w_mean is not None:
+                self.load_full_backbone(w_mean, src_bnn)
+            else:
+                raise RuntimeError("We need pre-trained weight to define model")
         
         # Set Last Layer Name
         for name, _ in self.backbone.named_modules():
@@ -65,7 +70,7 @@ class SABTL(torch.nn.Module):
                 w_var = w_var[-self.num_params:]
             else:
                 w_var = torch.rand(self.num_params)
-            w_var = torch.clamp(w_var * prior_var_scale, self.var_clamp)
+            w_var = torch.clamp(w_var, self.var_clamp)
             w_std = 0.5*torch.log(w_var)    # log_std       
             self.bnn_param.update({"log_std" : nn.Parameter(w_std)})      
 
@@ -260,19 +265,13 @@ class BSAM(torch.optim.Optimizer):
                 for idx, p in enumerate(group["params"]):
                     if p.grad is None: continue
                     self.state[p]["old_p"] = p.data.clone()
-                    ### Calculate perturbation Delta_theta --------------------------------------
-                    # print(f"p  nan count : {torch.sum(torch.isnan(p))}")
+                    ## Calculate perturbation Delta_theta --------------------------------------
                     Delta_p = group["rho"] * fish_inv[idx] * p.grad
-                    # print(f"Delta p nan count : {torch.sum(torch.isnan(Delta_p))}")
                     Delta_p = Delta_p / (torch.sqrt(p.grad * fish_inv[idx] * p.grad) + 1e-6) # add small value for numericaly stability
-                    # print(f"Full Delta nan count : {torch.sum(torch.isnan(Delta_p))}")
-                    # ---------------------------------------------------------------------------    
-                            
-                    ### theta + Delta_theta
+                    # ---------------------------------------------------------------------------                        
+                    ## theta + Delta_theta
                     p.add_(Delta_p)  # climb to the local maximum "w + e(w)"
-                    # print(f"perturbated p nan count : {torch.sum(torch.isnan(p))}")
                     # ---------------------------------------------------------------------------
-
             if zero_grad: self.zero_grad()
 
 

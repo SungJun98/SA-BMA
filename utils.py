@@ -1,3 +1,12 @@
+"""
+TODO
+utils를 세분화해서 나눠야 할 것 같음
+1. sabtl 관련 utils
+2. swag 관련 utils (swag_utils 통폐합)
+3. 나머지 utils
++ la, vi도 들어오면 얘네 관련 utils로 쪼개는게 관리하기 더 편할 듯
+"""
+
 import numpy as np
 import pickle
 import os
@@ -9,7 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from baselines.swag.swag_utils import bn_update, predict
+from baselines.swag.swag_utils import flatten, bn_update, predict
 from baselines.swag import swag
 
 from baselines.sam import sam_utils
@@ -37,53 +46,52 @@ def set_save_path(args):
     '''
     Set save path following the method / model / dataset / optimizer / hyperparameters
     '''
-    if args.method == "swag":
-        if args.optim != "sgd":
-            save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}/{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
-        else:
-            save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}/{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"    
-    elif args.method == "last_swag":
-        if args.optim != "sgd":
-            save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}_{args.t_max}/{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
-        else:
-            save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}_{args.t_max}/{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"    
-    elif args.method == 'sabtl':
-        if args.optim != "sgd":
-            save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}_{args.src_bnn}_{args.optim}_{args.scheduler}_{args.t_max}/{args.lr_init}_{args.wd}_{args.momentum}_{args.rho}"
-        else:
-            save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}_{args.src_bnn}_{args.optim}_{args.scheduler}_{args.t_max}/{args.lr_init}_{args.wd}_{args.momentum}"
+    ### scheduler part
+    if args.scheduler == "cos_anneal":
+        save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}({args.t_max})"
+    elif args.scheduler == "swag_lr":
+        save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}({args.swa_lr})"
+    elif args.scheduler == "cos_decay":
+        # save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}({args.first_cycle_steps}/{args.cycle_mult}/{args.min_lr}/{args.warmup_steps}/{args.decay_ratio})"
+        save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}({args.t_initial}/{args.lr_min}/{args.cycle_mul}/{args.cycle_decay}/{args.cycle_limit}/{args.warmup_t})"
+    
+    ## learning hyperparameter part
+    if args.method in ["swag", "last_swag"]:
+        save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
     else:
-        save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}_{args.scheduler}/{args.lr_init}_{args.wd}_{args.momentum}_{args.rho}"    
+        save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.momentum}"
+        
+    if args.optim != "sgd":
+        save_path_ = f"{save_path_}_{args.rho}"
     
     return save_path_
-
+    
 
 
 def set_wandb_runname(args):
     '''
     Set wandb run name following the method / model / dataset / optimizer / hyperparameters
     '''
-    if args.method == "swag":
-        if args.optim != "sgd":
-            run_name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
-        else:
-            run_name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"    
-
-    elif args.method == 'last_swag':
-        if args.optim != "sgd":
-            run_name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}_{args.rho}"
-        else:
-            run_name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}_{args.swa_lr}"    
-
-    elif args.method == 'sabtl':
-        if args.optim != "sgd":
-            run_name = f"{args.method}_{args.src_bnn}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})_{args.lr_init}_{args.wd}_{args.rho}"
-        else:
-            run_name = f"{args.method}_{args.src_bnn}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})_{args.lr_init}_{args.wd}"
+    ### scheduler part
+    if args.scheduler == "cos_anneal":
+        run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})"
+    elif args.scheduler == "swag_lr":
+        run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.swa_lr})"
+    elif args.scheduler == "cos_decay":
+        # run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.first_cycle_steps}/{args.cycle_mult}/{args.min_lr}/{args.warmup_steps}/{args.decay_ratio})"
+        run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_initial}/{args.lr_min}/{args.cycle_mul}/{args.cycle_decay}/{args.cycle_limit}/{args.warmup_t})"
+    
+    ## learning hyperparameter part
+    if args.method in ["swag", "last_swag"]:
+        run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
     else:
-        run_name = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})_{args.lr_init}_{args.wd}"
+        run_name_ = f"{run_name_}/{args.lr_init}_{args.wd}_{args.momentum}"
+        
+    if args.optim != "sgd":
+        run_name_ = f"{run_name_}_{args.rho}"
+    
+    return run_name_
 
-    return run_name
 
 
 
@@ -252,28 +260,6 @@ def nll(outputs, labels):
     return nll
 
 
-class StepLR:
-    def __init__(self, optimizer, learning_rate: float, total_epochs: int):
-        self.optimizer = optimizer
-        self.total_epochs = total_epochs
-        self.base = learning_rate
-
-    def __call__(self, epoch):
-        if epoch < self.total_epochs * 3/10:
-            lr = self.base
-        elif epoch < self.total_epochs * 6/10:
-            lr = self.base * 0.2
-        elif epoch < self.total_epochs * 8/10:
-            lr = self.base * 0.2 ** 2
-        else:
-            lr = self.base * 0.2 ** 3
-
-        for param_group in self.optimizer.param_groups:
-            param_group["lr"] = lr
-
-    def lr(self) -> float:
-        return self.optimizer.param_groups[0]["lr"]
-
 
 # train SGD
 def train_sgd(dataloader, model, criterion, optimizer, device, scaler):
@@ -391,6 +377,11 @@ def train_sabtl_sgd(dataloader, sabtl_model, criterion, optimizer, device, scale
         scaler.update()
         optimizer.zero_grad()
         
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
+        
+        """
         # ### Checking accuracy with MAP (Mean) solution
         params, _, _ = sabtl_model.sample(0.0)
         params = format_weights(params, sabtl_model)
@@ -398,7 +389,7 @@ def train_sabtl_sgd(dataloader, sabtl_model, criterion, optimizer, device, scale
         correct += (pred.argmax(1) == y).type(torch.float).sum().item()
         loss_sum += loss.data.item() * X.size(0)
         num_objects_current += X.size(0)
-        
+        """
     return{
         "loss" : loss_sum / num_objects_current,
         "accuracy" : correct / num_objects_current * 100.0,
@@ -423,6 +414,10 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
             loss = criterion(pred, y)        
         first_step_scaler.scale(loss).backward()
         first_step_scaler.unscale_(optimizer)
+        
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
         
         optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
         
@@ -452,6 +447,7 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
         second_step_scaler.step(optimizer)
         second_step_scaler.update()
 
+        """
         # ### Checking accuracy with MAP (Mean) solution
         params, _, _ = sabtl_model.sample(0.0)
         params = format_weights(params, sabtl_model)
@@ -459,7 +455,7 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
         correct += (pred.argmax(1) == y).type(torch.float).sum().item()
         loss_sum += loss.data.item() * X.size(0)
         num_objects_current += X.size(0)
-        
+        """
     return{
         "loss" : loss_sum / num_objects_current,
         "accuracy" : correct / num_objects_current * 100.0,
@@ -485,9 +481,13 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, firs
         with torch.cuda.amp.autocast():
             pred = sabtl_model(params, X)
             loss = criterion(pred, y)
-        
+
         first_step_scaler.scale(loss).backward()
         first_step_scaler.unscale_(optimizer)
+
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
         
         optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
         
@@ -508,13 +508,14 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, firs
         with torch.cuda.amp.autocast():
             pred = sabtl_model(params, X)
             loss = criterion(pred, y)
+
         second_step_scaler.scale(loss).backward()
-        
         if sam_first_step_applied:
             optimizer.second_step()  
         second_step_scaler.step(optimizer)
         second_step_scaler.update()
 
+        """
         # ### Checking accuracy with MAP (Mean) solution
         params, _, _ = sabtl_model.sample(0.0)
         params = format_weights(params, sabtl_model)
@@ -522,7 +523,7 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, firs
         correct += (pred.argmax(1) == y).type(torch.float).sum().item()
         loss_sum += loss.data.item() * X.size(0)
         num_objects_current += X.size(0)
-            
+        """ 
     return{
         "loss" : loss_sum / num_objects_current,
         "accuracy" : correct / num_objects_current * 100.0,
@@ -574,7 +575,7 @@ def eval_sabtl(loader, sabtl_model, params, criterion, device, num_bins=50, eps=
     '''
     get loss, accuracy, nll and ece for every eval step
     '''
-    
+
     loss_sum = 0.0
     num_objects_total = len(loader.dataset)
 
@@ -677,7 +678,7 @@ def bma(tr_loader, te_loader, model, bma_num_models, num_classes, bma_save_path=
 
 def bma_sabtl(te_loader, sabtl_model, bma_num_models,
             num_classes, criterion, device,
-            bma_save_path=None, eps=1e-8,
+            bma_save_path=None, eps=1e-8, num_bins=50,
             ):
     '''
     run bayesian model averaging in test step
@@ -696,8 +697,8 @@ def bma_sabtl(te_loader, sabtl_model, bma_num_models,
                 torch.save(params, f'{bma_save_path}/bma_model-{i}.pt')
             
             params = format_weights(params, sabtl_model)
-            res = eval_sabtl(te_loader, sabtl_model, params, criterion, device, num_bins=50, eps=1e-8)
-            
+            res = eval_sabtl(te_loader, sabtl_model, params, criterion, device, num_bins, eps)
+
             print(
                 "SABTL Sample %d/%d. Accuracy: %.2f%% NLL: %.4f"
                 % (i + 1, bma_num_models, res['accuracy'], res['nll'])

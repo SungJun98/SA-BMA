@@ -92,9 +92,44 @@ parser.add_argument("--wd", type=float, default=5e-4, help="weight decay (defaul
 
 parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation ball for SAM / BSAM")
 
-parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "step_lr", "cos_anneal", "swag_lr"])
+parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
 
-parser.add_argument("--t_max", type=int, default=300, help="T_max for Cosine Annealing Learning Rate Scheduler")
+parser.add_argument("--t_max", type=int, default=300, help="T_max (Cosine Annealing)")
+
+# parser.add_argument("--first_cycle_steps", type=int, default=120,
+#                 help="First cycle step size. (Cosine Annealing Warmup Restarts)")
+
+# parser.add_argument("--cycle_mult", type=float, default=1.,
+#                 help="Cycle steps magnification. (Cosine Annealing Warmup Restarts)")
+
+# parser.add_argument("--min_lr", type=float, default=0.001,
+#                 help="Min learning rate. (Cosine Annealing Warmup Restarts)")
+
+# parser.add_argument("--warmup_steps", type=int, default=30,
+#                 help="Linear warmup step size. (Cosine Annealing Warmup Restarts)")
+
+# parser.add_argument("--decay_ratio", type=float, default=0.75,
+#                 help="Decrease rate of max learning rate by cycle. (Cosine Annealing Warmup Restarts)")
+
+parser.add_argument("--t_initial", type=int, default=100,
+                help="First cycle step size. (Cosine Annealing Warmup Restarts)")
+
+parser.add_argument("--lr_min", type=float, default=1e-5,
+                help="Min learning rate. (Cosine Annealing Warmup Restarts)")
+
+parser.add_argument("--cycle_mul", type=float, default=0.9,
+                help="Decrease rate of max learning rate by cycle. (Cosine Annealing Warmup Restarts)")
+
+parser.add_argument("--cycle_decay", type=float, default=1.,
+                help="Decrease rate of cycle length. (Cosine Annealing Warmup Restarts)")
+
+parser.add_argument("--cycle_limit", type=int, default=3,
+                help="Linear warmup step size. (Cosine Annealing Warmup Restarts)")
+
+parser.add_argument("--warmup_t", type=int, default=0,
+                help="Linear warmup step size. (Cosine Annealing Warmup Restarts)")
+
+
 #----------------------------------------------------------------
 
 ## SWAG ---------------------------------------------------------
@@ -187,7 +222,7 @@ elif args.method == "sabtl":
 criterion = torch.nn.CrossEntropyLoss()
 #-------------------------------------------------------------------
 
-# Set Optimizer--------------------------------------
+# Set Optimizer-------------------------------------- (utils로)
 if args.optim == "sgd":
     optimizer = torch.optim.SGD(model.parameters(),
                         lr=args.lr_init, weight_decay=args.wd,
@@ -203,15 +238,58 @@ elif args.optim == "bsam":
 #----------------------------------------------------------------
 
     
-## Set Scheduler-------------------------------------------------------
+## Set Scheduler------------------------------------------------------- (utils로)
 if args.scheduler == "step_lr":
-    from utils import StepLR
-    scheduler = StepLR(optimizer, args.lr_init, args.epochs)
+    # from scheduler import StepLR
+    # scheduler = StepLR(optimizer, args.lr_init, args.epochs)
+    from timm.scheduler.step_lr import StepLRScheduler
+    scheduler = StepLRScheduler(optimizer, decay_rate=0.2, )
+    
 elif args.scheduler == "cos_anneal":
     if args.optim == "sgd":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.t_max)    
     elif args.optim in ["sam", "bsam"]:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer.base_optimizer, T_max=args.t_max)
+        
+elif args.scheduler == "cos_decay":
+    # from scheduler import CosineAnnealingWarmupRestarts
+    # if args.optim == 'sgd':
+    #     scheduler = CosineAnnealingWarmupRestarts(optimizer = optimizer,
+    #                                         first_cycle_steps = args.first_cycle_steps,
+    #                                         cycle_mult = args.cycle_mult,
+    #                                         max_lr = args.lr_init,
+    #                                         min_lr = args.min_lr,
+    #                                         warmup_steps = args.warmup_steps,
+    #                                         decay_ratio = args.decay_ratio,)
+    # elif args.optim in ["sam", "bsam"]:
+    #         scheduler = CosineAnnealingWarmupRestarts(optimizer = optimizer.base_optimizer,
+    #                                         first_cycle_steps = args.first_cycle_steps,
+    #                                         cycle_mult = args.cycle_mult,
+    #                                         max_lr = args.lr_init,
+    #                                         min_lr = args.min_lr,
+    #                                         warmup_steps = args.warmup_steps,
+    #                                         decay_ratio = args.decay_ratio,)
+    from timm.scheduler.cosine_lr import CosineLRScheduler
+    if args.optim == 'sgd':
+        scheduler = CosineLRScheduler(optimizer = optimizer,
+                                    t_initial= args.t_initial,
+                                    lr_min=args.lr_min,
+                                    cycle_mul=args.cycle_mul,
+                                    cycle_decay=args.cycle_decay,
+                                    cycle_limit=args.cycle_limit,
+                                    warmup_t=args.warmup_t,
+                                    warmup_lr_init=args.lr_init,
+                                        )
+    elif args.optim in ["sam", "bsam"]:
+        scheduler = CosineLRScheduler(optimizer = optimizer.base_optimizer,
+                                    t_initial= args.t_initial,
+                                    lr_min=args.lr_min,
+                                    cycle_mul=args.cycle_mul,
+                                    cycle_decay=args.cycle_decay,
+                                    cycle_limit=args.cycle_limit,
+                                    warmup_t=args.warmup_t,
+                                    warmup_lr_init=args.lr_init,
+                                        )
 #-------------------------------------------------------------------
 
 

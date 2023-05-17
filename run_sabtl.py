@@ -94,9 +94,45 @@ parser.add_argument("--wd", type=float, default=5e-4, help="weight decay (defaul
 
 parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation ball for SAM / BSAM")
 
-parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "step_lr", "cos_anneal", "swag_lr"])
+parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
 
-parser.add_argument("--t_max", type=int, default=300, help="T_max for Cosine Annealing Learning Rate Scheduler")
+parser.add_argument("--t_max", type=int, default=300, help="T_max (Cosine Annealing)")
+
+# parser.add_argument("--first_cycle_steps", type=int, default=120,
+#                 help="First cycle step size. (Cosine Annealing Warmup Restarts)")
+
+# parser.add_argument("--cycle_mult", type=float, default=1.,
+#                 help="Cycle steps magnification. (Cosine Annealing Warmup Restarts)")
+
+# parser.add_argument("--min_lr", type=float, default=0.001,
+#                 help="Min learning rate. (Cosine Annealing Warmup Restarts)")
+
+# parser.add_argument("--warmup_steps", type=int, default=30,
+#                 help="Linear warmup step size. (Cosine Annealing Warmup Restarts)")
+
+# parser.add_argument("--decay_ratio", type=float, default=0.75,
+#                 help="Decrease rate of max learning rate by cycle. (Cosine Annealing Warmup Restarts)")
+
+parser.add_argument("--t_initial", type=int, default=100,
+                help="First cycle step size. (Cosine Annealing Warmup Restarts)")
+
+parser.add_argument("--lr_min", type=float, default=1e-5,
+                help="Min learning rate. (Cosine Annealing Warmup Restarts)")
+
+parser.add_argument("--cycle_mul", type=float, default=1.,
+                help="Decrease rate of max learning rate by cycle. (Cosine Annealing Warmup Restarts)")
+
+parser.add_argument("--cycle_decay", type=float, default=0.9,
+                help="Decrease rate of cycle length. (Cosine Annealing Warmup Restarts)")
+
+parser.add_argument("--cycle_limit", type=int, default=3,
+                help="Linear warmup step size. (Cosine Annealing Warmup Restarts)")
+
+parser.add_argument("--warmup_lr_init", type=float, default=5e-3,
+                help="Linear warmup initial learning rate (Cosine Annealing Warmup Restarts)")
+
+parser.add_argument("--warmup_t", type=int, default=0,
+                help="Linear warmup step size. (Cosine Annealing Warmup Restarts)")
 #----------------------------------------------------------------
 
 
@@ -166,6 +202,7 @@ w_var = torch.load(args.var_path)
 w_covmat = torch.load(args.covmat_path)
 sabtl_model = sabtl.SABTL(copy.deepcopy(model),
                         src_bnn=args.src_bnn,
+                        pre_trained=args.pre_trained,
                         w_mean = w_mean,
                         diag_only=args.diag_only,
                         w_var=w_var,
@@ -198,13 +235,55 @@ elif args.optim == "bsam":
 
 ## Set Scheduler-------------------------------------------------------
 if args.scheduler == "step_lr":
-    from utils import StepLR
-    scheduler = StepLR(optimizer, args.lr_init, args.epochs)
+    from timm.scheduler.step_lr import StepLRScheduler
+    scheduler = StepLRScheduler(optimizer, decay_rate=0.2, )
+    
 elif args.scheduler == "cos_anneal":
     if args.optim == "sgd":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.t_max)    
     elif args.optim in ["sam", "bsam"]:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer.base_optimizer, T_max=args.t_max)
+        
+elif args.scheduler == "cos_decay":
+    # from scheduler import CosineAnnealingWarmupRestarts
+    # if args.optim == 'sgd':
+    #     scheduler = CosineAnnealingWarmupRestarts(optimizer = optimizer,
+    #                                         first_cycle_steps = args.first_cycle_steps,
+    #                                         cycle_mult = args.cycle_mult,
+    #                                         max_lr = args.lr_init,
+    #                                         min_lr = args.min_lr,
+    #                                         warmup_steps = args.warmup_steps,
+    #                                         decay_ratio = args.decay_ratio,)
+    # elif args.optim in ["sam", "bsam"]:
+    #         scheduler = CosineAnnealingWarmupRestarts(optimizer = optimizer.base_optimizer,
+    #                                         first_cycle_steps = args.first_cycle_steps,
+    #                                         cycle_mult = args.cycle_mult,
+    #                                         max_lr = args.lr_init,
+    #                                         min_lr = args.min_lr,
+    #                                         warmup_steps = args.warmup_steps,
+    #                                         decay_ratio = args.decay_ratio,)
+    from timm.scheduler.cosine_lr import CosineLRScheduler
+    if args.optim == 'sgd':
+        scheduler = CosineLRScheduler(optimizer = optimizer,
+                                    t_initial= args.t_initial,
+                                    lr_min=args.lr_min,
+                                    cycle_mul=args.cycle_mul,
+                                    cycle_decay=args.cycle_decay,
+                                    cycle_limit=args.cycle_limit,
+                                    warmup_t=args.warmup_t,
+                                    warmup_lr_init=args.warmup_lr_init,
+                                        )
+    elif args.optim in ["sam", "bsam"]:
+        scheduler = CosineLRScheduler(optimizer = optimizer.base_optimizer,
+                                    t_initial= args.t_initial,
+                                    lr_min=args.lr_min,
+                                    cycle_mul=args.cycle_mul,
+                                    cycle_decay=args.cycle_decay,
+                                    cycle_limit=args.cycle_limit,
+                                    warmup_t=args.warmup_t,
+                                    warmup_lr_init=args.warmup_lr_init,
+                                        )
+
 #-------------------------------------------------------------------
 
 ## Resume ---------------------------------------------------------------------------
@@ -280,13 +359,21 @@ for epoch in range(start_epoch, int(args.epochs)):
         "Validation nll (MAP)" : val_res["nll"], "Validation ece (MAP)" : val_res["ece"],
         "lr" : lr,
         "max(mean)" : torch.max(sabtl_model.bnn_param['mean']),
+        "mean(mean)" : torch.mean(sabtl_model.bnn_param['mean']),
+        "std(mean)" : torch.std(sabtl_model.bnn_param['mean']),
         "min(mean)" : torch.min(sabtl_model.bnn_param['mean']),
         "max(std)" : torch.max(torch.exp(sabtl_model.bnn_param['log_std'])),
+        "mean(std)" : torch.mean(torch.exp(sabtl_model.bnn_param['log_std'])),
+        "std(std)" : torch.std(torch.exp(sabtl_model.bnn_param['log_std'])),
         "min(std)" : torch.min(torch.exp(sabtl_model.bnn_param['log_std'])),
-        })
+        },
+        step=epoch)
     if not args.diag_only:
         wandb.log({"max(cov_sqrt)" : torch.max(sabtl_model.bnn_param['cov_sqrt']),
-            "min(cov_sqrt)" : torch.min(sabtl_model.bnn_param['cov_sqrt']),})
+            "mean(cov_sqrt)" : torch.mean(sabtl_model.bnn_param['cov_sqrt']),
+            "std(cov_sqrt)" : torch.std(sabtl_model.bnn_param['cov_sqrt']),
+            "min(cov_sqrt)" : torch.min(sabtl_model.bnn_param['cov_sqrt']),},
+            step=epoch)
 
     # Save best model (Early Stopping)
     if val_res['loss'] < best_val_loss: #### 지금 loss scale이...
@@ -326,8 +413,10 @@ for epoch in range(start_epoch, int(args.epochs)):
     
         
     ## Scheduler step
-    if args.scheduler in ["cos_anneal", "step_lr"]:
+    if args.scheduler == "cos_anneal":
         scheduler.step()
+    elif args.scheduler in ["step_lr", "cos_decay"]:
+        scheduler.step(epoch)
 #------------------------------------------------------------------------------------------------------------
 
 
@@ -347,7 +436,7 @@ os.makedirs(bma_save_path, exist_ok=True)
 
 bma_res = utils.bma_sabtl(te_loader, sabtl_model, args.bma_num_models,
                     num_classes, criterion, args.device,
-                    bma_save_path=bma_save_path, eps=args.eps)
+                    bma_save_path=bma_save_path, eps=args.eps, num_bins=args.num_bins)
 
 bma_predictions = bma_res["predictions"]
 bma_targets = bma_res["targets"]
