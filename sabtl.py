@@ -23,7 +23,7 @@ class SABTL(torch.nn.Module):
         low_rank = 20,
         w_cov_sqrt=None,
         prior_cov_scale = 1,
-        var_clamp = 1e-4,
+        var_clamp = 1e-8,
     ):
         super(SABTL, self).__init__()
         
@@ -164,7 +164,7 @@ class SABTL(torch.nn.Module):
                 covar = covar.matmul(covar.t())
             else:
                 cov_mat_lt = RootLazyTensor(self.bnn_param['cov_sqrt'].t())
-                var_lt = DiagLazyTensor(2*soft_std + self.var_clamp)
+                var_lt = DiagLazyTensor(soft_std**2) #  + self.var_clamp)
                 covar = AddedDiagLazyTensor(var_lt, cov_mat_lt)
         else:
             covar = torch.diag(soft_std**2)
@@ -175,12 +175,14 @@ class SABTL(torch.nn.Module):
         
         ## Fisher Inverse w.r.t. mean
         # \nabla_\mean p(w | \theta)
-        mean_fi = torch.autograd.grad(log_prob, self.bnn_param['mean'], retain_graph=True)
-        mean_fi = mean_fi[0]**2
+        # mean_fi = torch.autograd.grad(log_prob, self.bnn_param['mean'], retain_graph=True)
+        # mean_fi = mean_fi[0]**2
+            
+        mean_fi = torch.inverse(qdist.covariance_matrix) @ (params - self.bnn_param['mean'])    ## calculate derivative manually
+        mean_fi = mean_fi**2
         mean_fi = 1 / (1 + eta * mean_fi)
-
-        # # ## Fisher Inverse w.r.t. variance
-        # std_fi = torch.autograd.grad(log_prob, soft_std, retain_graph=True)
+        
+        ## Fisher Inverse w.r.t. variance
         std_fi = torch.autograd.grad(log_prob, self.bnn_param['log_std'], retain_graph=True)
         std_fi = std_fi[0]**2
         std_fi = 1 / (1 + eta * std_fi)
@@ -192,8 +194,7 @@ class SABTL(torch.nn.Module):
             cov_fi = cov_fi[0]**2
             cov_fi = 1 / (1 + eta * cov_fi)
             if self.low_rank == 0:
-                cov_fi = torch.tril(cov_fi, diagonal=-1)
-        
+                cov_fi = torch.tril(cov_fi, diagonal=-1) 
             return [mean_fi, std_fi, cov_fi]
 
         else:
@@ -267,7 +268,7 @@ class BSAM(torch.optim.Optimizer):
                     self.state[p]["old_p"] = p.data.clone()
                     ## Calculate perturbation Delta_theta --------------------------------------
                     Delta_p = group["rho"] * fish_inv[idx] * p.grad
-                    Delta_p = Delta_p / (torch.sqrt(p.grad * fish_inv[idx] * p.grad) + 1e-6) # add small value for numericaly stability
+                    Delta_p = Delta_p / (torch.sqrt(p.grad * fish_inv[idx] * p.grad) + 1e-12) # add small value for numericaly stability
                     # ---------------------------------------------------------------------------                        
                     ## theta + Delta_theta
                     p.add_(Delta_p)  # climb to the local maximum "w + e(w)"

@@ -36,38 +36,38 @@ class SWAG(torch.nn.Module):
 
     def init_swag_parameters(self, params):
         for mod_name, module in self.base.named_modules():
-            # if not self.last_layer:
-            for name in list(module._parameters.keys()):
-                if module._parameters[name] is None:
-                    continue
+            if not self.last_layer:
+                for name in list(module._parameters.keys()):
+                    if module._parameters[name] is None:
+                        continue
 
-                name_full = f"{mod_name}.{name}".replace(".", "-")
-                data = module._parameters[name].data
-                module._parameters.pop(name)
-                module.register_buffer("%s_mean" % name_full, data.new(data.size()).zero_())
-                module.register_buffer("%s_sq_mean" % name_full, data.new(data.size()).zero_())
+                    name_full = f"{mod_name}.{name}".replace(".", "-")
+                    data = module._parameters[name].data
+                    module._parameters.pop(name)
+                    module.register_buffer("%s_mean" % name_full, data.new(data.size()).zero_())
+                    module.register_buffer("%s_sq_mean" % name_full, data.new(data.size()).zero_())
 
-                if self.no_cov_mat is False:
-                    module.register_buffer("%s_cov_mat_sqrt" % name_full, data.new_empty((0, data.numel())).zero_())
+                    if self.no_cov_mat is False:
+                        module.register_buffer("%s_cov_mat_sqrt" % name_full, data.new_empty((0, data.numel())).zero_())
 
-                params.append((module, name_full))
+                    params.append((module, name_full))
             
-            # else:
-            #     for name in list(module._parameters.keys()):
-            #         if module._parameters[name] is None:
-            #             continue
+            else:
+                for name in list(module._parameters.keys()):
+                    if module._parameters[name] is None:
+                        continue
                     
-            #         if mod_name == 'fc' or mod_name == 'linear' or mod_name == 'classifier':
-            #             name_full = f"{mod_name}.{name}".replace(".", "-")
-            #             data = module._parameters[name].data
-            #             module._parameters.pop(name)
-            #             module.register_buffer("%s_mean" % name_full, data.new(data.size()).zero_())
-            #             module.register_buffer("%s_sq_mean" % name_full, data.new(data.size()).zero_())
+                    if mod_name == 'fc' or mod_name == 'linear' or mod_name == 'classifier':
+                        name_full = f"{mod_name}.{name}".replace(".", "-")
+                        data = module._parameters[name].data
+                        module._parameters.pop(name)
+                        module.register_buffer("%s_mean" % name_full, data.new(data.size()).zero_())
+                        module.register_buffer("%s_sq_mean" % name_full, data.new(data.size()).zero_())
 
-            #             if self.no_cov_mat is False:
-            #                 module.register_buffer("%s_cov_mat_sqrt" % name_full, data.new_empty((0, data.numel())).zero_())
+                        if self.no_cov_mat is False:
+                            module.register_buffer("%s_cov_mat_sqrt" % name_full, data.new_empty((0, data.numel())).zero_())
 
-            #             params.append((module, name_full))
+                        params.append((module, name_full))
                          
                 
     
@@ -161,77 +161,77 @@ class SWAG(torch.nn.Module):
 
 
     def collect_model(self, base_model):
-        # if not self.last_layer:
-        for (module, name), base_param in zip(self.params, base_model.parameters()):    
-            data = base_param.data
+        if not self.last_layer:
+            for (module, name), base_param in zip(self.params, base_model.parameters()):    
+                data = base_param.data
 
-            mean = module.__getattr__("%s_mean" % name)
-            sq_mean = module.__getattr__("%s_sq_mean" % name)
-            
-            # first moment  
-            mean = mean * self.n_models.item() / (
-                self.n_models.item() + 1.0
-            ) + data / (self.n_models.item() + 1.0)
-
-            # second moment
-            sq_mean = sq_mean * self.n_models.item() / (
-                self.n_models.item() + 1.0
-            ) + data ** 2 / (self.n_models.item() + 1.0)
-
-            # square root of covariance matrix
-            if self.no_cov_mat is False:
-                cov_mat_sqrt = module.__getattr__("%s_cov_mat_sqrt" % name)
-
-                # block covariance matrices, store deviation from current mean
-                dev = (data - mean)
-                name_full = name.replace("-", ".")
-                cov_mat_sqrt = torch.cat((cov_mat_sqrt, dev.view(-1, 1).t()), dim=0)
-
-                # remove first column if we have stored too many models
-                if (self.n_models.item() + 1) > self.max_num_models:
-                    cov_mat_sqrt = cov_mat_sqrt[1:, :]
-                module.__setattr__("%s_cov_mat_sqrt" % name, cov_mat_sqrt)
-
-            module.__setattr__("%s_mean" % name, mean)
-            module.__setattr__("%s_sq_mean" % name, sq_mean)
-        
-        # else:
-        #     for mod_name, module in base_model.named_modules():
-        #         if mod_name in ['fc', 'linear', 'classifier']:
-        #             classifier_params = module._parameters
-                    
-        #     for (module, name), base_param in zip(self.params, classifier_params.values()):   
-        #         data = base_param.data
-
-        #         mean = module.__getattr__("%s_mean" % name)
-        #         sq_mean = module.__getattr__("%s_sq_mean" % name)
+                mean = module.__getattr__("%s_mean" % name)
+                sq_mean = module.__getattr__("%s_sq_mean" % name)
                 
-        #         # first moment
-        #         mean = mean * self.n_models.item() / (
-        #             self.n_models.item() + 1.0
-        #         ) + data / (self.n_models.item() + 1.0)
+                # first moment  
+                mean = mean * self.n_models.item() / (
+                    self.n_models.item() + 1.0
+                ) + data / (self.n_models.item() + 1.0)
 
-        #         # second moment
-        #         sq_mean = sq_mean * self.n_models.item() / (
-        #             self.n_models.item() + 1.0
-        #         ) + data ** 2 / (self.n_models.item() + 1.0)
+                # second moment
+                sq_mean = sq_mean * self.n_models.item() / (
+                    self.n_models.item() + 1.0
+                ) + data ** 2 / (self.n_models.item() + 1.0)
 
-        #         # square root of covariance matrix
-        #         if self.no_cov_mat is False:
-        #             cov_mat_sqrt = module.__getattr__("%s_cov_mat_sqrt" % name)
+                # square root of covariance matrix
+                if self.no_cov_mat is False:
+                    cov_mat_sqrt = module.__getattr__("%s_cov_mat_sqrt" % name)
 
-        #             # block covariance matrices, store deviation from current mean
-        #             dev = (data - mean)
-        #             name_full = name.replace("-", ".")
-        #             cov_mat_sqrt = torch.cat((cov_mat_sqrt, dev.view(-1, 1).t()), dim=0)
+                    # block covariance matrices, store deviation from current mean
+                    dev = (data - mean)
+                    name_full = name.replace("-", ".")
+                    cov_mat_sqrt = torch.cat((cov_mat_sqrt, dev.view(-1, 1).t()), dim=0)
 
-        #             # remove first column if we have stored too many models
-        #             if (self.n_models.item() + 1) > self.max_num_models:
-        #                 cov_mat_sqrt = cov_mat_sqrt[1:, :]
-        #             module.__setattr__("%s_cov_mat_sqrt" % name, cov_mat_sqrt)
+                    # remove first column if we have stored too many models
+                    if (self.n_models.item() + 1) > self.max_num_models:
+                        cov_mat_sqrt = cov_mat_sqrt[1:, :]
+                    module.__setattr__("%s_cov_mat_sqrt" % name, cov_mat_sqrt)
 
-        #         module.__setattr__("%s_mean" % name, mean)
-        #         module.__setattr__("%s_sq_mean" % name, sq_mean)
+                module.__setattr__("%s_mean" % name, mean)
+                module.__setattr__("%s_sq_mean" % name, sq_mean)
+        
+        else:
+            for mod_name, module in base_model.named_modules():
+                if mod_name in ['fc', 'linear', 'classifier']:
+                    classifier_params = module._parameters
+                    
+            for (module, name), base_param in zip(self.params, classifier_params.values()):   
+                data = base_param.data
+
+                mean = module.__getattr__("%s_mean" % name)
+                sq_mean = module.__getattr__("%s_sq_mean" % name)
+                
+                # first moment
+                mean = mean * self.n_models.item() / (
+                    self.n_models.item() + 1.0
+                ) + data / (self.n_models.item() + 1.0)
+
+                # second moment
+                sq_mean = sq_mean * self.n_models.item() / (
+                    self.n_models.item() + 1.0
+                ) + data ** 2 / (self.n_models.item() + 1.0)
+
+                # square root of covariance matrix
+                if self.no_cov_mat is False:
+                    cov_mat_sqrt = module.__getattr__("%s_cov_mat_sqrt" % name)
+
+                    # block covariance matrices, store deviation from current mean
+                    dev = (data - mean)
+                    name_full = name.replace("-", ".")
+                    cov_mat_sqrt = torch.cat((cov_mat_sqrt, dev.view(-1, 1).t()), dim=0)
+
+                    # remove first column if we have stored too many models
+                    if (self.n_models.item() + 1) > self.max_num_models:
+                        cov_mat_sqrt = cov_mat_sqrt[1:, :]
+                    module.__setattr__("%s_cov_mat_sqrt" % name, cov_mat_sqrt)
+
+                module.__setattr__("%s_mean" % name, mean)
+                module.__setattr__("%s_sq_mean" % name, sq_mean)
 
         self.n_models.add_(1)
 

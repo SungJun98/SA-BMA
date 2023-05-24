@@ -48,12 +48,12 @@ def set_save_path(args):
     '''
     ### scheduler part
     if args.scheduler == "cos_anneal":
-        save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}({args.t_max})"
+        save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}_{args.t_max}"
     elif args.scheduler == "swag_lr":
-        save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}({args.swa_lr})"
+        save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}_{args.swa_lr}"
     elif args.scheduler == "cos_decay":
         # save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}({args.first_cycle_steps}/{args.cycle_mult}/{args.min_lr}/{args.warmup_steps}/{args.decay_ratio})"
-        save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}({args.t_initial}/{args.lr_min}/{args.cycle_mul}/{args.cycle_decay}/{args.cycle_limit}/{args.warmup_t})"
+        save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}_{args.t_initial}_{args.lr_min}/{args.cycle_mul}/{args.cycle_decay}/{args.warmup_t}"
     
     ## learning hyperparameter part
     if args.method in ["swag", "last_swag"]:
@@ -79,7 +79,7 @@ def set_wandb_runname(args):
         run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.swa_lr})"
     elif args.scheduler == "cos_decay":
         # run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.first_cycle_steps}/{args.cycle_mult}/{args.min_lr}/{args.warmup_steps}/{args.decay_ratio})"
-        run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_initial}/{args.lr_min}/{args.cycle_mul}/{args.cycle_decay}/{args.cycle_limit}/{args.warmup_t})"
+        run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_initial}/{args.lr_min}/{args.cycle_mul}/{args.cycle_decay}/{args.warmup_t})"
     
     ## learning hyperparameter part
     if args.method in ["swag", "last_swag"]:
@@ -463,7 +463,7 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
 
 
 
-def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, first_step_scaler, second_step_scaler):
+def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta, first_step_scaler, second_step_scaler):
     loss_sum = 0.0
     correct = 0.0
     num_objects_current = 0
@@ -473,7 +473,7 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, firs
         params, z_1, z_2 = sabtl_model.sample(1.0)    
 
         # compute Fisher inverse
-        fish_inv = sabtl_model.fish_inv(params)
+        fish_inv = sabtl_model.fish_inv(params, eta)
         # Change weight sample shape to input model
         params = format_weights(params, sabtl_model)
 

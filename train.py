@@ -123,9 +123,6 @@ parser.add_argument("--cycle_mul", type=float, default=0.9,
 parser.add_argument("--cycle_decay", type=float, default=1.,
                 help="Decrease rate of cycle length. (Cosine Annealing Warmup Restarts)")
 
-parser.add_argument("--cycle_limit", type=int, default=3,
-                help="Linear warmup step size. (Cosine Annealing Warmup Restarts)")
-
 parser.add_argument("--warmup_t", type=int, default=0,
                 help="Linear warmup step size. (Cosine Annealing Warmup Restarts)")
 
@@ -252,23 +249,6 @@ elif args.scheduler == "cos_anneal":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer.base_optimizer, T_max=args.t_max)
         
 elif args.scheduler == "cos_decay":
-    # from scheduler import CosineAnnealingWarmupRestarts
-    # if args.optim == 'sgd':
-    #     scheduler = CosineAnnealingWarmupRestarts(optimizer = optimizer,
-    #                                         first_cycle_steps = args.first_cycle_steps,
-    #                                         cycle_mult = args.cycle_mult,
-    #                                         max_lr = args.lr_init,
-    #                                         min_lr = args.min_lr,
-    #                                         warmup_steps = args.warmup_steps,
-    #                                         decay_ratio = args.decay_ratio,)
-    # elif args.optim in ["sam", "bsam"]:
-    #         scheduler = CosineAnnealingWarmupRestarts(optimizer = optimizer.base_optimizer,
-    #                                         first_cycle_steps = args.first_cycle_steps,
-    #                                         cycle_mult = args.cycle_mult,
-    #                                         max_lr = args.lr_init,
-    #                                         min_lr = args.min_lr,
-    #                                         warmup_steps = args.warmup_steps,
-    #                                         decay_ratio = args.decay_ratio,)
     from timm.scheduler.cosine_lr import CosineLRScheduler
     if args.optim == 'sgd':
         scheduler = CosineLRScheduler(optimizer = optimizer,
@@ -276,9 +256,9 @@ elif args.scheduler == "cos_decay":
                                     lr_min=args.lr_min,
                                     cycle_mul=args.cycle_mul,
                                     cycle_decay=args.cycle_decay,
-                                    cycle_limit=args.cycle_limit,
+                                    cycle_limit=args.epochs//args.t_initial,
                                     warmup_t=args.warmup_t,
-                                    warmup_lr_init=args.lr_init,
+                                    warmup_lr_init=args.warmup_lr_init,
                                         )
     elif args.optim in ["sam", "bsam"]:
         scheduler = CosineLRScheduler(optimizer = optimizer.base_optimizer,
@@ -286,9 +266,9 @@ elif args.scheduler == "cos_decay":
                                     lr_min=args.lr_min,
                                     cycle_mul=args.cycle_mul,
                                     cycle_decay=args.cycle_decay,
-                                    cycle_limit=args.cycle_limit,
+                                    cycle_limit=args.epochs//args.t_initial,
                                     warmup_t=args.warmup_t,
-                                    warmup_lr_init=args.lr_init,
+                                    warmup_lr_init=args.warmup_lr_init,
                                         )
 #-------------------------------------------------------------------
 

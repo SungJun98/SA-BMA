@@ -12,11 +12,17 @@ import torch.nn.functional as F
 
 
 def flatten(lst):
+    '''
+    나중에 그냥 utils에 옮겨놓자
+    '''
     tmp = [i.contiguous().view(-1, 1) for i in lst]
     return torch.cat(tmp).view(-1)
 
 
 def unflatten_like(vector, likeTensorList):
+    '''
+    나중에 그냥 utils에 옮겨놓자
+    '''
     # Takes a flat torch.tensor and unflattens it to a list of torch.tensors
     #    shaped like likeTensorList
     outList = []

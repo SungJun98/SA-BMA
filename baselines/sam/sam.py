@@ -23,7 +23,6 @@ class SAM(torch.optim.Optimizer):
                     self.state[p]["old_p"] = p.data.clone()
                     e_w = (torch.pow(p, 2) if group["adaptive"] else 1.0) * p.grad * scale.to(p)
                     p.add_(e_w)  # climb to the local maximum "w + e(w)"
-
             if zero_grad: self.zero_grad()
 
     @torch.no_grad()
@@ -62,16 +61,23 @@ class SAM(torch.optim.Optimizer):
         self.base_optimizer.param_groups = self.param_groups
 
 
-    def second_sample(self, z_, sabtl_model, scale=1.0):
+    def second_sample(self, z_1, z_2,  sabtl_model):
         '''
         Sample from perturbated bnn parameters with pre-selected z_1, z_2
         '''
-        rand_sample = (torch.exp(self.param_groups[0]['params'][1]) + sabtl_model.var_clamp**0.5) * z_
-        rand_sample += self.param_groups[0]['params'][2].matmul(z_)
+        if not sabtl_model.diag_only:
+            rand_sample = (torch.exp(self.param_groups[0]['params'][1]) + sabtl_model.var_clamp**0.5) * z_1
+            if sabtl_model.low_rank != 0:
+                rand_sample += (self.param_groups[0]['params'][2].t().matmul(z_2)) / (sabtl_model.low_rank - 1)**0.5
+                sample = self.param_groups[0]['params'][0] + 0.5**0.5 * rand_sample
+            else:
+                rand_sample += self.param_groups[0]['params'][2].matmul(z_1)
+                sample = self.param_groups[0]['params'][0] + rand_sample
+            
+        else:
+            rand_sample = torch.exp(self.param_groups[0]['params'][1]) * z_1
+            sample = self.param_groups[0]['params'][0] + rand_sample    
         
-        # update sample with mean and scale
-        sample = self.param_groups[0]['params'][0] + scale**0.5 * rand_sample
-        # change sampled weight type list to dict 
         return sample
 
 
