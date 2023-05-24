@@ -273,18 +273,22 @@ def train_sgd(dataloader, model, criterion, optimizer, device, scaler):
     for batch, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
 
-        with torch.cuda.amp.autocast():
+        if scaler is not None:
+            with torch.cuda.amp.autocast():
+                pred = model(X)
+                loss = criterion(pred, y)
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)  # optimizer.step()
+                scaler.update()
+                optimizer.zero_grad()
+        else:
             pred = model(X)
             loss = criterion(pred, y)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
         
         correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-    
-        # Backprop
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)  # optimizer.step()
-        scaler.update()
-        optimizer.zero_grad()
-        
         loss_sum += loss.data.item() * X.size(0)
         num_objects_current += X.size(0)
     return {
@@ -308,48 +312,67 @@ def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler
         X, y = X.to(device), y.to(device)
         optimizer.zero_grad()
 
-        sam_utils.enable_running_stats(model)
-        ### first forward-backward pass
-        with torch.cuda.amp.autocast():
-            pred = model(X)
-            loss = criterion(pred, y)
-        first_step_scaler.scale(loss).backward()
+        if first_step_scaler is not None:
+            sam_utils.enable_running_stats(model)
+            ### first forward-backward pass
+            with torch.cuda.amp.autocast():
+                pred = model(X)
+                loss = criterion(pred, y)
+            first_step_scaler.scale(loss).backward()
+            
+            first_step_scaler.unscale_(optimizer)
+            
+            optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
+            
+            inf_grad_cnt = sum(v.item() for v in optimizer_state["found_inf_per_device"].values())      # Check if any gradients are inf/nan
+            
+            if inf_grad_cnt == 0:
+                # if valid graident, apply sam_first_step
+                optimizer.first_step(zero_grad=True)
+                sam_first_step_applied = True
+            else:
+                # if invalid graident, skip sam and revert to single optimization step
+                optimizer.zero_grad()
+                sam_first_step_applied = False
+
+            first_step_scaler.update()
+
+            sam_utils.disable_running_stats(model)
+            
+            ### second forward-backward pass
+            with torch.cuda.amp.autocast():
+                pred = model(X)
+                loss = criterion(pred, y)
+            second_step_scaler.scale(loss).backward()
+
+            if sam_first_step_applied:
+                optimizer.second_step()
+            
+            second_step_scaler.step(optimizer)
+            second_step_scaler.update()
+            
+            # Calculate loss and accuracy
+            correct += (model(X).argmax(1) == y).type(torch.float).sum().item()
+            loss_sum += loss.data.item() * X.size(0)
+            num_objects_current += X.size(0)
         
-        first_step_scaler.unscale_(optimizer)
-        
-        optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
-        
-        inf_grad_cnt = sum(v.item() for v in optimizer_state["found_inf_per_device"].values())      # Check if any gradients are inf/nan
-        
-        if inf_grad_cnt == 0:
-            # if valid graident, apply sam_first_step
-            optimizer.first_step(zero_grad=True)
-            sam_first_step_applied = True
         else:
-            # if invalid graident, skip sam and revert to single optimization step
-            optimizer.zero_grad()
-            sam_first_step_applied = False
-
-        first_step_scaler.update()
-
-        sam_utils.disable_running_stats(model)
-        
-        ### second forward-backward pass
-        with torch.cuda.amp.autocast():
+            ## first forward & backward
             pred = model(X)
+            loss = criterion(pred, y)        
+            loss.backward()
+            optimizer.first_step(zero_grad=True, amp=False)
+            
+            ## second forward-backward pass
+            pred = model( X)
             loss = criterion(pred, y)
-        second_step_scaler.scale(loss).backward()
-
-        if sam_first_step_applied:
-            optimizer.second_step()
-        
-        second_step_scaler.step(optimizer)
-        second_step_scaler.update()
-        
-        # Calculate loss and accuracy
-        correct += (model(X).argmax(1) == y).type(torch.float).sum().item()
-        loss_sum += loss.data.item() * X.size(0)
-        num_objects_current += X.size(0)
+            loss.backward()
+            optimizer.second_step(zero_grad=True, amp=False)   
+                       
+            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+            loss_sum += loss.data.item() * X.size(0)
+            num_objects_current += X.size(0)
+                      
     return {
         "loss": loss_sum / num_objects_current,
         "accuracy": correct / num_objects_current * 100.0,
@@ -368,15 +391,22 @@ def train_sabtl_sgd(dataloader, sabtl_model, criterion, optimizer, device, scale
         params, _, _ = sabtl_model.sample(1.0)
         # Change weight sample shape to input model
         params = format_weights(params, sabtl_model)
-
-        with torch.cuda.amp.autocast():
+        
+        if scaler is not None:
+            with torch.cuda.amp.autocast():
+                pred = sabtl_model(params, X)
+                loss = criterion(pred, y)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)  # optimizer.step()
+            scaler.update()
+            optimizer.zero_grad()
+        else:
             pred = sabtl_model(params, X)
             loss = criterion(pred, y)
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)  # optimizer.step()
-        scaler.update()
-        optimizer.zero_grad()
-        
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
         correct += (pred.argmax(1) == y).type(torch.float).sum().item()
         loss_sum += loss.data.item() * X.size(0)
         num_objects_current += X.size(0)
@@ -396,6 +426,8 @@ def train_sabtl_sgd(dataloader, sabtl_model, criterion, optimizer, device, scale
     }
 
 
+
+
 def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first_step_scaler, second_step_scaler):
     loss_sum = 0.0
     correct = 0.0
@@ -408,45 +440,65 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
         # Change weight sample shape to input model
         params = format_weights(params, sabtl_model)
 
-        ## first forward & backward
-        with torch.cuda.amp.autocast():
+        if first_step_scaler is not None:
+            ## first forward & backward
+            with torch.cuda.amp.autocast():
+                pred = sabtl_model(params, X)
+                loss = criterion(pred, y)        
+            first_step_scaler.scale(loss).backward()
+            first_step_scaler.unscale_(optimizer)
+            
+            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+            loss_sum += loss.data.item() * X.size(0)
+            num_objects_current += X.size(0)
+            
+            optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
+            
+            inf_grad_cnt = sum(v.item() for v in optimizer_state["found_inf_per_device"].values())      # Check if any gradients are inf/nan
+            if inf_grad_cnt == 0:
+                # if valid graident, apply sam_first_step
+                optimizer.first_step(zero_grad=True)
+                sam_first_step_applied = True
+            else:
+                # if invalid graident, skip sam and revert to single optimization step
+                optimizer.zero_grad()
+                sam_first_step_applied = False  
+            first_step_scaler.update()
+
+            ## second forward-backward pass
+            params = optimizer.second_sample(z_1, z_2, sabtl_model)
+            params = format_weights(params, sabtl_model)
+            
+            with torch.cuda.amp.autocast():
+                pred = sabtl_model(params, X)
+                loss = criterion(pred, y)
+            second_step_scaler.scale(loss).backward()
+            
+            if sam_first_step_applied:
+                optimizer.second_step()  
+            second_step_scaler.step(optimizer)
+            second_step_scaler.update()
+
+        else:
+            ## first forward & backward
             pred = sabtl_model(params, X)
             loss = criterion(pred, y)        
-        first_step_scaler.scale(loss).backward()
-        first_step_scaler.unscale_(optimizer)
-        
-        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-        loss_sum += loss.data.item() * X.size(0)
-        num_objects_current += X.size(0)
-        
-        optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
-        
-        inf_grad_cnt = sum(v.item() for v in optimizer_state["found_inf_per_device"].values())      # Check if any gradients are inf/nan
-        if inf_grad_cnt == 0:
-            # if valid graident, apply sam_first_step
-            optimizer.first_step(zero_grad=True)
-            sam_first_step_applied = True
-        else:
-            # if invalid graident, skip sam and revert to single optimization step
-            optimizer.zero_grad()
-            sam_first_step_applied = False  
-        first_step_scaler.update()
-
-        
-        ## second forward-backward pass
-        params = optimizer.second_sample(z_1, z_2, sabtl_model)
-        params = format_weights(params, sabtl_model)
-        
-        with torch.cuda.amp.autocast():
+            loss.backward()
+            optimizer.first_step(zero_grad=True, amp=False)
+            
+            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+            loss_sum += loss.data.item() * X.size(0)
+            num_objects_current += X.size(0)
+                      
+            ## second forward-backward pass
+            params = optimizer.second_sample(z_1, z_2, sabtl_model)
+            params = format_weights(params, sabtl_model)
+            
+            
             pred = sabtl_model(params, X)
             loss = criterion(pred, y)
-        second_step_scaler.scale(loss).backward()
-        
-        if sam_first_step_applied:
-            optimizer.second_step()  
-        second_step_scaler.step(optimizer)
-        second_step_scaler.update()
-
+            loss.backward()
+            optimizer.second_step(zero_grad=True, amp=False)  
         """
         # ### Checking accuracy with MAP (Mean) solution
         params, _, _ = sabtl_model.sample(0.0)
@@ -477,43 +529,61 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
         # Change weight sample shape to input model
         params = format_weights(params, sabtl_model)
 
-        ## first forward & backward
-        with torch.cuda.amp.autocast():
-            pred = sabtl_model(params, X)
-            loss = criterion(pred, y)
+        if first_step_scaler is not None:
+            ## first forward & backward
+            with torch.cuda.amp.autocast():
+                pred = sabtl_model(params, X)
+                loss = criterion(pred, y)
 
-        first_step_scaler.scale(loss).backward()
-        first_step_scaler.unscale_(optimizer)
+            first_step_scaler.scale(loss).backward()
+            first_step_scaler.unscale_(optimizer)
 
-        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-        loss_sum += loss.data.item() * X.size(0)
-        num_objects_current += X.size(0)
+            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+            loss_sum += loss.data.item() * X.size(0)
+            num_objects_current += X.size(0)
+            
+            optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
+            
+            inf_grad_cnt = sum(v.item() for v in optimizer_state["found_inf_per_device"].values())      # Check if any gradients are inf/nan
+            if inf_grad_cnt == 0:
+                # if valid graident, apply sam_first_step
+                optimizer.first_step(fish_inv, zero_grad=True)
+                sam_first_step_applied = True
+            else:
+                # if invalid graident, skip sam and revert to single optimization step
+                optimizer.zero_grad()
+                sam_first_step_applied = False
+            first_step_scaler.update()
+            
+            ## second forward-backward pass
+            params = optimizer.second_sample(z_1, z_2, sabtl_model)
+            with torch.cuda.amp.autocast():
+                pred = sabtl_model(params, X)
+                loss = criterion(pred, y)
+
+            second_step_scaler.scale(loss).backward()
+            if sam_first_step_applied:
+                optimizer.second_step()  
+            second_step_scaler.step(optimizer)
+            second_step_scaler.update()
         
-        optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
-        
-        inf_grad_cnt = sum(v.item() for v in optimizer_state["found_inf_per_device"].values())      # Check if any gradients are inf/nan
-        if inf_grad_cnt == 0:
-            # if valid graident, apply sam_first_step
-            optimizer.first_step(fish_inv, zero_grad=True)
-            sam_first_step_applied = True
         else:
-            # if invalid graident, skip sam and revert to single optimization step
-            optimizer.zero_grad()
-            sam_first_step_applied = False
-        first_step_scaler.update()
-        
-        ## second forward-backward pass
-        params = optimizer.second_sample(z_1, z_2, sabtl_model)
-        
-        with torch.cuda.amp.autocast():
+            ## first forward & backward
+            pred = sabtl_model(params, X)
+            loss = criterion(pred, y)        
+            loss.backward()
+            optimizer.first_step(fish_inv, zero_grad=True, amp=False)
+            
+            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+            loss_sum += loss.data.item() * X.size(0)
+            num_objects_current += X.size(0)
+                      
+            ## second forward-backward pass
+            params = optimizer.second_sample(z_1, z_2, sabtl_model)
             pred = sabtl_model(params, X)
             loss = criterion(pred, y)
-
-        second_step_scaler.scale(loss).backward()
-        if sam_first_step_applied:
-            optimizer.second_step()  
-        second_step_scaler.step(optimizer)
-        second_step_scaler.update()
+            loss.backward()
+            optimizer.second_step(zero_grad=True, amp=False)  
 
         """
         # ### Checking accuracy with MAP (Mean) solution

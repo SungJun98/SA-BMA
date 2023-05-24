@@ -177,7 +177,7 @@ class SABTL(torch.nn.Module):
         # \nabla_\mean p(w | \theta)
         # mean_fi = torch.autograd.grad(log_prob, self.bnn_param['mean'], retain_graph=True)
         # mean_fi = mean_fi[0]**2
-            
+        # mean_fi = 1 / (1 + eta * mean_fi)    
         mean_fi = torch.inverse(qdist.covariance_matrix) @ (params - self.bnn_param['mean'])    ## calculate derivative manually
         mean_fi = mean_fi**2
         mean_fi = 1 / (1 + eta * mean_fi)
@@ -259,9 +259,25 @@ class BSAM(torch.optim.Optimizer):
         self.defaults.update(self.base_optimizer.defaults)
     
 
+
     @torch.no_grad()
-    def first_step(self, fish_inv, zero_grad=False):
-        with torch.cuda.amp.autocast():
+    def first_step(self, fish_inv, zero_grad=False, amp=True):
+        if amp:
+            with torch.cuda.amp.autocast():
+                for group in self.param_groups:
+                    for idx, p in enumerate(group["params"]):
+                        if p.grad is None: continue
+                        self.state[p]["old_p"] = p.data.clone()
+                        ## Calculate perturbation Delta_theta --------------------------------------
+                        Delta_p = group["rho"] * fish_inv[idx] * p.grad
+                        Delta_p = Delta_p / (torch.sqrt(p.grad * fish_inv[idx] * p.grad) + 1e-12) # add small value for numericaly stability
+                        # ---------------------------------------------------------------------------                        
+                        ## theta + Delta_theta
+                        p.add_(Delta_p)  # climb to the local maximum "w + e(w)"
+                        # ---------------------------------------------------------------------------
+                if zero_grad: self.zero_grad()
+                
+        else:
             for group in self.param_groups:
                 for idx, p in enumerate(group["params"]):
                     if p.grad is None: continue
@@ -274,6 +290,8 @@ class BSAM(torch.optim.Optimizer):
                     p.add_(Delta_p)  # climb to the local maximum "w + e(w)"
                     # ---------------------------------------------------------------------------
             if zero_grad: self.zero_grad()
+
+
 
 
     def second_sample(self, z_1, z_2, sabtl_model):
@@ -300,15 +318,25 @@ class BSAM(torch.optim.Optimizer):
 
 
     @torch.no_grad()
-    def second_step(self, zero_grad=False):
-        with torch.cuda.amp.autocast():
+    def second_step(self, zero_grad=False, amp=True):
+        if amp:
+            with torch.cuda.amp.autocast():
+                for group in self.param_groups:
+                    for p in group["params"]:
+                        if p.grad is None: continue
+                        p.data = self.state[p]["old_p"]  # get back to "w" from "w + e(w)"
+
+        else:
             for group in self.param_groups:
                 for p in group["params"]:
                     if p.grad is None: continue
-                    p.data = self.state[p]["old_p"]  # get back to "w" from "w + e(w)"
+                    p.data = self.state[p]["old_p"]  # get ba
 
-        # self.base_optimizer.step()  # do the actual "sharpness-aware" update
-        # if zero_grad: self.zero_grad()
+            self.base_optimizer.step()  # do the actual "sharpness-aware" update
+
+            if zero_grad: self.zero_grad()
+
+
 
     @torch.no_grad()
     def step(self, closure=None):

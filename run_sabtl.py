@@ -32,6 +32,8 @@ parser.add_argument("--method", type=str, default="sabtl",
                     choices=["sabtl"],
                     help="Learning Method")
 
+parser.add_argument("--no_amp", action="store_true", default=False, help="Deactivate AMP")
+
 parser.add_argument("--print_epoch", type=int, default=10, help="Printing epoch")
 
 parser.add_argument("--resume", type=str, default=None,
@@ -261,14 +263,20 @@ start_epoch = 0
 #------------------------------------------------------------------------------------
 
 ## Set AMP --------------------------------------------------------------------------
-if args.optim == "sgd":
-    scaler = torch.cuda.amp.GradScaler()
-
-elif args.optim in ["sam", "bsam"]:
-    first_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
-    second_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
-
-print(f"Set AMP Scaler for {args.optim}")
+if not args.no_amp:
+    if args.optim == "sgd":
+        scaler = torch.cuda.amp.GradScaler()
+        
+    elif args.optim in ["sam", "bsam"]:
+        first_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
+        second_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
+        
+    print(f"Set AMP Scaler for {args.optim}")
+    
+else:
+    scaler = None
+    first_step_scaler = None
+    second_step_scaler = None
 #------------------------------------------------------------------------------------
 
 ## Training -------------------------------------------------------------------------
@@ -352,22 +360,38 @@ for epoch in range(start_epoch, int(args.epochs)):
         # save state_dict
         os.makedirs(args.save_path, exist_ok=True)
         if args.optim == "sgd":
+            if not args.no_amp:
                 utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
                                 epoch = epoch,
                                 state_dict =sabtl_model.state_dict(),
                                 optimizer = optimizer.state_dict(),
                                 # scheduler = scheduler.state_dict(),
-                                scaler = scaler.state_dict()
+                                scaler = scaler.state_dict(),
                                 )
-        elif args.optim in ["sam", "bsam"]:
-            utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+            else:
+                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
                                 epoch = epoch,
-                                state_dict = sabtl_model.state_dict(),
+                                state_dict =sabtl_model.state_dict(),
                                 optimizer = optimizer.state_dict(),
                                 # scheduler = scheduler.state_dict(),
-                                first_step_scaler = first_step_scaler.state_dict(),
-                                second_step_scaler = second_step_scaler.state_dict()
                                 )
+        elif args.optim in ["sam", "bsam"]:
+            if not args.no_amp:
+                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                    epoch = epoch,
+                                    state_dict = sabtl_model.state_dict(),
+                                    optimizer = optimizer.state_dict(),
+                                    # scheduler = scheduler.state_dict(),
+                                    first_step_scaler = first_step_scaler.state_dict(),
+                                    second_step_scaler = second_step_scaler.state_dict()
+                                    )
+            else:
+                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                    epoch = epoch,
+                                    state_dict = sabtl_model.state_dict(),
+                                    optimizer = optimizer.state_dict(),
+                                    # scheduler = scheduler.state_dict(),
+                                    )
         # Save Mean, variance, Covariance matrix
         # mean, variance, cov_mat_sqrt = swag_model.generate_mean_var_covar()
         mean = sabtl_model.get_mean_vector()
@@ -380,9 +404,9 @@ for epoch in range(start_epoch, int(args.epochs)):
     
         
     ## Scheduler step
-    if args.scheduler == "cos_anneal":
-        scheduler.step()
-    elif args.scheduler in ["step_lr", "cos_decay"]:
+    # if args.scheduler == "cos_anneal":
+    #     scheduler.step()
+    if args.scheduler in ["cos_anneal", "step_lr", "cos_decay"]:
         scheduler.step(epoch)
 #------------------------------------------------------------------------------------------------------------
 

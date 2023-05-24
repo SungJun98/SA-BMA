@@ -30,6 +30,8 @@ parser.add_argument("--method", type=str, default="dnn",
                     choices=["dnn", "swag", "last_swag", "sabtl"],
                     help="Learning Method")
 
+parser.add_argument("--no_amp", action="store_true", default=False, help="Deactivate AMP")
+
 parser.add_argument("--print_epoch", type=int, default=10, help="Printing epoch")
 
 parser.add_argument("--resume", type=str, default=None,
@@ -303,17 +305,23 @@ else:
 
 
 ## Set AMP --------------------------------------------------------------------------
-if args.optim == "sgd":
-    scaler = torch.cuda.amp.GradScaler()
+if not args.no_amp:
+    if args.optim == "sgd":
+        scaler = torch.cuda.amp.GradScaler()
+        first_step_scaler = None
+        second_step_scaler = None
+
+    elif args.optim in ["sam", "bsam"]:
+        scaler = None
+        first_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
+        second_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
+
+    print(f"Set AMP Scaler for {args.optim}")
+
+else:
+    scaler = None
     first_step_scaler = None
     second_step_scaler = None
-
-elif args.optim in ["sam", "bsam"]:
-    scaler = None
-    first_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
-    second_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
-
-print(f"Set AMP Scaler for {args.optim}")
 #------------------------------------------------------------------------------------
 
 
@@ -417,22 +425,38 @@ for epoch in range(start_epoch, int(args.epochs)):
             # save state_dict
             os.makedirs(args.save_path, exist_ok=True)
             if args.optim == "sgd":
-                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                    epoch = epoch,
-                                    state_dict = swag_model.state_dict(),
-                                    optimizer = optimizer.state_dict(),
-                                    # scheduler = scheduler.state_dict(),
-                                    scaler = scaler.state_dict()
-                                    )
+                if not args.no_amp:
+                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                        epoch = epoch,
+                                        state_dict = swag_model.state_dict(),
+                                        optimizer = optimizer.state_dict(),
+                                        # scheduler = scheduler.state_dict(),
+                                        scaler = scaler.state_dict()
+                                        )
+                else:
+                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                        epoch = epoch,
+                                        state_dict = swag_model.state_dict(),
+                                        optimizer = optimizer.state_dict(),
+                                        # scheduler = scheduler.state_dict(),
+                                        )
             elif args.optim in ["sam", "bsam"]:
-                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                    epoch = epoch,
-                                    state_dict = swag_model.state_dict(),
-                                    optimizer = optimizer.state_dict(),
-                                    # scheduler = scheduler.state_dict(),
-                                    first_step_scaler = first_step_scaler.state_dict(),
-                                    second_step_scaler = second_step_scaler.state_dict()
-                                    )
+                if not args.no_amp:
+                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                        epoch = epoch,
+                                        state_dict = swag_model.state_dict(),
+                                        optimizer = optimizer.state_dict(),
+                                        # scheduler = scheduler.state_dict(),
+                                        first_step_scaler = first_step_scaler.state_dict(),
+                                        second_step_scaler = second_step_scaler.state_dict()
+                                        )
+                else:
+                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                        epoch = epoch,
+                                        state_dict = swag_model.state_dict(),
+                                        optimizer = optimizer.state_dict(),
+                                        # scheduler = scheduler.state_dict(),
+                                        )
             torch.save(model.state_dict(),f'{args.save_path}/{args.method}-{args.optim}_best_val_model.pt')
             
             # Save Mean, variance, Covariance matrix
@@ -454,22 +478,38 @@ for epoch in range(start_epoch, int(args.epochs)):
             # save state_dict
             os.makedirs(args.save_path,exist_ok=True)
             if args.optim == "sgd":
-                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                epoch = epoch,
-                                state_dict = model.state_dict(),
-                                optimizer = optimizer.state_dict(),
-                                # scheduler = scheduler.state_dict(),
-                                scaler = scaler.state_dict()
-                                )
+                if not args.no_amp:
+                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                    epoch = epoch,
+                                    state_dict = model.state_dict(),
+                                    optimizer = optimizer.state_dict(),
+                                    # scheduler = scheduler.state_dict(),
+                                    scaler = scaler.state_dict()
+                                    )
+                else:
+                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                    epoch = epoch,
+                                    state_dict = model.state_dict(),
+                                    optimizer = optimizer.state_dict(),
+                                    # scheduler = scheduler.state_dict(),
+                                    )
             elif args.optim == "sam":
-                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                epoch = epoch,
-                                state_dict = model.state_dict(),
-                                optimizer = optimizer.state_dict(),
-                                # scheduler = scheduler.state_dict(),
-                                first_step_scaler = first_step_scaler.state_dict(),
-                                second_step_scaler = second_step_scaler.state_dict()
-                                )
+                if not args.no_amp:
+                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                    epoch = epoch,
+                                    state_dict = model.state_dict(),
+                                    optimizer = optimizer.state_dict(),
+                                    # scheduler = scheduler.state_dict(),
+                                    first_step_scaler = first_step_scaler.state_dict(),
+                                    second_step_scaler = second_step_scaler.state_dict()
+                                    )
+                else:
+                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                    epoch = epoch,
+                                    state_dict = model.state_dict(),
+                                    optimizer = optimizer.state_dict(),
+                                    # scheduler = scheduler.state_dict(),
+                                    )
     
     if args.scheduler in ["cos_anneal", "step_lr"]:
         scheduler.step()
