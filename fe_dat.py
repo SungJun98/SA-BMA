@@ -2,13 +2,13 @@
 import torch
 import torch.nn as nn
 import os
-import utils.utils
+import utils.utils as utils
 import numpy as np
 
 # %%
 ## Settings
 MODEL_NAME = 'vitb16-i21k'
-DATASET = 'cifar10'
+DATASET = 'cifar100'
 DATA_PATH = f'/data2/lsj9862/data/{DATASET}'
 BATCH_SIZE = 256
 

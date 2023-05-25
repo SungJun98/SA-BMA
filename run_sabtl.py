@@ -11,12 +11,9 @@ import numpy as np
 import pickle
 import wandb
 
-import utils, data
-
-from baselines.sam.sam import SAM
-from baselines.swag import swag, swag_utils
-
-import sabtl
+import utils.utils as utils
+from utils.swag import swag, swag_utils
+from utils.sabtl import sabtl, sabtl_utils
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -58,15 +55,19 @@ parser.add_argument("--num_workers", type=int, default=4,
 
 parser.add_argument("--use_validation", action='store_true',
             help ="Use validation for hyperparameter search (Default : False)")
+
+parser.add_argument("--fe_dat", type=str, default=None, choices=[None, "vitb16-i21k"],
+            help = "Use Feature Extracted from Feature Extractor (Default : None)")
 #----------------------------------------------------------------
 
 ## Model ---------------------------------------------------------
 parser.add_argument(
     "--model",
-    type=str, default='mlp', required=True,
-    choices=['mlp', 'resnet18', 'resnet50', 'wideresnet28x10', 'wideresnet40x10',
-            'resnet18-noBN', 'resnet50-noBN', 'wideresnet28x10-noBN', 'wideresnet40x10-noBN'],
-    help="model name (default : mlp)")
+    type=str, default='resnet18', required=True,
+    choices=['resnet18', 'resnet50', 'wideresnet28x10', 'wideresnet40x10',
+            'resnet18-noBN', 'resnet50-noBN', 'wideresnet28x10-noBN', 'wideresnet40x10-noBN',
+            "vitb16-i21k"],
+    help="model name (default : resnet18)")
 
 parser.add_argument(
     "--pre_trained", action='store_true', default=False,
@@ -102,28 +103,18 @@ parser.add_argument("--scheduler", type=str, default='constant', choices=['const
 
 parser.add_argument("--t_max", type=int, default=300, help="T_max (Cosine Annealing)")
 
-parser.add_argument("--t_initial", type=int, default=100,
-                help="First cycle step size. (Cosine Annealing Warmup Restarts)")
-
-parser.add_argument("--lr_min", type=float, default=1e-5,
+parser.add_argument("--lr_min", type=float, default=1e-8,
                 help="Min learning rate. (Cosine Annealing Warmup Restarts)")
 
-parser.add_argument("--cycle_mul", type=float, default=1.,
-                help="Decrease rate of cycle length. (Cosine Annealing Warmup Restarts)")
-
-parser.add_argument("--cycle_decay", type=float, default=0.9,
-                help="Decrease rate of max learning rate by cycle. (Cosine Annealing Warmup Restarts)")
-
-parser.add_argument("--warmup_lr_init", type=float, default=5e-3,
+parser.add_argument("--warmup_lr_init", type=float, default=1e-7,
                 help="Linear warmup initial learning rate (Cosine Annealing Warmup Restarts)")
 
-parser.add_argument("--warmup_t", type=int, default=0,
+parser.add_argument("--warmup_t", type=int, default=10,
                 help="Linear warmup step size. (Cosine Annealing Warmup Restarts)")
 #----------------------------------------------------------------
 
 
 ## SABTL ---------------------------------------------------------
-parser.add_argument("--swa_lr", type=float, default=0.05, help="Learning rate for SWAG")
 parser.add_argument("--src_bnn", type=str, default="swag", choices=["swag", "la", "vi"],
         help="Type of pre-trained BNN model")
 # parser.add_argument("--z_scale", type=float, default=1e-2, help="Sampling scale for weight")
@@ -172,16 +163,23 @@ wandb.run.name = utils.set_wandb_runname(args)
 #----------------------------------------------------------------
 
 # Load Data ------------------------------------------------------
+if args.model.split("-")[-1] != "noBN": args.aug = True
 tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(args.dataset,
-                                                            args.data_path,
-                                                            args.batch_size,
-                                                            args.num_workers,
-                                                            args.use_validation)
-print(f"Load Data : {args.dataset}")
+                                                            data_path = args.data_path,
+                                                            batch_size = args.batch_size,
+                                                            num_workers = args.num_workers,
+                                                            use_validation = args.use_validation,
+                                                            aug = args.aug,
+                                                            fe_dat = args.fe_dat)
+print(f"Load Data : {args.dataset} feature extracted from {args.fe_dat}")
 #----------------------------------------------------------------
 
 # Define Model------------------------------------------------------
-model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
+if args.fe_dat is not None:
+    model = utils.get_last_layer(args.model, num_classes, args.device) 
+else:
+    model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)   
+
 
 w_mean = torch.load(args.mean_path)
 w_var = torch.load(args.var_path) 
@@ -203,56 +201,11 @@ criterion = torch.nn.CrossEntropyLoss()
 
 # Set Optimizer--------------------------------------
 ## Optimizer
-if args.optim == "sgd":
-    optimizer = torch.optim.SGD(sabtl_model.bnn_param.values(),
-                        lr=args.lr_init, weight_decay=args.wd,
-                        momentum=args.momentum)
-    
-elif args.optim == "sam":
-    base_optimizer = torch.optim.SGD
-    optimizer = SAM(sabtl_model.bnn_param.values(), base_optimizer, rho=args.rho, lr=args.lr_init, momentum=args.momentum,
-                    weight_decay=args.wd)
-    
-elif args.optim == "bsam":
-    base_optimizer = torch.optim.SGD
-    optimizer = sabtl.BSAM(sabtl_model.bnn_param.values(), base_optimizer, rho=args.rho, lr=args.lr_init, momentum=args.momentum,
-                    weight_decay=args.wd)
+optimizer = sabtl_utils.get_optimizer(args, sabtl_model)
 #----------------------------------------------------------------
 
 ## Set Scheduler-------------------------------------------------------
-if args.scheduler == "step_lr":
-    from timm.scheduler.step_lr import StepLRScheduler
-    scheduler = StepLRScheduler(optimizer, decay_rate=0.2, )
-    
-elif args.scheduler == "cos_anneal":
-    if args.optim == "sgd":
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.t_max)    
-    elif args.optim in ["sam", "bsam"]:
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer.base_optimizer, T_max=args.t_max)
-        
-elif args.scheduler == "cos_decay":
-    from timm.scheduler.cosine_lr import CosineLRScheduler
-    if args.optim == 'sgd':
-        scheduler = CosineLRScheduler(optimizer = optimizer,
-                                    t_initial= args.t_initial,
-                                    lr_min=args.lr_min,
-                                    cycle_mul=args.cycle_mul,
-                                    cycle_decay=args.cycle_decay,
-                                    cycle_limit=args.epochs//args.t_initial,
-                                    warmup_t=args.warmup_t,
-                                    warmup_lr_init=args.warmup_lr_init,
-                                        )
-    elif args.optim in ["sam", "bsam"]:
-        scheduler = CosineLRScheduler(optimizer = optimizer.base_optimizer,
-                                    t_initial= args.t_initial,
-                                    lr_min=args.lr_min,
-                                    cycle_mul=args.cycle_mul,
-                                    cycle_decay=args.cycle_decay,
-                                    cycle_limit=args.epochs//args.t_initial,
-                                    warmup_t=args.warmup_t,
-                                    warmup_lr_init=args.warmup_lr_init,
-                                        )
-
+scheduler = utils.get_scheduler(args, optimizer)
 #-------------------------------------------------------------------
 
 ## Resume ---------------------------------------------------------------------------
@@ -263,20 +216,7 @@ start_epoch = 0
 #------------------------------------------------------------------------------------
 
 ## Set AMP --------------------------------------------------------------------------
-if not args.no_amp:
-    if args.optim == "sgd":
-        scaler = torch.cuda.amp.GradScaler()
-        
-    elif args.optim in ["sam", "bsam"]:
-        first_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
-        second_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
-        
-    print(f"Set AMP Scaler for {args.optim}")
-    
-else:
-    scaler = None
-    first_step_scaler = None
-    second_step_scaler = None
+scaler, first_step_scaler, second_step_scaler = utils.get_scaler(args)
 #------------------------------------------------------------------------------------
 
 ## Training -------------------------------------------------------------------------
@@ -302,16 +242,16 @@ for epoch in range(start_epoch, int(args.epochs)):
         
     ## train
     if args.optim == "sgd":
-        tr_res = utils.train_sabtl_sgd(tr_loader, sabtl_model, criterion, optimizer, args.device, scaler)
+        tr_res = sabtl_utils.train_sabtl_sgd(tr_loader, sabtl_model, criterion, optimizer, args.device, scaler)
     elif args.optim == "sam":
-        tr_res = utils.train_sabtl_sam(tr_loader, sabtl_model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
+        tr_res = sabtl_utils.train_sabtl_sam(tr_loader, sabtl_model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
     elif args.optim == "bsam":
-        tr_res = utils.train_sabtl_bsam(tr_loader, sabtl_model, criterion, optimizer, args.device, args.eta, first_step_scaler, second_step_scaler)
+        tr_res = sabtl_utils.train_sabtl_bsam(tr_loader, sabtl_model, criterion, optimizer, args.device, args.eta, first_step_scaler, second_step_scaler)
         
     # validation / test
     params, _, _ = sabtl_model.sample(0.0)
     params = utils.format_weights(params, sabtl_model)
-    val_res = utils.eval_sabtl(val_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
+    val_res = sabtl_utils.eval_sabtl(val_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
 
     time_ep = time.time() - time_ep
 
@@ -425,7 +365,7 @@ sabtl_model.to(args.device)
 bma_save_path = f"{args.save_path}/bma_models"
 os.makedirs(bma_save_path, exist_ok=True)
 
-bma_res = utils.bma_sabtl(te_loader, sabtl_model, args.bma_num_models,
+bma_res = sabtl_utils.bma_sabtl(te_loader, sabtl_model, args.bma_num_models,
                     num_classes, criterion, args.device,
                     bma_save_path=bma_save_path, eps=args.eps, num_bins=args.num_bins)
 
@@ -463,7 +403,7 @@ utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, Tru
 params, _, _ = sabtl_model.sample(0)
 params = utils.format_weights(params, sabtl_model)
 
-res = utils.eval_sabtl(te_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
+res = sabtl_utils.eval_sabtl(te_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
 
 wandb.run.summary['Best epoch'] = checkpoint["epoch"] + 1
 # Acc

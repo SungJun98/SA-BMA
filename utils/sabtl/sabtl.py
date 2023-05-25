@@ -3,8 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-import utils
-from baselines.swag.swag_utils import flatten
+import utils.utils as utils
+from utils.swag.swag_utils import flatten
 
 import gpytorch
 from gpytorch.lazy import RootLazyTensor, DiagLazyTensor, AddedDiagLazyTensor

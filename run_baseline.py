@@ -196,7 +196,6 @@ criterion = torch.nn.CrossEntropyLoss()
 # Set Optimizer--------------------------------------
 optimizer = utils.get_optimizer(args, model)
 #----------------------------------------------------------------
-
     
 ## Set Scheduler----------------------------------------------------
 scheduler = utils.get_scheduler(args, optimizer)
