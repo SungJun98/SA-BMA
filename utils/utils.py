@@ -245,20 +245,20 @@ def get_scheduler(args, optimizer):
     if args.scheduler == "step_lr":
         from timm.scheduler.step_lr import StepLRScheduler
         if args.optim == 'sgd':
-            scheduler = StepLRScheduler(optimizer, decay_rate=0.2, )
+            scheduler_ = StepLRScheduler(optimizer, decay_rate=0.2, )
         elif args.optim == 'sam':
-            scheduler = StepLRScheduler(optimizer.base_optimizer, decay_rate=0.2, )
+            scheduler_ = StepLRScheduler(optimizer.base_optimizer, decay_rate=0.2, )
             
     elif args.scheduler == "cos_anneal":
         if args.optim == "sgd":
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.t_max)    
+            scheduler_ = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.t_max)    
         elif args.optim == "sam":
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer.base_optimizer, T_max=args.t_max)
+            scheduler_ = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer.base_optimizer, T_max=args.t_max)
             
     elif args.scheduler == "cos_decay":
         from timm.scheduler.cosine_lr import CosineLRScheduler
         if args.optim == 'sgd':
-            scheduler = CosineLRScheduler(optimizer = optimizer,
+            scheduler_ = CosineLRScheduler(optimizer = optimizer,
                                         t_initial= args.epochs,
                                         lr_min=args.lr_min,
                                         cycle_mul=1,
@@ -268,7 +268,7 @@ def get_scheduler(args, optimizer):
                                         warmup_lr_init=args.warmup_lr_init,
                                             )
         elif args.optim in ["sam", "bsam"]:
-            scheduler = CosineLRScheduler(optimizer = optimizer.base_optimizer,
+            scheduler_ = CosineLRScheduler(optimizer = optimizer.base_optimizer,
                                         t_initial= args.epochs,
                                         lr_min=args.lr_min,
                                         cycle_mul=1,
@@ -278,7 +278,7 @@ def get_scheduler(args, optimizer):
                                         warmup_lr_init=args.warmup_lr_init,
                                             )
     
-    return scheduler
+    return scheduler_
 
 
 

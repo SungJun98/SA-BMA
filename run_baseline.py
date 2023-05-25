@@ -96,6 +96,7 @@ parser.add_argument("--wd", type=float, default=5e-4, help="weight decay (defaul
 
 parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation ball for SAM / BSAM")
 
+# Scheduler
 parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
 
 parser.add_argument("--t_max", type=int, default=300, help="T_max (Cosine Annealing)")
@@ -134,7 +135,7 @@ args = parser.parse_args()
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device : {args.device}")
 
-if args.method in ["last_swag"]:
+if (args.method in ["last_swag"]) and (args.fe_dat is None):
     args.last_layer = True 
     # args.swa_start = 0
 else:
@@ -198,7 +199,8 @@ optimizer = utils.get_optimizer(args, model)
 #----------------------------------------------------------------
     
 ## Set Scheduler----------------------------------------------------
-scheduler = utils.get_scheduler(args, optimizer)
+if args.scheduler not in ["constant", "swag_lr"]:
+    scheduler = utils.get_scheduler(args, optimizer)
 #-------------------------------------------------------------------
 
 

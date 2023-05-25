@@ -205,7 +205,8 @@ optimizer = sabtl_utils.get_optimizer(args, sabtl_model)
 #----------------------------------------------------------------
 
 ## Set Scheduler-------------------------------------------------------
-scheduler = utils.get_scheduler(args, optimizer)
+if args.scheduler not in ["constant", "swag_lr"]:
+    scheduler = utils.get_scheduler(args, optimizer)
 #-------------------------------------------------------------------
 
 ## Resume ---------------------------------------------------------------------------
