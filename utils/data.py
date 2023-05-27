@@ -33,7 +33,7 @@ class ExtractedDataSet(Dataset):
 def get_cifar10(data_path='/mlainas/lsj9862/cifar10', batch_size=256, num_workers=4, use_validation=False, val_ratio=0.1, aug=True):
     if aug:
         transform_train = create_transform(224, is_training=True)
-        transform_test = create_transform(224, )
+        transform_test = create_transform(224)
     else:
         transform_train = transforms.Compose([
                 transforms.RandomHorizontalFlip(),
@@ -136,7 +136,7 @@ def get_cifar10_vitb16_fe(data_path="/mlainas/lsj9862/data/cifar10_vitb16-i21k_f
 def get_cifar100(data_path='/mlainas/lsj9862/cifar100', batch_size=256, num_workers=4, use_validation=False, val_ratio=0.1, aug=True):
     if aug:
         transform_train = create_transform(224, is_training=True)
-        transform_test = create_transform(224, )
+        transform_test = create_transform(224)
     else:
         transform_train = transforms.Compose([
                 transforms.RandomHorizontalFlip(),

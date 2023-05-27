@@ -16,6 +16,7 @@ class SABTL(torch.nn.Module):
         backbone,
         src_bnn = 'swag',
         pre_trained = True,
+        fe_dat = None, 
         w_mean = None,
         diag_only = False,
         w_var=None,
@@ -23,7 +24,7 @@ class SABTL(torch.nn.Module):
         low_rank = 20,
         w_cov_sqrt=None,
         prior_cov_scale = 1,
-        var_clamp = 1e-8,
+        var_clamp = 1e-16,
     ):
         super(SABTL, self).__init__()
         
@@ -38,7 +39,7 @@ class SABTL(torch.nn.Module):
         for p in backbone.parameters():
             p.requires_grad = False
             self.full_model_shape.append(p.shape)
-        
+
         ## Load Pre-Trained Model
         if pre_trained == False:
             if w_mean is not None:
@@ -47,14 +48,22 @@ class SABTL(torch.nn.Module):
                 raise RuntimeError("We need pre-trained weight to define model")
         
         # Set Last Layer Name
-        for name, _ in self.backbone.named_modules():
-            self.last_layer_name = name
-        
+        if fe_dat is not None:
+            for name, _ in self.backbone.named_modules():
+                self.last_layer_name = name
+        else:
+            self.last_layer_name = "Linear"
+
         # Get total number of parameters and backbone shape which are updated during training
         self.num_params = 0
-        for name, param in self.backbone.named_parameters():
-            if name.split('.')[0] == self.last_layer_name:
+        if fe_dat is not None:
+            for name, param in self.backbone.named_parameters():
+                if name.split('.')[0] == self.last_layer_name:
+                    self.num_params += param.numel()
+        else:
+            for param in self.backbone.parameters():
                 self.num_params += param.numel()
+
         self.backbone_shape = self.full_model_shape[-2:]
 
         ### Add Mean, Var, Cov layer ---------------------------------------------------------------
@@ -123,7 +132,7 @@ class SABTL(torch.nn.Module):
         return nn.utils.stateless.functional_call(self.backbone, params, input)
     
     
-    def sample(self, z_scale=1.0):
+    def sample(self, z_scale=0.0):
         '''
         Sample weight from bnn params
         '''

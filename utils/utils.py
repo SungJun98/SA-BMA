@@ -91,7 +91,7 @@ def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug
     '''
     Load Dataset
     '''
-    import utils.data as data
+    import utils.data.data as data
     if dataset == 'cifar10':
         if fe_dat == 'vitb16-i21k':
             tr_loader, val_loader, te_loader, num_classes = data.get_cifar10_vitb16_fe(batch_size = batch_size,
@@ -111,13 +111,39 @@ def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug
                                                                         num_workers,
                                                                         use_validation = use_validation,
                                                                         aug = aug)
-    elif dataset == 'oxfordflower':
-        raise RuntimeError("You need to add code for this dataset")
     
-    elif dataset == 'oxfordcars':
-        raise RuntimeError("You need to add code for this dataset")
+        
+    elif dataset == 'aircraft':
+        if fe_dat == 'vitb16-i21k':
+            tr_loader, val_loader, te_loader, num_classes = data.get_aircraft_vitb16_fe(batch_size = batch_size,
+                                                                            use_validation = use_validation,)
+        else:
+            tr_loader, val_loader, te_loader, num_classes = data.get_aircraft(data_path, batch_size,
+                                                                        num_workers,
+                                                                        use_validation = use_validation,
+                                                                        aug = aug)
+    elif dataset == 'nabirds':
+        if fe_dat == 'vitb16-i21k':
+            tr_loader, val_loader, te_loader, num_classes = data.get_nabirds_vitb16_fe(batch_size = batch_size,
+                                                                            use_validation = use_validation,)
+        else:
+            tr_loader, val_loader, te_loader, num_classes = data.get_nabirds(data_path, batch_size,
+                                                                        num_workers,
+                                                                        use_validation = use_validation,
+                                                                        aug = aug)    
+        
 
-
+    elif dataset == 'stanfordcars':
+        if fe_dat == 'vitb16-i21k':
+            tr_loader, val_loader, te_loader, num_classes = data.get_cars_vitb16_fe(batch_size = batch_size,
+                                                                            use_validation = use_validation,)
+        else:
+            tr_loader, val_loader, te_loader, num_classes = data.get_cars(data_path, batch_size,
+                                                                        num_workers,
+                                                                        use_validation = use_validation,
+                                                                        aug = aug)    
+    
+    
     if not use_validation:
         val_loader = te_loader
     
@@ -385,14 +411,15 @@ def format_weights(sample, sabtl_model):
     '''  
     sample = unflatten_like_size(sample, sabtl_model.backbone_shape)
     
-    if True: # last_layer만
+    if sabtl_model.last_layer_name != '':
         state_dict = sabtl_model.backbone.state_dict()
         state_dict[f"{sabtl_model.last_layer_name}.weight"] = sample[0]
         state_dict[f"{sabtl_model.last_layer_name}.bias"] = sample[1]    
     else:
-        state_dict = dict()
-        for (name, _), w in zip(sabtl_model.backbone.named_parameters(), sample):
-                state_dict[name] = w
+        state_dict = sabtl_model.backbone.state_dict()
+        state_dict["weight"] = sample[0]
+        state_dict["bias"] = sample[1]    
+    
     return state_dict
 
     

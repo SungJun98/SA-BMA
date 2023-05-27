@@ -38,7 +38,7 @@ parser.add_argument("--resume", type=str, default=None,
 
 ## Data ---------------------------------------------------------
 parser.add_argument(
-    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100"],
+    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "aircraft", "nabirds", "stanfordcars"],
                     help="dataset name")
 
 parser.add_argument(
@@ -130,8 +130,9 @@ parser.add_argument("--covmat_path", type=str, default="/home/lsj9862/BayesianSA
 #----------------------------------------------------------------
 
 ## bma or metrics -----------------------------------------------
+parser.add_argument("--val_mc_num", type=int, default=5, help="Number of models for Mc integration in validation phase")
 parser.add_argument("--eps", type=float, default=1e-8, help="small float to calculate nll")
-parser.add_argument("--bma_num_models", type=int, default=30, help="Number of models for bma")
+parser.add_argument("--bma_num_models", type=int, default=30, help="Number of models for bma in test phase")
 parser.add_argument("--num_bins", type=int, default=50, help="bin number for ece")
 #----------------------------------------------------------------
 
@@ -187,6 +188,7 @@ w_covmat = torch.load(args.covmat_path)
 sabtl_model = sabtl.SABTL(copy.deepcopy(model),
                         src_bnn=args.src_bnn,
                         pre_trained=args.pre_trained,
+                        fe_dat=args.fe_dat,
                         w_mean = w_mean,
                         diag_only=args.diag_only,
                         w_var=w_var,
@@ -250,10 +252,20 @@ for epoch in range(start_epoch, int(args.epochs)):
         tr_res = sabtl_utils.train_sabtl_bsam(tr_loader, sabtl_model, criterion, optimizer, args.device, args.eta, first_step_scaler, second_step_scaler)
         
     # validation / test
-    params, _, _ = sabtl_model.sample(0.0)
-    params = utils.format_weights(params, sabtl_model)
-    val_res = sabtl_utils.eval_sabtl(val_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
-
+    if args.val_mc_num ==1:
+        params, _, _ = sabtl_model.sample(0.0)
+        params = utils.format_weights(params, sabtl_model)
+        val_res = sabtl_utils.eval_sabtl(val_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
+    else:
+        """
+        근데 mc prediction의 acc가 낮고, loss가 높게 나온다..
+        """
+        val_res = sabtl_utils.bma_sabtl(val_loader, sabtl_model, args.val_mc_num,
+                            num_classes, criterion, args.device,
+                            bma_save_path=None, eps=1e-8, num_bins=50,
+                            validation=True,
+                            )
+    
     time_ep = time.time() - time_ep
 
     values = [epoch + 1, f"sabtl-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
@@ -374,7 +386,7 @@ bma_predictions = bma_res["predictions"]
 bma_targets = bma_res["targets"]
 
 # Acc
-bma_accuracy = bma_res["bma_accuracy"] * 100
+bma_accuracy = bma_res["accuracy"]
 wandb.run.summary['bma accuracy'] = bma_accuracy
 print(f"bma accuracy : {bma_accuracy:8.4f}")
 
@@ -385,7 +397,8 @@ print(f"bma nll : {bma_nll:8.4f}")
 
 # ece
 unc = utils.calibration_curve(bma_predictions, bma_targets, args.num_bins)
-bma_ece = unc["ece"]
+# bma_ece = unc["ece"]
+bma_ece = bma_res['ece']
 wandb.run.summary['bma ece'] = bma_ece
 print(f"bma ece : {bma_ece:8.4f}")
 

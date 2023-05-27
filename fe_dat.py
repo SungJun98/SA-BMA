@@ -8,12 +8,12 @@ import numpy as np
 # %%
 ## Settings
 MODEL_NAME = 'vitb16-i21k'
-DATASET = 'cifar100'
-DATA_PATH = f'/data2/lsj9862/data/{DATASET}'
+DATASET = 'nabirds'
+DATA_PATH = f'/data1/lsj9862/data/{DATASET}'
 BATCH_SIZE = 256
 
 # %%
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
 utils.set_seed(0)
 
 
@@ -103,3 +103,5 @@ target_list = torch.concat(target_list, dim=0)
 
 torch.save(feature_list, f"/mlainas/lsj9862/data/{DATASET}_{MODEL_NAME}_fe/te_x.pt")
 torch.save(target_list, f"/mlainas/lsj9862/data/{DATASET}_{MODEL_NAME}_fe/te_y.pt")
+
+# %%

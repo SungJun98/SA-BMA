@@ -37,7 +37,7 @@ parser.add_argument("--resume", type=str, default=None,
 
 ## Data ---------------------------------------------------------
 parser.add_argument(
-    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100"],
+    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "aircraft", "nabirds", "stanfordcars"],
                     help="dataset name")
 
 parser.add_argument(
