@@ -37,7 +37,7 @@ parser.add_argument("--resume", type=str, default=None,
 
 ## Data ---------------------------------------------------------
 parser.add_argument(
-    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "aircraft", "nabirds", "stanfordcars"],
+    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "aircraft", "stanfordcars"],
                     help="dataset name")
 
 parser.add_argument(
@@ -52,10 +52,10 @@ parser.add_argument("--batch_size", type=int, default=256,
 parser.add_argument("--num_workers", type=int, default=4,
             help="number of workers")
 
-parser.add_argument("--use_validation", action='store_true',
+parser.add_argument("--use_validation", action='store_true', default=True,
             help ="Use validation for hyperparameter search (Default : False)")
 
-parser.add_argument("--fe_dat", type=str, default=None, choices=[None, "vitb16-i21k"],
+parser.add_argument("--fe_dat", type=str, default=None, choices=[None, "resnet18-noBN", "vitb16-i21k"],
             help = "Use Feature Extracted from Feature Extractor (Default : None)")
 #----------------------------------------------------------------
 
@@ -99,8 +99,6 @@ parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation
 # Scheduler
 parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
 
-parser.add_argument("--t_max", type=int, default=300, help="T_max (Cosine Annealing)")
-
 parser.add_argument("--lr_min", type=float, default=1e-8,
                 help="Min learning rate. (Cosine Annealing Warmup Restarts)")
 
@@ -135,16 +133,15 @@ args = parser.parse_args()
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device : {args.device}")
 
-if (args.method in ["last_swag"]) and (args.fe_dat is None):
-    args.last_layer = True 
-    # args.swa_start = 0
-else:
-    args.last_layer = False
-    
+if args.method == 'last_swag':
+    args.swa_start = 0
+
 if args.model.split("-")[-1] == "noBN":
     args.batch_norm = False
+    args.aug = False
 else:
     args.batch_norm = True
+    args.aug = True
 
 utils.set_seed(args.seed)
 #------------------------------------------------------------------
@@ -163,8 +160,6 @@ wandb.run.name = utils.set_wandb_runname(args)
 #------------------------------------------------------------------
 
 # Load Data --------------------------------------------------------
-if args.model.split("-")[-1] != "noBN": args.aug = True
-
 tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(args.dataset,
                                                                 args.data_path,
                                                                 args.batch_size,
@@ -177,17 +172,24 @@ print(f"Load Data : {args.dataset} feature extracted from {args.fe_dat}")
 
 # Define Model-----------------------------------------------------
 if args.fe_dat is not None:
-    model = utils.get_last_layer(args.model, num_classes, args.device) 
+    model = utils.get_last_layer(args.model, num_classes, args.device)
+    
 else:
     model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)   
 
 swag_model=None
-if args.method in ["swag", "last_swag"]:
+if args.method == "swag":
     swag_model = swag.SWAG(copy.deepcopy(model),
                         no_cov_mat=args.diag_only,
                         max_num_models=args.max_num_models,
-                        last_layer=args.last_layer).to(args.device)
+                        last_layer=False).to(args.device)
     print("Preparing SWAG model")
+elif args.method == "last_swag":
+    swag_model = swag.SWAG(copy.deepcopy(model),
+                        no_cov_mat=args.diag_only,
+                        max_num_models=args.max_num_models,
+                        last_layer=True).to(args.device)
+    print("Preparing Last-SWAG model")
 #-------------------------------------------------------------------
 
 # Set Criterion-----------------------------------------------------
@@ -207,13 +209,13 @@ if args.scheduler not in ["constant", "swag_lr"]:
 ## Resume ---------------------------------------------------------------------------
 start_epoch = 0
 
-if args.last_layer and not args.pre_trained:
+if not args.pre_trained and args.resume is not None:
     print(f"Resume training from {args.resume}")
     checkpoint = torch.load(args.resume)
     model.load_state_dict(checkpoint["state_dict"])
     if args.method == 'last_swag':
         swag_model.base.load_state_dict(checkpoint["state_dict"], strict=False)
-    utils.freeze_fe(model)
+    utils.freeze_fe(model, args.model)
         
 else:
     if args.resume is not None:

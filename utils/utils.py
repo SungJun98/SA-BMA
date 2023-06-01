@@ -10,8 +10,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from utils.swag.swag_utils import flatten, bn_update, predict
-
 from utils.sam import sam, sam_utils
+
+from utils.models import resnet_noBN, wide_resnet, wide_resnet_noBN
+from torchvision.models import resnet18, resnet50
+from utils.models.vitb16_i21k import VisionTransformer, CONFIGS
 
 ## ------------------------------------------------------------------------------------
 ## Setting Configs --------------------------------------------------------------------
@@ -87,14 +90,15 @@ def set_wandb_runname(args):
 
 
 
-def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug, fe_dat='vitb16-i21k'):
+def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug, fe_dat):
     '''
     Load Dataset
     '''
     import utils.data.data as data
     if dataset == 'cifar10':
-        if fe_dat == 'vitb16-i21k':
-            tr_loader, val_loader, te_loader, num_classes = data.get_cifar10_vitb16_fe(batch_size = batch_size,
+        if fe_dat is not None:
+            tr_loader, val_loader, te_loader, num_classes = data.get_cifar10_fe(fe_dat=fe_dat,
+                                                                            batch_size = batch_size,
                                                                             use_validation = use_validation,)
         else:
             tr_loader, val_loader, te_loader, num_classes = data.get_cifar10(data_path, batch_size,
@@ -103,8 +107,9 @@ def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug
                                                                             aug = aug)
             
     elif dataset == 'cifar100':
-        if fe_dat == 'vitb16-i21k':
-            tr_loader, val_loader, te_loader, num_classes = data.get_cifar100_vitb16_fe(batch_size = batch_size,
+        if fe_dat is not None:
+            tr_loader, val_loader, te_loader, num_classes = data.get_cifar100_fe(fe_dat=fe_dat,
+                                                                            batch_size = batch_size,
                                                                             use_validation = use_validation,)
         else:
             tr_loader, val_loader, te_loader, num_classes = data.get_cifar100(data_path, batch_size,
@@ -114,8 +119,9 @@ def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug
     
         
     elif dataset == 'aircraft':
-        if fe_dat == 'vitb16-i21k':
-            tr_loader, val_loader, te_loader, num_classes = data.get_aircraft_vitb16_fe(batch_size = batch_size,
+        if fe_dat is not None:
+            tr_loader, val_loader, te_loader, num_classes = data.get_aircraft_fe(fe_dat = fe_dat,
+                                                                            batch_size = batch_size,
                                                                             use_validation = use_validation,)
         else:
             tr_loader, val_loader, te_loader, num_classes = data.get_aircraft(data_path, batch_size,
@@ -123,19 +129,19 @@ def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug
                                                                         use_validation = use_validation,
                                                                         aug = aug)
     elif dataset == 'nabirds':
-        if fe_dat == 'vitb16-i21k':
-            tr_loader, val_loader, te_loader, num_classes = data.get_nabirds_vitb16_fe(batch_size = batch_size,
+        if fe_dat is not None:
+            tr_loader, val_loader, te_loader, num_classes = data.get_nabirds_fe(fe_dat = fe_dat
+                                                                            ,batch_size = batch_size,
                                                                             use_validation = use_validation,)
         else:
             tr_loader, val_loader, te_loader, num_classes = data.get_nabirds(data_path, batch_size,
                                                                         num_workers,
                                                                         use_validation = use_validation,
                                                                         aug = aug)    
-        
-
     elif dataset == 'stanfordcars':
-        if fe_dat == 'vitb16-i21k':
-            tr_loader, val_loader, te_loader, num_classes = data.get_cars_vitb16_fe(batch_size = batch_size,
+        if fe_dat is not None:
+            tr_loader, val_loader, te_loader, num_classes = data.get_cars_fe(fe_dat = fe_dat,
+                                                                            batch_size = batch_size,
                                                                             use_validation = use_validation,)
         else:
             tr_loader, val_loader, te_loader, num_classes = data.get_cars(data_path, batch_size,
@@ -155,10 +161,6 @@ def get_backbone(model_name, num_classes, device, pre_trained=False):
     '''
     Define Backbone Model
     '''
-    from utils.models import resnet_noBN, wide_resnet, wide_resnet_noBN
-    from torchvision.models import resnet18, resnet50
-    from utils.models.vitb16_i21k import VisionTransformer, CONFIGS
-    
     ## ResNet18
     if model_name == "resnet18":
         if pre_trained:
@@ -231,7 +233,6 @@ def get_last_layer(model_name, num_classes, device):
     Load only last layer of backbone model
     e.g. Classifier, Fully-Connected layer
     """
-    from utils.models.vitb16_i21k import VisionTransformer, CONFIGS
     ## ViT-B/16-ImageNet21K
     if model_name == "vitb16-i21k":
         model = VisionTransformer(CONFIGS["ViT-B_16"], 

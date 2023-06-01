@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-
+from math import pi
 import utils.utils as utils
 from utils.swag.swag_utils import flatten
 
@@ -174,23 +174,24 @@ class SABTL(torch.nn.Module):
             else:
                 cov_mat_lt = RootLazyTensor(self.bnn_param['cov_sqrt'].t())
                 var_lt = DiagLazyTensor(soft_std**2) #  + self.var_clamp)
-                covar = AddedDiagLazyTensor(var_lt, cov_mat_lt)
+                covar = AddedDiagLazyTensor(var_lt, cov_mat_lt).add_jitter(1e-6)
         else:
             covar = torch.diag(soft_std**2)
         
         qdist = MultivariateNormal(self.bnn_param['mean'], covar)
+
         with gpytorch.settings.num_trace_samples(1) and gpytorch.settings.max_cg_iterations(25):
             log_prob =  qdist.log_prob(params)
-        
         ## Fisher Inverse w.r.t. mean
         # \nabla_\mean p(w | \theta)
         # mean_fi = torch.autograd.grad(log_prob, self.bnn_param['mean'], retain_graph=True)
         # mean_fi = mean_fi[0]**2
         # mean_fi = 1 / (1 + eta * mean_fi)    
-        mean_fi = torch.inverse(qdist.covariance_matrix) @ (params - self.bnn_param['mean'])    ## calculate derivative manually
+        # mean_fi = torch.linalg.solve(qdist.covariance_matrix, (params - self.bnn_param['mean']))    ## calculate derivative manually
+        mean_fi = covar.inv_matmul((params - self.bnn_param['mean']))   ## calculate derivative manually (gpytorch version)
         mean_fi = mean_fi**2
         mean_fi = 1 / (1 + eta * mean_fi)
-        
+
         ## Fisher Inverse w.r.t. variance
         std_fi = torch.autograd.grad(log_prob, self.bnn_param['log_std'], retain_graph=True)
         std_fi = std_fi[0]**2
