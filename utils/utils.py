@@ -37,16 +37,22 @@ def set_save_path(args):
     '''
     Set save path following the method / model / dataset / optimizer / hyperparameters
     '''
-    ### scheduler part
+    ### Few-shot part
+    if args.dat_per_cls >= 0:
+        save_path_ = f"{args.save_path}/{args.dataset}/{args.dat_per_cls}shot"
+    else:
+        save_path_ = f"{args.save_path}/{args.dataset}/"
+        
+    ### scheduler part   
     if args.scheduler == "cos_anneal":
-        save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}_{args.t_max}"
+        save_path_ = f"{save_path_}/{args.model}/{args.method}-{args.optim}/{args.scheduler}_{args.t_max}"
     elif args.scheduler == "swag_lr":
-        save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}_{args.swa_lr}"
+        save_path_ = f"{save_path_}/{args.model}/{args.method}-{args.optim}/{args.scheduler}_{args.swa_lr}"
     elif args.scheduler == "cos_decay":
         # save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}({args.first_cycle_steps}/{args.cycle_mult}/{args.min_lr}/{args.warmup_steps}/{args.decay_ratio})"
-        save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}_{args.lr_min}/{args.warmup_t}_{args.warmup_lr_init}"
+        save_path_ = f"{save_path_}/{args.model}/{args.method}-{args.optim}/{args.scheduler}_{args.lr_min}/{args.warmup_t}_{args.warmup_lr_init}"
     else:    
-        save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}"
+        save_path_ = f"{save_path_}/{args.model}/{args.method}-{args.optim}/{args.scheduler}"
     
     ## learning hyperparameter part
     if args.method in ["swag", "last_swag"]:
@@ -65,16 +71,21 @@ def set_wandb_runname(args):
     '''
     Set wandb run name following the method / model / dataset / optimizer / hyperparameters
     '''
+    ### Few-shot part
+    if args.dat_per_cls >= 0:
+        run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.dat_per_cls}shot"
+    else:
+        run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}"
+        
     ### scheduler part
     if args.scheduler == "cos_anneal":
-        run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.t_max})"
+        run_name_ = f"{run_name_}_{args.scheduler}({args.t_max})"
     elif args.scheduler == "swag_lr":
-        run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.swa_lr})"
+        run_name_ = f"{run_name_}_{args.scheduler}({args.swa_lr})"
     elif args.scheduler == "cos_decay":
-        # run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.first_cycle_steps}/{args.cycle_mult}/{args.min_lr}/{args.warmup_steps}/{args.decay_ratio})"
-        run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}({args.lr_min}_{args.warmup_t}_{args.warmup_lr_init})"
+        run_name_ = f"{run_name_}_{args.scheduler}({args.lr_min}_{args.warmup_t}_{args.warmup_lr_init})"
     else:
-        run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.scheduler}"
+        run_name_ = f"{run_name_}_{args.scheduler}"
     
     ## learning hyperparameter part
     if args.method in ["swag", "last_swag"]:
