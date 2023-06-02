@@ -90,7 +90,7 @@ def set_wandb_runname(args):
 
 
 
-def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug, fe_dat):
+def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug, fe_dat, dat_per_cls):
     '''
     Load Dataset
     '''
@@ -99,55 +99,59 @@ def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug
         if fe_dat is not None:
             tr_loader, val_loader, te_loader, num_classes = data.get_cifar10_fe(fe_dat=fe_dat,
                                                                             batch_size = batch_size,
-                                                                            use_validation = use_validation,)
+                                                                            use_validation = use_validation,
+                                                                            dat_per_cls = dat_per_cls)
         else:
             tr_loader, val_loader, te_loader, num_classes = data.get_cifar10(data_path, batch_size,
                                                                             num_workers,
                                                                             use_validation = use_validation,
-                                                                            aug = aug)
+                                                                            aug = aug,
+                                                                            dat_per_cls = dat_per_cls)
             
     elif dataset == 'cifar100':
         if fe_dat is not None:
             tr_loader, val_loader, te_loader, num_classes = data.get_cifar100_fe(fe_dat=fe_dat,
                                                                             batch_size = batch_size,
-                                                                            use_validation = use_validation,)
+                                                                            use_validation = use_validation,
+                                                                            dat_per_cls = dat_per_cls)
         else:
             tr_loader, val_loader, te_loader, num_classes = data.get_cifar100(data_path, batch_size,
                                                                         num_workers,
                                                                         use_validation = use_validation,
-                                                                        aug = aug)
+                                                                        aug = aug,
+                                                                        dat_per_cls = dat_per_cls)
     
         
-    elif dataset == 'aircraft':
-        if fe_dat is not None:
-            tr_loader, val_loader, te_loader, num_classes = data.get_aircraft_fe(fe_dat = fe_dat,
-                                                                            batch_size = batch_size,
-                                                                            use_validation = use_validation,)
-        else:
-            tr_loader, val_loader, te_loader, num_classes = data.get_aircraft(data_path, batch_size,
-                                                                        num_workers,
-                                                                        use_validation = use_validation,
-                                                                        aug = aug)
-    elif dataset == 'nabirds':
-        if fe_dat is not None:
-            tr_loader, val_loader, te_loader, num_classes = data.get_nabirds_fe(fe_dat = fe_dat
-                                                                            ,batch_size = batch_size,
-                                                                            use_validation = use_validation,)
-        else:
-            tr_loader, val_loader, te_loader, num_classes = data.get_nabirds(data_path, batch_size,
-                                                                        num_workers,
-                                                                        use_validation = use_validation,
-                                                                        aug = aug)    
-    elif dataset == 'stanfordcars':
-        if fe_dat is not None:
-            tr_loader, val_loader, te_loader, num_classes = data.get_cars_fe(fe_dat = fe_dat,
-                                                                            batch_size = batch_size,
-                                                                            use_validation = use_validation,)
-        else:
-            tr_loader, val_loader, te_loader, num_classes = data.get_cars(data_path, batch_size,
-                                                                        num_workers,
-                                                                        use_validation = use_validation,
-                                                                        aug = aug)    
+    # elif dataset == 'aircraft':
+    #     if fe_dat is not None:
+    #         tr_loader, val_loader, te_loader, num_classes = data.get_aircraft_fe(fe_dat = fe_dat,
+    #                                                                         batch_size = batch_size,
+    #                                                                         use_validation = use_validation,)
+    #     else:
+    #         tr_loader, val_loader, te_loader, num_classes = data.get_aircraft(data_path, batch_size,
+    #                                                                     num_workers,
+    #                                                                     use_validation = use_validation,
+    #                                                                     aug = aug)
+    # elif dataset == 'nabirds':
+    #     if fe_dat is not None:
+    #         tr_loader, val_loader, te_loader, num_classes = data.get_nabirds_fe(fe_dat = fe_dat
+    #                                                                         ,batch_size = batch_size,
+    #                                                                         use_validation = use_validation,)
+    #     else:
+    #         tr_loader, val_loader, te_loader, num_classes = data.get_nabirds(data_path, batch_size,
+    #                                                                     num_workers,
+    #                                                                     use_validation = use_validation,
+    #                                                                     aug = aug)    
+    # elif dataset == 'stanfordcars':
+    #     if fe_dat is not None:
+    #         tr_loader, val_loader, te_loader, num_classes = data.get_cars_fe(fe_dat = fe_dat,
+    #                                                                         batch_size = batch_size,
+    #                                                                         use_validation = use_validation,)
+    #     else:
+    #         tr_loader, val_loader, te_loader, num_classes = data.get_cars(data_path, batch_size,
+    #                                                                     num_workers,
+    #                                                                     use_validation = use_validation,
+    #                                                                     aug = aug)    
     
     
     if not use_validation:

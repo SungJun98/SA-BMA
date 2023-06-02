@@ -38,7 +38,7 @@ parser.add_argument("--resume", type=str, default=None,
 
 ## Data ---------------------------------------------------------
 parser.add_argument(
-    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "aircraft", "nabirds", "stanfordcars"],
+    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100"],
                     help="dataset name")
 
 parser.add_argument(
@@ -56,7 +56,10 @@ parser.add_argument("--num_workers", type=int, default=4,
 parser.add_argument("--use_validation", action='store_true',
             help ="Use validation for hyperparameter search (Default : False)")
 
-parser.add_argument("--fe_dat", type=str, default=None, choices=[None, "vitb16-i21k"],
+parser.add_argument("--dat_per_cls", type=int, default=-1,
+            help="Number of data points per class in few-shot setting. -1 denotes deactivate few-shot setting (Default : -1)")
+
+parser.add_argument("--fe_dat", type=str, default=None, choices=[None, "resnet18-noBN", "vitb16-i21k"],
             help = "Use Feature Extracted from Feature Extractor (Default : None)")
 #----------------------------------------------------------------
 
@@ -101,16 +104,14 @@ parser.add_argument("--eta", type=float, default=1.0, help="Eta to calculate Inv
 
 parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
 
-parser.add_argument("--t_max", type=int, default=300, help="T_max (Cosine Annealing)")
-
 parser.add_argument("--lr_min", type=float, default=1e-8,
                 help="Min learning rate. (Cosine Annealing Warmup Restarts)")
 
-parser.add_argument("--warmup_lr_init", type=float, default=1e-7,
-                help="Linear warmup initial learning rate (Cosine Annealing Warmup Restarts)")
-
 parser.add_argument("--warmup_t", type=int, default=10,
                 help="Linear warmup step size. (Cosine Annealing Warmup Restarts)")
+
+parser.add_argument("--warmup_lr_init", type=float, default=1e-7,
+                help="Linear warmup initial learning rate (Cosine Annealing Warmup Restarts)")
 #----------------------------------------------------------------
 
 
@@ -143,8 +144,6 @@ args = parser.parse_args()
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device : {args.device}")
 
-args.last_layer = True
-
 if args.model.split("-")[-1] == "noBN":
     args.batch_norm = False
 else:
@@ -164,13 +163,11 @@ wandb.run.name = utils.set_wandb_runname(args)
 #----------------------------------------------------------------
 
 # Load Data ------------------------------------------------------
-if args.model.split("-")[-1] != "noBN": args.aug = True
 tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(args.dataset,
                                                             data_path = args.data_path,
                                                             batch_size = args.batch_size,
                                                             num_workers = args.num_workers,
                                                             use_validation = args.use_validation,
-                                                            aug = args.aug,
                                                             fe_dat = args.fe_dat)
 print(f"Load Data : {args.dataset} feature extracted from {args.fe_dat}")
 #----------------------------------------------------------------

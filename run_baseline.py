@@ -37,7 +37,7 @@ parser.add_argument("--resume", type=str, default=None,
 
 ## Data ---------------------------------------------------------
 parser.add_argument(
-    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "aircraft", "stanfordcars"],
+    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100"],
                     help="dataset name")
 
 parser.add_argument(
@@ -54,6 +54,9 @@ parser.add_argument("--num_workers", type=int, default=4,
 
 parser.add_argument("--use_validation", action='store_true', default=True,
             help ="Use validation for hyperparameter search (Default : False)")
+
+parser.add_argument("--dat_per_cls", type=int, default=-1,
+            help="Number of data points per class in few-shot setting. -1 denotes deactivate few-shot setting (Default : -1)")
 
 parser.add_argument("--fe_dat", type=str, default=None, choices=[None, "resnet18-noBN", "vitb16-i21k"],
             help = "Use Feature Extracted from Feature Extractor (Default : None)")
@@ -165,8 +168,9 @@ tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(args.dataset,
                                                                 args.batch_size,
                                                                 args.num_workers,
                                                                 use_validation = args.use_validation,
+                                                                fe_dat = args.fe_dat,
                                                                 aug = args.aug,
-                                                                fe_dat = args.fe_dat)
+                                                                dat_per_cls = args.dat_per_cls)
 print(f"Load Data : {args.dataset} feature extracted from {args.fe_dat}")
 #------------------------------------------------------------------
 
