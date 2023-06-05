@@ -168,15 +168,14 @@ tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(args.dataset,
                                                             batch_size = args.batch_size,
                                                             num_workers = args.num_workers,
                                                             use_validation = args.use_validation,
-                                                            fe_dat = args.fe_dat)
+                                                            fe_dat = args.fe_dat,
+                                                            dat_per_cls = args.dat_per_cls,
+                                                            seed = args.seed)
 print(f"Load Data : {args.dataset} feature extracted from {args.fe_dat}")
 #----------------------------------------------------------------
 
 # Define Model------------------------------------------------------
-if args.fe_dat is not None:
-    model = utils.get_last_layer(args.model, num_classes, args.device) 
-else:
-    model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)   
+model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained, args.fe_dat)   
 
 
 w_mean = torch.load(args.mean_path)

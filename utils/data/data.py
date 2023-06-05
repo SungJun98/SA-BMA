@@ -10,11 +10,11 @@ from timm.data.transforms_factory import create_transform
 
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 
-
+"""
 class ExtractedDataSet(Dataset): 
-    """
+    '''
     Class for Feature Extracted data
-    """
+    '''
     def __init__(self, feature, target):
         self.x = feature
         self.y = target
@@ -26,11 +26,15 @@ class ExtractedDataSet(Dataset):
         x = self.x[idx]
         y = self.y[idx]
         return x, y
-
+"""
 
 ####################################################################################################################################
 ### CIFAR-10 ----------------------------------------------------------------------------------------------------------------------|
-def get_cifar10(data_path='/mlainas/lsj9862/cifar10', batch_size=256, num_workers=4, use_validation=False, aug=True, val_ratio=0.1, dat_per_cls=-1):
+def get_cifar10(data_path='/data1/lsj9862/data/cifar10',
+            batch_size=256, num_workers=4, use_validation=True,
+            aug=True, val_ratio=0.1, dat_per_cls=-1,
+            seed=0
+            ):
     ## Get transform
     if aug:
         transform_train = create_transform(224, is_training=True)
@@ -65,21 +69,7 @@ def get_cifar10(data_path='/mlainas/lsj9862/cifar10', batch_size=256, num_worker
         
         ## Pre-Setting for Few-shot Setting
         if dat_per_cls >= 0:
-            class_indices = [[] for _ in range(num_classes)]
-            for idx, (_, target) in enumerate(tr_data):
-                class_indices[target].append(idx)
-            
-            few_shot_indices = []
-            for indices in class_indices:
-                few_shot_indices.extend(indices[:dat_per_cls])
-
-            sampler = SubsetRandomSampler(few_shot_indices)
-        
-            tr_loader = DataLoader(tr_data,
-                                batch_size=batch_size,
-                                num_workers=0,
-                                pin_memory=True,
-                                sampler=sampler)
+            tr_loader = torch.load(f'/mlainas/lsj9862/data/cifar10/{dat_per_cls}shot/tr_loader_seed{seed}.pth')
         else:
             tr_loader = DataLoader(tr_data,
                                 batch_size=batch_size,
@@ -111,10 +101,10 @@ def get_cifar10(data_path='/mlainas/lsj9862/cifar10', batch_size=256, num_worker
     return tr_loader, val_loader, te_loader, num_classes
 
 
-
+"""
 def get_cifar10_fe(fe_dat="vitb16-i21k", batch_size=256, num_workers=0, use_validation=True, dat_per_cls=-1):
     if dat_per_cls >= 0:
-        data_path= f"/mlainas/lsj9862/data/cifar10_{fe_dat}_fe_{dat_per_cls}shot/"
+        data_path= f"/mlainas/lsj9862/data/cifar10/{fe_dat}_fe_{dat_per_cls}shot/"
     else:
         data_path = f"/mlainas/lsj9862/data/cifar10_{fe_dat}_fe"
         
@@ -151,14 +141,17 @@ def get_cifar10_fe(fe_dat="vitb16-i21k", batch_size=256, num_workers=0, use_vali
     num_classes = max(te_data.y) + 1
 
     return tr_loader, val_loader, te_loader, num_classes
-
+"""
 ####################################################################################################################################
 # ---------------------------------------------------------------------------------------------------------------------------------|
 
 
 ####################################################################################################################################
 ### CIFAR-100 ---------------------------------------------------------------------------------------------------------------------|
-def get_cifar100(data_path='/mlainas/lsj9862/cifar100', batch_size=256, num_workers=4, use_validation=False, aug=True, val_ratio=0.1, dat_per_cls=-1):
+def get_cifar100(data_path='/data1/lsj9862/data/cifar100',
+            batch_size=256, num_workers=4, use_validation=True,
+            aug=True, val_ratio=0.1, dat_per_cls=-1,
+            seed=0):
     ## Get transform
     if aug:
         transform_train = create_transform(224, is_training=True)
@@ -192,22 +185,7 @@ def get_cifar100(data_path='/mlainas/lsj9862/cifar100', batch_size=256, num_work
         
         ## Pre-Setting for Few-shot Setting
         if dat_per_cls >= 0:
-            class_indices = [[] for _ in range(num_classes)]
-            for idx, (_, target) in enumerate(tr_data):
-                class_indices[target].append(idx)
-            
-            few_shot_indices = []
-            for indices in class_indices:
-                few_shot_indices.extend(indices[:dat_per_cls])
-
-            sampler = SubsetRandomSampler(few_shot_indices)
-        
-            tr_loader = DataLoader(tr_data,
-                                batch_size=batch_size,
-                                shuffle=True,
-                                num_workers=0,
-                                pin_memory=True,
-                                sampler=sampler)
+            tr_loader = torch.load(f'/mlainas/lsj9862/data/cifar100/{dat_per_cls}shot/tr_loader_seed{seed}.pth')
         else:
             tr_loader = DataLoader(tr_data,
                                 batch_size=batch_size,
@@ -239,7 +217,7 @@ def get_cifar100(data_path='/mlainas/lsj9862/cifar100', batch_size=256, num_work
     return tr_loader, val_loader, te_loader, num_classes
 
 
-
+"""
 def get_cifar100_fe(fe_dat="vitb16-i21k", batch_size=256, num_workers=0, use_validation=True, dat_per_cls=-1):
     if dat_per_cls >= 0:
         data_path= f"/mlainas/lsj9862/data/cifar100_{fe_dat}_fe_{dat_per_cls}shot/"
@@ -280,5 +258,6 @@ def get_cifar100_fe(fe_dat="vitb16-i21k", batch_size=256, num_workers=0, use_val
     num_classes = max(te_data.y) + 1
 
     return tr_loader, val_loader, te_loader, num_classes
+"""
 ####################################################################################################################################
 # ---------------------------------------------------------------------------------------------------------------------------------|

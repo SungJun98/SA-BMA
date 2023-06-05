@@ -14,7 +14,7 @@ from utils.sam import sam, sam_utils
 
 from utils.models import resnet_noBN, wide_resnet, wide_resnet_noBN
 from torchvision.models import resnet18, resnet50
-from utils.models.vitb16_i21k import VisionTransformer, CONFIGS
+import timm
 
 ## ------------------------------------------------------------------------------------
 ## Setting Configs --------------------------------------------------------------------
@@ -101,7 +101,7 @@ def set_wandb_runname(args):
 
 
 
-def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug, fe_dat, dat_per_cls):
+def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug, fe_dat, dat_per_cls, seed):
     '''
     Load Dataset
     '''
@@ -117,7 +117,8 @@ def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug
                                                                             num_workers,
                                                                             use_validation = use_validation,
                                                                             aug = aug,
-                                                                            dat_per_cls = dat_per_cls)
+                                                                            dat_per_cls = dat_per_cls,
+                                                                            seed = seed)
             
     elif dataset == 'cifar100':
         if fe_dat is not None:
@@ -130,7 +131,8 @@ def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug
                                                                         num_workers,
                                                                         use_validation = use_validation,
                                                                         aug = aug,
-                                                                        dat_per_cls = dat_per_cls)
+                                                                        dat_per_cls = dat_per_cls,
+                                                                        seed = seed)
     
         
     # elif dataset == 'aircraft':
@@ -172,10 +174,15 @@ def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug
 
 
 
-def get_backbone(model_name, num_classes, device, pre_trained=False):
+def get_backbone(model_name, num_classes, device, pre_trained=False, fe_dat=None):
     '''
     Define Backbone Model
     '''
+    if fe_dat is not None:
+        last_layer = True
+    else:
+        last_layer = False
+
     ## ResNet18
     if model_name == "resnet18":
         if pre_trained:
@@ -185,9 +192,14 @@ def get_backbone(model_name, num_classes, device, pre_trained=False):
             model.fc = nn.Linear(in_features, num_classes)
         else:
             model = resnet18(pretrained=False, num_classes=num_classes)
+
+        if last_layer:
+            model = model.fc
         
     elif model_name == "resnet18-noBN":
         model = resnet_noBN.resnet18(num_classes=num_classes)
+        if last_layer:
+            model = model.fc
 
 
     ## ResNet50
@@ -197,72 +209,80 @@ def get_backbone(model_name, num_classes, device, pre_trained=False):
             freeze_fe(model, model_name)
             in_features = model.fc.in_features
             model.fc = nn.Linear(in_features, num_classes)
+
+            if last_layer:
+                model = model.fc
+
         else:
             model = resnet50(pretrained=False, num_classes=num_classes)
+            if last_layer:
+                model = model.fc
             
+
     elif model_name == "resnet50-noBN":
         model = resnet_noBN.resnet50(num_classes=num_classes)
+        if last_layer:
+            model = model.fc
 
 
     ## WideResNet28x10
     elif model_name == "wideresnet28x10":
         model_cfg = getattr(wide_resnet, "WideResNet28x10")
         model = model_cfg.base(num_classes=num_classes)
-    elif model_name == "wideresnet28x10-noBN":
+        if last_layer:
+            raise AssertionError("You need to implement code for this")
         
+    elif model_name == "wideresnet28x10-noBN":
         model_cfg = getattr(wide_resnet_noBN, "WideResNet28x10")
         model = model_cfg.base(num_classes=num_classes)
+        if last_layer:
+            raise AssertionError("You need to implement code for this")
 
 
     ## WideResNet40x10
     elif model_name == "wideresnet40x10":
         model_cfg = getattr(wide_resnet, "WideResNet40x10")
         model = model_cfg.base(num_classes=num_classes)
+        if last_layer:
+            raise AssertionError("You need to implement code for this")
         
     elif model_name == "wideresnet40x10-noBN":
         model_cfg = getattr(wide_resnet_noBN, "WideResNet40x10")
         model = model_cfg.base(num_classes=num_classes)
+        if last_layer:
+            raise AssertionError("You need to implement code for this")
     
     
     ## ViT-B/16-ImageNet21K
     if model_name == "vitb16-i21k":
-        model = VisionTransformer(CONFIGS["ViT-B_16"], 
-                        num_classes=21843, 
-                        zero_head=False, 
-                        img_size=224, 
-                        vis=True)
-        model.load_from(np.load("/mlainas/lsj9862/model/vit16b_i21k/imagenet21k_ViT-B_16.npz"))
+        model = timm.create_model('vit_base_patch16_224_in21k', pretrained=True)
         freeze_fe(model, model_name)
         model.head = torch.nn.Linear(768, num_classes)
+        if last_layer:
+            model = model.head
     
     model.to(device)
-    
     print(f"Preparing model {model_name}")
-    
     return model
 
 
 
-def get_last_layer(model_name, num_classes, device):
-    """
-    Load only last layer of backbone model
-    e.g. Classifier, Fully-Connected layer
-    """
-    ## ViT-B/16-ImageNet21K
-    if model_name == "vitb16-i21k":
-        model = VisionTransformer(CONFIGS["ViT-B_16"], 
-                        num_classes=21843, 
-                        zero_head=False, 
-                        img_size=224, 
-                        vis=True)
-        model.head = torch.nn.Linear(768, num_classes)
-        model = model.head
+# def get_last_layer(model_name, num_classes, device):
+#     """
+#     Load only last layer of backbone model
+#     e.g. Classifier, Fully-Connected layer
+#     """
+#     ## ViT-B/16-ImageNet21K
+#     if model_name == "vitb16-i21k":
+#         model = timm.create_model('vit_base_patch16_224_in21k', pretrained=True)
+#         model.head = torch.nn.Linear(768, num_classes)
+#         model = model.head
            
-    model.to(device)
+#     model.to(device)
     
-    print(f"Preparing last layer of {model_name}")
+#     print(f"Preparing last layer of {model_name}")
     
-    return model
+#     return model
 
  
 
