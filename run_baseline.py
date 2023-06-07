@@ -72,8 +72,8 @@ parser.add_argument("--fe_dat", type=str, default=None, choices=[None, "resnet18
 parser.add_argument(
     "--model",
     type=str, default='resnet18', required=True,
-    choices=['resnet18', 'resnet50', 'wideresnet28x10', 'wideresnet40x10',
-            'resnet18-noBN', 'resnet50-noBN', 'wideresnet28x10-noBN', 'wideresnet40x10-noBN',
+    choices=['resnet18', 'resnet50', 'resnet101', 'wideresnet28x10', 'wideresnet40x10',
+            'resnet18-noBN', 'resnet50-noBN', 'resnet101-noBN', 'wideresnet28x10-noBN', 'wideresnet40x10-noBN',
             "vitb16-i21k"],
     help="model name (default : resnet18)")
 

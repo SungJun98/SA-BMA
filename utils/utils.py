@@ -13,7 +13,7 @@ from utils.swag.swag_utils import flatten, bn_update, predict
 from utils.sam import sam, sam_utils
 
 from utils.models import resnet_noBN, wide_resnet, wide_resnet_noBN
-from torchvision.models import resnet18, resnet50
+from torchvision.models import resnet18, resnet50, resnet101
 import timm
 
 ## ------------------------------------------------------------------------------------
@@ -218,13 +218,33 @@ def get_backbone(model_name, num_classes, device, pre_trained=False, fe_dat=None
             if last_layer:
                 model = model.fc
             
-
     elif model_name == "resnet50-noBN":
         model = resnet_noBN.resnet50(num_classes=num_classes)
         if last_layer:
             model = model.fc
 
+    ## ResNet101
+    elif model_name == "resnet101":
+        if pre_trained:
+            model = resnet101(pretrained=True)
+            freeze_fe(model, model_name)
+            in_features = model.fc.in_features
+            model.fc = nn.Linear(in_features, num_classes)
 
+            if last_layer:
+                model = model.fc
+
+        else:
+            model = resnet101(pretrained=False, num_classes=num_classes)
+            if last_layer:
+                model = model.fc
+            
+    elif model_name == "resnet101-noBN":
+        model = resnet_noBN.resnet101(num_classes=num_classes)
+        if last_layer:
+            model = model.fc
+            
+            
     ## WideResNet28x10
     elif model_name == "wideresnet28x10":
         model_cfg = getattr(wide_resnet, "WideResNet28x10")
@@ -294,7 +314,7 @@ def get_optimizer(args, model):
         if args.model == 'vitb16-i21k':
             optim_param = model.head.parameters()
         elif args.model == 'resnet101':
-            raise ValueError("Write code for this!!")
+            optim_param = model.fc.parameters()
     else:
         optim_param = model.parameters()
 
