@@ -35,6 +35,12 @@ parser.add_argument("--print_epoch", type=int, default=10, help="Printing epoch"
 parser.add_argument("--resume", type=str, default=None,
     help="path to load saved model to resume training (default: None)",)
 
+parser.add_argument("--linear_probe", action="store_true", default=False,
+        help = "When we do Linear Probing (Default : False)")
+
+parser.add_argument("--tol", type=int, default=30,
+        help="tolerance for early stopping (Default : 30)")
+
 ## Data ---------------------------------------------------------
 parser.add_argument(
     "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100"],
@@ -136,7 +142,7 @@ args = parser.parse_args()
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device : {args.device}")
 
-if args.method == 'last_swag':
+if args.method == 'last_swag' and not args.linear_probe:
     args.swa_start = 0
 
 if args.model.split("-")[-1] == "noBN":
@@ -256,7 +262,7 @@ if args.method in ["swag", "last_swag"]:
     print(f"Running SWAG...")
 
 
-best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; cnt=0; best_swag_val_loss=9999
+best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; cnt=0; swag_cnt = 0; best_swag_val_loss=9999
 print("Start Training!!")
 for epoch in range(start_epoch, int(args.epochs)):
     time_ep = time.time()
@@ -286,7 +292,7 @@ for epoch in range(start_epoch, int(args.epochs)):
         swag_model.collect_model(model)
         swag_model.sample(0.0)
         
-        if (args.batch_norm == True) and (not args.last_layer):
+        if args.batch_norm == True:
             swag_utils.bn_update(tr_loader, swag_model)
             
         swag_res = utils.eval(val_loader, swag_model, criterion, args.device, args.num_bins, args.eps)
@@ -330,6 +336,7 @@ for epoch in range(start_epoch, int(args.epochs)):
     ## Save best model (Early Stopping)
     if (args.method in ["swag", "last_swag"]) and (swag_res['loss'] is not None):
         if swag_res['loss'] < best_swag_val_loss:
+            swag_cnt = 0
             best_val_loss = val_res["loss"]
             best_val_acc = val_res['accuracy']
             best_swag_val_loss = swag_res["loss"]
@@ -382,9 +389,13 @@ for epoch in range(start_epoch, int(args.epochs)):
             torch.save(mean,f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
             torch.save(variance, f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
             torch.save(cov_mat_list, f'{args.save_path}/{args.method}-{args.optim}_best_val_covmat.pt')
-    
+
+        else:
+            swag_cnt += 1
+
     else:
         if val_res["loss"] < best_val_loss:
+            cnt = 0
             best_val_loss = val_res["loss"]
             best_val_acc = val_res["accuracy"]
             best_epoch = epoch + 1
@@ -424,7 +435,15 @@ for epoch in range(start_epoch, int(args.epochs)):
                                     optimizer = optimizer.state_dict(),
                                     # scheduler = scheduler.state_dict(),
                                     )
+        else:
+            cnt +=1
     
+    # Early Stopping
+    if cnt == args.tol and args.method == 'dnn':
+        break
+    elif swag_cnt == args.tol and args.method in ['swag', 'last_swag']:
+        break
+
     if args.scheduler in ["cos_anneal", "cos_decay", "step_lr"]:
         scheduler.step(epoch)
 #------------------------------------------------------------------------------------------------------------

@@ -36,6 +36,9 @@ parser.add_argument("--print_epoch", type=int, default=10, help="Printing epoch"
 parser.add_argument("--resume", type=str, default=None,
     help="path to load saved model to resume training (default: None)",)
 
+parser.add_argument("--linear_probe", action="store_true", default=False,
+        help = "When we do Linear Probing (Default : False)")
+
 ## Data ---------------------------------------------------------
 parser.add_argument(
     "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100"],

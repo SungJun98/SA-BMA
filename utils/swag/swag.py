@@ -21,9 +21,12 @@ class SWAG(torch.nn.Module):
         self.var_clamp = var_clamp
         self.last_layer= last_layer
 
+        for name, _ in base.named_modules():
+            self.last_layer_name = name
+        
         self.num_params = 0
         for name, param in base.named_parameters():
-            if name.split('.')[0] in ["fc", "linear", "classifier"]:
+            if name.split('.')[0] in self.last_layer_name:
                 self.num_params += param.numel()
         
         self.base = base
@@ -57,7 +60,7 @@ class SWAG(torch.nn.Module):
                     if module._parameters[name] is None:
                         continue
                     
-                    if mod_name == 'fc' or mod_name == 'linear' or mod_name == 'classifier':
+                    if mod_name == self.last_layer_name:
                         name_full = f"{mod_name}.{name}".replace(".", "-")
                         data = module._parameters[name].data
                         module._parameters.pop(name)
@@ -197,7 +200,7 @@ class SWAG(torch.nn.Module):
         
         else:
             for mod_name, module in base_model.named_modules():
-                if mod_name in ['fc', 'linear', 'classifier']:
+                if mod_name == self.last_layer_name:
                     classifier_params = module._parameters
                     
             for (module, name), base_param in zip(self.params, classifier_params.values()):   

@@ -290,16 +290,22 @@ def get_optimizer(args, model):
     '''
     Define optimizer
     '''
+    if args.linear_probe:
+        if args.model == 'vitb16-i21k':
+            optim_param = model.head.parameters()
+        elif args.model == 'resnet101':
+            raise ValueError("Write code for this!!")
+    else:
+        optim_param = model.parameters()
+
     if args.optim == "sgd":
-        optimizer = torch.optim.SGD(model.parameters(),
+        optimizer = torch.optim.SGD(optim_param,
                             lr=args.lr_init, weight_decay=args.wd,
                             momentum=args.momentum)
-        
     elif args.optim == "sam":
         base_optimizer = torch.optim.SGD
-        optimizer = sam.SAM(model.parameters(), base_optimizer, rho=args.rho, lr=args.lr_init, momentum=args.momentum,
+        optimizer = sam.SAM(optim_param, base_optimizer, rho=args.rho, lr=args.lr_init, momentum=args.momentum,
                         weight_decay=args.wd)
-        
     return optimizer
 
 
