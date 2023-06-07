@@ -64,8 +64,8 @@ parser.add_argument("--use_validation", action='store_true', default=True,
 parser.add_argument("--dat_per_cls", type=int, default=-1,
             help="Number of data points per class in few-shot setting. -1 denotes deactivate few-shot setting (Default : -1)")
 
-parser.add_argument("--fe_dat", type=str, default=None, choices=[None, "resnet18-noBN", "vitb16-i21k"],
-            help = "Use Feature Extracted from Feature Extractor (Default : None)")
+# parser.add_argument("--fe_dat", type=str, default=None, choices=[None, "resnet18-noBN", "vitb16-i21k"],
+#             help = "Use Feature Extracted from Feature Extractor (Default : None)")
 #----------------------------------------------------------------
 
 ## Model ---------------------------------------------------------
@@ -144,6 +144,9 @@ print(f"Device : {args.device}")
 
 if args.method == 'last_swag' and not args.linear_probe:
     args.swa_start = 0
+    args.last_layer = True
+else:
+    args.last_layer = False
 
 if args.model.split("-")[-1] == "noBN":
     args.batch_norm = False
@@ -151,6 +154,7 @@ if args.model.split("-")[-1] == "noBN":
 else:
     args.batch_norm = True
     args.aug = True
+
 
 utils.set_seed(args.seed)
 #------------------------------------------------------------------
@@ -174,15 +178,15 @@ tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(args.dataset,
                                                                 args.batch_size,
                                                                 args.num_workers,
                                                                 use_validation = args.use_validation,
-                                                                fe_dat = args.fe_dat,
+                                                                # fe_dat = args.fe_dat,
                                                                 aug = args.aug,
                                                                 dat_per_cls = args.dat_per_cls,
                                                                 seed = args.seed)
-print(f"Load Data : {args.dataset} feature extracted from {args.fe_dat}")
+print(f"Load Data : {args.dataset}")
 #------------------------------------------------------------------
 
 # Define Model-----------------------------------------------------
-model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained, args.fe_dat)   
+model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained, args.last_layer)   
 
 swag_model=None
 if args.method == "swag":
@@ -438,7 +442,7 @@ for epoch in range(start_epoch, int(args.epochs)):
         else:
             cnt +=1
     
-    # Early Stopping
+    Early Stopping
     if cnt == args.tol and args.method == 'dnn':
         break
     elif swag_cnt == args.tol and args.method in ['swag', 'last_swag']:

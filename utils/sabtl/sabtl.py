@@ -16,7 +16,7 @@ class SABTL(torch.nn.Module):
         backbone,
         src_bnn = 'swag',
         pre_trained = True,
-        fe_dat = None, 
+        # fe_dat = None, 
         w_mean = None,
         diag_only = False,
         w_var=None,
@@ -48,20 +48,13 @@ class SABTL(torch.nn.Module):
                 raise RuntimeError("We need pre-trained weight to define model")
         
         # Set Last Layer Name
-        if fe_dat is not None:
-            for name, _ in self.backbone.named_modules():
-                self.last_layer_name = name
-        else:
-            self.last_layer_name = "Linear"
+        for name, _ in self.backbone.named_modules():
+            self.last_layer_name = name
 
         # Get total number of parameters and backbone shape which are updated during training
         self.num_params = 0
-        if fe_dat is not None:
-            for name, param in self.backbone.named_parameters():
-                if name.split('.')[0] == self.last_layer_name:
-                    self.num_params += param.numel()
-        else:
-            for param in self.backbone.parameters():
+        for name, param in self.backbone.named_parameters():
+            if name.split('.')[0] == self.last_layer_name:
                 self.num_params += param.numel()
 
         self.backbone_shape = self.full_model_shape[-2:]

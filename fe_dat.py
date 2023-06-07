@@ -7,14 +7,20 @@ import numpy as np
 
 # %%
 ## Settings
-MODEL_NAME = 'vitb16-i21k'
-DATASET = 'nabirds'
-DATA_PATH = f'/data1/lsj9862/data/{DATASET}'
+MODEL_NAME = 'resnet18-noBN'
+DATASET = 'cifar100'
+DATA_PATH = f'/data2/lsj9862/data/{DATASET}'
 BATCH_SIZE = 256
+RESUME = "/mlainas/lsj9862/exp_result/cifar100/resnet18-noBN/dnn-sgd/swag_lr/dnn-sgd_best_val.pt"
+SAVE_PATH = "/mlainas/lsj9862/exp_result/cifar100/resnet18-noBN/lswag-sam/swag_lr/fe_dat"
+DAT_PER_CLS = -1
+SEED = 0
+AUG = False
+
 
 # %%
-device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
-utils.set_seed(0)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+utils.set_seed(SEED)
 
 
 # %%
@@ -24,28 +30,41 @@ tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=DATASE
                                                             batch_size=BATCH_SIZE,
                                                             num_workers=4,
                                                             use_validation=True,
-                                                            aug=True,
-                                                            fe_dat=None)
+                                                            aug=AUG,
+                                                            dat_per_cls = DAT_PER_CLS,
+                                                            seed = SEED)
 # %%
 ## Define model
-model = utils.get_backbone(MODEL_NAME, num_classes, device, pre_trained=True)
+model = utils.get_backbone(MODEL_NAME,
+                    num_classes = num_classes,
+                    device = device,
+                    pre_trained = True,
+                    last_layer = False)
 
-class Identity(nn.Module):
-    def __init__(self):
-        super(Identity, self).__init__()
+if RESUME is not None:
+    checkpoint = torch.load(RESUME)
+    model.load_state_dict(checkpoint['state_dict'])
         
-    def forward(self, x):
-        return x
+    class Identity(nn.Module):
+        def __init__(self):
+            super(Identity, self).__init__()
+            
+        def forward(self, x):
+            return x
+        
+    if MODEL_NAME == 'vitb16-i21k':
+        model.head = Identity()
+    elif MODEL_NAME in ['resnet18', 'resnet18-noBN', 'resnet50', 'resnet50-noBN', 'resnet101', 'resnet101-noBN']:
+        model.fc = Identity()
+    elif MODEL_NAME in ["wideresnet28x10", "wideresnet28x10-noBN"]:
+        raise ValueError("Add code for this")
 
-if MODEL_NAME == 'vitb16-i21k':
-    model.head = Identity()
-elif MODEL_NAME in ['resnet18', 'resnet18-noBN', 'resnet50', 'resnet50-noBN']:
-    model.fc = Identity()
 
 # %%
 ## Set save path
 import os
-os.makedirs(f"/mlainas/lsj9862/data/{DATASET}_{MODEL_NAME}_fe/", exist_ok=True)
+os.makedirs(SAVE_PATH, exist_ok=True)
+
 
 # %%
 ## Training data
@@ -63,8 +82,8 @@ with torch.no_grad():
 feature_list = torch.concat(feature_list, dim=0)
 target_list = torch.concat(target_list, dim=0)
 
-torch.save(feature_list, f"/mlainas/lsj9862/data/{DATASET}_{MODEL_NAME}_fe/tr_x.pt")
-torch.save(target_list, f"/mlainas/lsj9862/data/{DATASET}_{MODEL_NAME}_fe/tr_y.pt")
+torch.save(feature_list, f"{SAVE_PATH}/tr_fe_x.pt")
+torch.save(target_list, f"{SAVE_PATH}/tr_fe_y.pt")
 
 # %%
 ## Validation data
@@ -82,8 +101,8 @@ with torch.no_grad():
 feature_list = torch.concat(feature_list, dim=0)
 target_list = torch.concat(target_list, dim=0)
 
-torch.save(feature_list, f"/mlainas/lsj9862/data/{DATASET}_{MODEL_NAME}_fe/val_x.pt")
-torch.save(target_list, f"/mlainas/lsj9862/data/{DATASET}_{MODEL_NAME}_fe/val_y.pt")
+torch.save(feature_list, f"{SAVE_PATH}/val_fe_x.pt")
+torch.save(target_list, f"{SAVE_PATH}/val_fe_y.pt")
 
 # %%
 ## Test data
@@ -101,7 +120,7 @@ with torch.no_grad():
 feature_list = torch.concat(feature_list, dim=0)
 target_list = torch.concat(target_list, dim=0)
 
-torch.save(feature_list, f"/mlainas/lsj9862/data/{DATASET}_{MODEL_NAME}_fe/te_x.pt")
-torch.save(target_list, f"/mlainas/lsj9862/data/{DATASET}_{MODEL_NAME}_fe/te_y.pt")
+torch.save(feature_list, f"{SAVE_PATH}/te_fe_x.pt")
+torch.save(target_list, f"{SAVE_PATH}/te_fe_y.pt")
 
 # %%

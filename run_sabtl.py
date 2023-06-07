@@ -62,8 +62,8 @@ parser.add_argument("--use_validation", action='store_true',
 parser.add_argument("--dat_per_cls", type=int, default=-1,
             help="Number of data points per class in few-shot setting. -1 denotes deactivate few-shot setting (Default : -1)")
 
-parser.add_argument("--fe_dat", type=str, default=None, choices=[None, "resnet18-noBN", "vitb16-i21k"],
-            help = "Use Feature Extracted from Feature Extractor (Default : None)")
+# parser.add_argument("--fe_dat", type=str, default=None, choices=[None, "resnet18-noBN", "vitb16-i21k"],
+#             help = "Use Feature Extracted from Feature Extractor (Default : None)")
 #----------------------------------------------------------------
 
 ## Model ---------------------------------------------------------
@@ -146,9 +146,11 @@ args = parser.parse_args()
 # Set Device and Seed--------------------------------------------
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device : {args.device}")
+args.last_layer = True
 
 if args.model.split("-")[-1] == "noBN":
     args.batch_norm = False
+    args.last_layer = False
 else:
     args.batch_norm = True
 
@@ -171,14 +173,14 @@ tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(args.dataset,
                                                             batch_size = args.batch_size,
                                                             num_workers = args.num_workers,
                                                             use_validation = args.use_validation,
-                                                            fe_dat = args.fe_dat,
+                                                            # fe_dat = args.fe_dat,
                                                             dat_per_cls = args.dat_per_cls,
                                                             seed = args.seed)
-print(f"Load Data : {args.dataset} feature extracted from {args.fe_dat}")
+print(f"Load Data : {args.dataset}")
 #----------------------------------------------------------------
 
 # Define Model------------------------------------------------------
-model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained, args.fe_dat)   
+model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained, args.last_layer)   
 
 
 w_mean = torch.load(args.mean_path)
@@ -187,7 +189,7 @@ w_covmat = torch.load(args.covmat_path)
 sabtl_model = sabtl.SABTL(copy.deepcopy(model),
                         src_bnn=args.src_bnn,
                         pre_trained=args.pre_trained,
-                        fe_dat=args.fe_dat,
+                        # fe_dat=args.fe_dat,
                         w_mean = w_mean,
                         diag_only=args.diag_only,
                         w_var=w_var,

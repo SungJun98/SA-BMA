@@ -101,40 +101,27 @@ def set_wandb_runname(args):
 
 
 
-def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug, fe_dat, dat_per_cls, seed):
+def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug, dat_per_cls, seed):
     '''
     Load Dataset
     '''
     import utils.data.data as data
     if dataset == 'cifar10':
-        if fe_dat is not None:
-            tr_loader, val_loader, te_loader, num_classes = data.get_cifar10_fe(fe_dat=fe_dat,
-                                                                            batch_size = batch_size,
-                                                                            use_validation = use_validation,
-                                                                            dat_per_cls = dat_per_cls)
-        else:
-            tr_loader, val_loader, te_loader, num_classes = data.get_cifar10(data_path, batch_size,
-                                                                            num_workers,
-                                                                            use_validation = use_validation,
-                                                                            aug = aug,
-                                                                            dat_per_cls = dat_per_cls,
-                                                                            seed = seed)
-            
-    elif dataset == 'cifar100':
-        if fe_dat is not None:
-            tr_loader, val_loader, te_loader, num_classes = data.get_cifar100_fe(fe_dat=fe_dat,
-                                                                            batch_size = batch_size,
-                                                                            use_validation = use_validation,
-                                                                            dat_per_cls = dat_per_cls)
-        else:
-            tr_loader, val_loader, te_loader, num_classes = data.get_cifar100(data_path, batch_size,
+        tr_loader, val_loader, te_loader, num_classes = data.get_cifar10(data_path, batch_size,
                                                                         num_workers,
                                                                         use_validation = use_validation,
                                                                         aug = aug,
                                                                         dat_per_cls = dat_per_cls,
                                                                         seed = seed)
+            
+    elif dataset == 'cifar100':
+        tr_loader, val_loader, te_loader, num_classes = data.get_cifar100(data_path, batch_size,
+                                                                    num_workers,
+                                                                    use_validation = use_validation,
+                                                                    aug = aug,
+                                                                    dat_per_cls = dat_per_cls,
+                                                                    seed = seed)
     
-        
     # elif dataset == 'aircraft':
     #     if fe_dat is not None:
     #         tr_loader, val_loader, te_loader, num_classes = data.get_aircraft_fe(fe_dat = fe_dat,
@@ -166,7 +153,6 @@ def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug
     #                                                                     use_validation = use_validation,
     #                                                                     aug = aug)    
     
-    
     if not use_validation:
         val_loader = te_loader
     
@@ -174,15 +160,10 @@ def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug
 
 
 
-def get_backbone(model_name, num_classes, device, pre_trained=False, fe_dat=None):
+def get_backbone(model_name, num_classes, device, pre_trained=False, last_layer=True):
     '''
     Define Backbone Model
     '''
-    if fe_dat is not None:
-        last_layer = True
-    else:
-        last_layer = False
-
     ## ResNet18
     if model_name == "resnet18":
         if pre_trained:
