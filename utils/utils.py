@@ -187,7 +187,7 @@ def get_backbone(model_name, num_classes, device, pre_trained=False, fe_dat=None
     if model_name == "resnet18":
         if pre_trained:
             model = resnet18(pretrained=True)
-            freeze_fe(model, model_name)
+            freeze_fe(model)
             in_features = model.fc.in_features
             model.fc = nn.Linear(in_features, num_classes)
         else:
@@ -206,7 +206,7 @@ def get_backbone(model_name, num_classes, device, pre_trained=False, fe_dat=None
     elif model_name == "resnet50":
         if pre_trained:
             model = resnet50(pretrained=True)
-            freeze_fe(model, model_name)
+            freeze_fe(model)
             in_features = model.fc.in_features
             model.fc = nn.Linear(in_features, num_classes)
 
@@ -227,7 +227,7 @@ def get_backbone(model_name, num_classes, device, pre_trained=False, fe_dat=None
     elif model_name == "resnet101":
         if pre_trained:
             model = resnet101(pretrained=True)
-            freeze_fe(model, model_name)
+            freeze_fe(model)
             in_features = model.fc.in_features
             model.fc = nn.Linear(in_features, num_classes)
 
@@ -276,7 +276,7 @@ def get_backbone(model_name, num_classes, device, pre_trained=False, fe_dat=None
     ## ViT-B/16-ImageNet21K
     if model_name == "vitb16-i21k":
         model = timm.create_model('vit_base_patch16_224_in21k', pretrained=True)
-        freeze_fe(model, model_name)
+        freeze_fe(model)
         model.head = torch.nn.Linear(768, num_classes)
         if last_layer:
             model = model.head
@@ -400,16 +400,12 @@ def get_scaler(args):
 
 
 
-def freeze_fe(model, model_name):
+def freeze_fe(model):
     '''
     Freezing Feature Extractor
     '''
-    if model_name in ["resnet18", "resnet18-noBN", "resnet50", "resnet50-noBN"]:
-        last_layer_name = 'fc'
-    elif model_name in ["wideresnet28x10", "wideresnet28x10-noBN", "wideresnet40x10", "wideresnet40x10-noBN"]:
-        last_layer_name = 'linear'
-    elif model_name in ["vitb16-i21k"]:
-        last_layer_name = 'head'
+    for name, _ in model.named_modules():
+        last_layer_name = name
     
     for name, param in model.named_parameters():
         if name.split('.')[0] in last_layer_name:

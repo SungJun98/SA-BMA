@@ -222,7 +222,7 @@ if not args.pre_trained and args.resume is not None:
     model.load_state_dict(checkpoint["state_dict"])
     if args.method == 'last_swag':
         swag_model.base.load_state_dict(checkpoint["state_dict"], strict=False)
-    utils.freeze_fe(model, args.model)
+    utils.freeze_fe(model)
         
 else:
     if args.resume is not None:
