@@ -15,8 +15,6 @@ class SABTL(torch.nn.Module):
         self,
         backbone,
         src_bnn = 'swag',
-        pre_trained = True,
-        # fe_dat = None, 
         w_mean = None,
         diag_only = False,
         w_var=None,
@@ -40,16 +38,18 @@ class SABTL(torch.nn.Module):
             p.requires_grad = False
             self.full_model_shape.append(p.shape)
 
-        ## Load Pre-Trained Model
-        if pre_trained == False:
-            if w_mean is not None:
-                self.load_full_backbone(w_mean, src_bnn)
-            else:
-                raise RuntimeError("We need pre-trained weight to define model")
-        
-        # Set Last Layer Name
+        # Get Last Layer Name and Last Layer Shape
         for name, _ in self.backbone.named_modules():
             self.last_layer_name = name
+        self.last_layer_shape = self.full_model_shape[-2:]
+            
+        ## Load Pre-Trained Model
+        if w_mean is not None:
+            self.load_backbone(w_mean, src_bnn)
+        else:
+            raise RuntimeError("We need pre-trained weight to define model")
+        
+
 
         # Get total number of parameters and backbone shape which are updated during training
         self.num_params = 0
@@ -57,7 +57,7 @@ class SABTL(torch.nn.Module):
             if name.split('.')[0] == self.last_layer_name:
                 self.num_params += param.numel()
 
-        self.backbone_shape = self.full_model_shape[-2:]
+        
 
         ### Add Mean, Var, Cov layer ---------------------------------------------------------------
         self.bnn_param = nn.ParameterDict()
@@ -106,16 +106,16 @@ class SABTL(torch.nn.Module):
         
     
 
-    def load_full_backbone(self, w_mean, src_bnn):
+    def load_backbone(self, w_mean, src_bnn):
         '''
         Reform Saved Weight As State Dict
         and Load Pre-Trained Backbone Model
         '''
         if src_bnn == 'swag':
-            unflatten_mean_list = utils.unflatten_like_size(w_mean, self.full_model_shape)
+            unflatten_mean_list = utils.unflatten_like_size(w_mean, self.last_layer_shape)
             st_dict = dict()
-            for (name, _), w in zip(self.backbone.named_parameters(), unflatten_mean_list):
-                st_dict[name] = w
+            st_dict[f'{self.last_layer_name}.weight'] = unflatten_mean_list[0]
+            st_dict[f'{self.last_layer_name}.bias'] = unflatten_mean_list[1]
                 
         self.backbone.load_state_dict(st_dict, strict=False)
         ## bn의 running_mean, running_var는 trainable parameter가 아니라 save할 때 제대로 안 됨

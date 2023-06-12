@@ -69,7 +69,7 @@ def get_cifar10(data_path='/data1/lsj9862/data/cifar10',
         
         ## Pre-Setting for Few-shot Setting
         if dat_per_cls >= 0:
-            tr_loader = torch.load(f'/data2/lsj9862/data/cifar10/{dat_per_cls}shot/tr_loader_seed{seed}.pth')
+            tr_loader = torch.load(f'/data1/lsj9862/data/cifar10/{dat_per_cls}shot/tr_loader_seed{seed}.pth')
         else:
             tr_loader = DataLoader(tr_data,
                                 batch_size=batch_size,
@@ -185,7 +185,7 @@ def get_cifar100(data_path='/data1/lsj9862/data/cifar100',
         
         ## Pre-Setting for Few-shot Setting
         if dat_per_cls >= 0:
-            tr_loader = torch.load(f'/mlainas/lsj9862/data/cifar100/{dat_per_cls}shot/tr_loader_seed{seed}.pth')
+            tr_loader = torch.load(f'/data1/lsj9862/data/cifar100/{dat_per_cls}shot/tr_loader_seed{seed}.pth')
         else:
             tr_loader = DataLoader(tr_data,
                                 batch_size=batch_size,

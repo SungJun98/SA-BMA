@@ -160,7 +160,7 @@ def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug
 
 
 
-def get_backbone(model_name, num_classes, device, pre_trained=False, last_layer=True):
+def get_backbone(model_name, num_classes, device, pre_trained=False):
     '''
     Define Backbone Model
     '''
@@ -168,124 +168,67 @@ def get_backbone(model_name, num_classes, device, pre_trained=False, last_layer=
     if model_name == "resnet18":
         if pre_trained:
             model = resnet18(pretrained=True)
-            freeze_fe(model)
             in_features = model.fc.in_features
             model.fc = nn.Linear(in_features, num_classes)
         else:
             model = resnet18(pretrained=False, num_classes=num_classes)
-
-        if last_layer:
-            model = model.fc
         
     elif model_name == "resnet18-noBN":
         model = resnet_noBN.resnet18(num_classes=num_classes)
-        if last_layer:
-            model = model.fc
 
 
     ## ResNet50
     elif model_name == "resnet50":
         if pre_trained:
             model = resnet50(pretrained=True)
-            freeze_fe(model)
             in_features = model.fc.in_features
             model.fc = nn.Linear(in_features, num_classes)
-
-            if last_layer:
-                model = model.fc
-
         else:
             model = resnet50(pretrained=False, num_classes=num_classes)
-            if last_layer:
-                model = model.fc
-            
+
     elif model_name == "resnet50-noBN":
         model = resnet_noBN.resnet50(num_classes=num_classes)
-        if last_layer:
-            model = model.fc
 
     ## ResNet101
     elif model_name == "resnet101":
         if pre_trained:
             model = resnet101(pretrained=True)
-            freeze_fe(model)
             in_features = model.fc.in_features
             model.fc = nn.Linear(in_features, num_classes)
-
-            if last_layer:
-                model = model.fc
-
         else:
             model = resnet101(pretrained=False, num_classes=num_classes)
-            if last_layer:
-                model = model.fc
-            
+
     elif model_name == "resnet101-noBN":
         model = resnet_noBN.resnet101(num_classes=num_classes)
-        if last_layer:
-            model = model.fc
-            
             
     ## WideResNet28x10
     elif model_name == "wideresnet28x10":
         model_cfg = getattr(wide_resnet, "WideResNet28x10")
         model = model_cfg.base(num_classes=num_classes)
-        if last_layer:
-            raise AssertionError("You need to implement code for this")
         
     elif model_name == "wideresnet28x10-noBN":
         model_cfg = getattr(wide_resnet_noBN, "WideResNet28x10")
         model = model_cfg.base(num_classes=num_classes)
-        if last_layer:
-            raise AssertionError("You need to implement code for this")
-
 
     ## WideResNet40x10
     elif model_name == "wideresnet40x10":
         model_cfg = getattr(wide_resnet, "WideResNet40x10")
         model = model_cfg.base(num_classes=num_classes)
-        if last_layer:
-            raise AssertionError("You need to implement code for this")
         
     elif model_name == "wideresnet40x10-noBN":
         model_cfg = getattr(wide_resnet_noBN, "WideResNet40x10")
         model = model_cfg.base(num_classes=num_classes)
-        if last_layer:
-            raise AssertionError("You need to implement code for this")
     
     
     ## ViT-B/16-ImageNet21K
     if model_name == "vitb16-i21k":
         model = timm.create_model('vit_base_patch16_224_in21k', pretrained=True)
-        freeze_fe(model)
         model.head = torch.nn.Linear(768, num_classes)
-        if last_layer:
-            model = model.head
     
     model.to(device)
     print(f"Preparing model {model_name}")
     return model
 
-
-
-# def get_last_layer(model_name, num_classes, device):
-#     """
-#     Load only last layer of backbone model
-#     e.g. Classifier, Fully-Connected layer
-#     """
-#     ## ViT-B/16-ImageNet21K
-#     if model_name == "vitb16-i21k":
-#         model = timm.create_model('vit_base_patch16_224_in21k', pretrained=True)
-#         model.head = torch.nn.Linear(768, num_classes)
-#         model = model.head
-           
-#     model.to(device)
-    
-#     print(f"Preparing last layer of {model_name}")
-    
-#     return model
-
- 
 
 def get_optimizer(args, model):
     '''
@@ -393,7 +336,7 @@ def freeze_fe(model):
             continue
         param.requires_grad = False
     
-    print("Freeze Feature Extractor for last-layer Training")
+    print("Freeze Feature Extractor for Linear Probing")
 
 
 
@@ -448,7 +391,7 @@ def format_weights(sample, sabtl_model):
     '''
     Format sampled vector to state dict
     '''  
-    sample = unflatten_like_size(sample, sabtl_model.backbone_shape)
+    sample = unflatten_like_size(sample, sabtl_model.last_layer_shape)
     
     if sabtl_model.last_layer_name != '':
         state_dict = sabtl_model.backbone.state_dict()

@@ -150,9 +150,10 @@ args.last_layer = True
 
 if args.model.split("-")[-1] == "noBN":
     args.batch_norm = False
-    args.last_layer = False
+    args.aug = False
 else:
     args.batch_norm = True
+    args.aug = True
 
 utils.set_seed(args.seed)
 #----------------------------------------------------------------
@@ -169,27 +170,26 @@ wandb.run.name = utils.set_wandb_runname(args)
 
 # Load Data ------------------------------------------------------
 tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(args.dataset,
-                                                            data_path = args.data_path,
-                                                            batch_size = args.batch_size,
-                                                            num_workers = args.num_workers,
-                                                            use_validation = args.use_validation,
-                                                            # fe_dat = args.fe_dat,
-                                                            dat_per_cls = args.dat_per_cls,
-                                                            seed = args.seed)
+                                                                args.data_path,
+                                                                args.batch_size,
+                                                                args.num_workers,
+                                                                use_validation = args.use_validation,
+                                                                # fe_dat = args.fe_dat,
+                                                                aug = args.aug,
+                                                                dat_per_cls = args.dat_per_cls,
+                                                                seed = args.seed)
 print(f"Load Data : {args.dataset}")
 #----------------------------------------------------------------
 
 # Define Model------------------------------------------------------
-model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained, args.last_layer)   
-
+model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)   
+utils.freeze_fe(model)
 
 w_mean = torch.load(args.mean_path)
 w_var = torch.load(args.var_path) 
 w_covmat = torch.load(args.covmat_path)
 sabtl_model = sabtl.SABTL(copy.deepcopy(model),
                         src_bnn=args.src_bnn,
-                        pre_trained=args.pre_trained,
-                        # fe_dat=args.fe_dat,
                         w_mean = w_mean,
                         diag_only=args.diag_only,
                         w_var=w_var,
@@ -229,7 +229,7 @@ print(f"Start training SABTL with {args.optim} optimizer from {start_epoch} epoc
 ## print setting
 columns = ["epoch", "method", "lr",
         "tr_loss", "tr_acc",
-        "val_loss(MAP)", "val_acc(MAP)", "val_nll(MAP)", "val_ece(MAP)",
+        f"val_loss(MC{args.val_mc_num})", f"val_acc(MC{args.val_mc_num})", f"val_nll(MC{args.val_mc_num})", f"val_ece(MC{args.val_mc_num})",
         "time"]
 
 best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; duration=0

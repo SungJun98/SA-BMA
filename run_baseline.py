@@ -142,11 +142,6 @@ args = parser.parse_args()
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device : {args.device}")
 
-if args.method == 'last_swag' and not args.linear_probe:
-    args.swa_start = 0
-    args.last_layer = True
-else:
-    args.last_layer = False
 
 if args.model.split("-")[-1] == "noBN":
     args.batch_norm = False
@@ -186,8 +181,10 @@ print(f"Load Data : {args.dataset}")
 #------------------------------------------------------------------
 
 # Define Model-----------------------------------------------------
-model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained, args.last_layer)   
-
+model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)   
+if args.linear_probe or args.method == "last_swag":
+    utils.freeze_fe(model)
+    
 swag_model=None
 if args.method == "swag":
     swag_model = swag.SWAG(copy.deepcopy(model),
@@ -442,7 +439,7 @@ for epoch in range(start_epoch, int(args.epochs)):
         else:
             cnt +=1
     
-    Early Stopping
+    ## Early Stopping
     if cnt == args.tol and args.method == 'dnn':
         break
     elif swag_cnt == args.tol and args.method in ['swag', 'last_swag']:
