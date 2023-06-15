@@ -10,7 +10,7 @@ from timm.data.transforms_factory import create_transform
 
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 
-"""
+
 class ExtractedDataSet(Dataset): 
     '''
     Class for Feature Extracted data
@@ -26,7 +26,7 @@ class ExtractedDataSet(Dataset):
         x = self.x[idx]
         y = self.y[idx]
         return x, y
-"""
+
 
 ####################################################################################################################################
 ### CIFAR-10 ----------------------------------------------------------------------------------------------------------------------|
@@ -101,12 +101,12 @@ def get_cifar10(data_path='/data1/lsj9862/data/cifar10',
     return tr_loader, val_loader, te_loader, num_classes
 
 
-"""
+
 def get_cifar10_fe(fe_dat="vitb16-i21k", batch_size=256, num_workers=0, use_validation=True, dat_per_cls=-1):
     if dat_per_cls >= 0:
-        data_path= f"/mlainas/lsj9862/data/cifar10/{fe_dat}_fe_{dat_per_cls}shot/"
+        data_path= f"/data1/lsj9862/data/cifar10/{fe_dat}/{dat_per_cls}_shot/"
     else:
-        data_path = f"/mlainas/lsj9862/data/cifar10_{fe_dat}_fe"
+        data_path = f"/data1/lsj9862/data/cifar10/{fe_dat}/full_shot"
         
     tr_x = torch.load(f"{data_path}/tr_x.pt", map_location='cuda'); tr_y = torch.load(f"{data_path}/tr_y.pt", map_location='cuda')
     val_x = torch.load(f"{data_path}/val_x.pt", map_location='cuda'); val_y = torch.load(f"{data_path}/val_y.pt", map_location='cuda')
@@ -141,7 +141,7 @@ def get_cifar10_fe(fe_dat="vitb16-i21k", batch_size=256, num_workers=0, use_vali
     num_classes = max(te_data.y) + 1
 
     return tr_loader, val_loader, te_loader, num_classes
-"""
+
 ####################################################################################################################################
 # ---------------------------------------------------------------------------------------------------------------------------------|
 
@@ -217,12 +217,12 @@ def get_cifar100(data_path='/data1/lsj9862/data/cifar100',
     return tr_loader, val_loader, te_loader, num_classes
 
 
-"""
+
 def get_cifar100_fe(fe_dat="vitb16-i21k", batch_size=256, num_workers=0, use_validation=True, dat_per_cls=-1):
     if dat_per_cls >= 0:
-        data_path= f"/mlainas/lsj9862/data/cifar100_{fe_dat}_fe_{dat_per_cls}shot/"
+        data_path= f"/data1/lsj9862/data/cifar100/{fe_dat}/{dat_per_cls}_shot/"
     else:
-        data_path = f"/mlainas/lsj9862/data/cifar100_{fe_dat}_fe"
+        data_path = f"/data1/lsj9862/data/cifar100/{fe_dat}/full_shot"
     
     
     data_path = f"/mlainas/lsj9862/data/cifar100_{fe_dat}_fe"
@@ -258,6 +258,6 @@ def get_cifar100_fe(fe_dat="vitb16-i21k", batch_size=256, num_workers=0, use_val
     num_classes = max(te_data.y) + 1
 
     return tr_loader, val_loader, te_loader, num_classes
-"""
+
 ####################################################################################################################################
 # ---------------------------------------------------------------------------------------------------------------------------------|
