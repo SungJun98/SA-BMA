@@ -101,7 +101,7 @@ utils.set_seed(args.seed)
 
 # Load Data -----------------------------------------------------------------
 if not args.last_layer:
-    tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(args.dataset,
+    tr_loader, _, te_loader, num_classes = utils.get_dataset(args.dataset,
                                                                 args.data_path,
                                                                 args.batch_size,
                                                                 args.num_workers,
@@ -148,18 +148,23 @@ else:
     model.load_state_dict(checkpoint["state_dict"], strict=False)
 # ------------------------------------------------------------------------------
 
-## Set save_path ---------------------------------------------------------------
+## Set save path ---------------------------------------------------------------
 if args.swag:
     save_path = f"{args.swag_load_path}/performance"
     os.makedirs(save_path, exist_ok=True)
 else:
-    save_path = f"{args.load_path}/performance"
+    save_path = args.load_path.split("/")[:-1]
+    save_path = os.path.join(*save_path)
+    save_path = f"{save_path}/performance"
     os.makedirs(save_path, exist_ok=True)
+
+print(f"Save path : {save_path}")
 # ------------------------------------------------------------------------------
 
 model.eval()
 
 criterion = torch.nn.CrossEntropyLoss()
+
 ## Calculate Hessian ------------------------------------------------------------
 if args.swag:
     model_num_list = list(); acc_list = list(); ece_list = list(); nll_list = list()
