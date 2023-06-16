@@ -102,13 +102,13 @@ utils.set_seed(args.seed)
 # Load Data -----------------------------------------------------------------
 if not args.last_layer:
     tr_loader, _, te_loader, num_classes = utils.get_dataset(args.dataset,
-                                                                args.data_path,
-                                                                args.batch_size,
-                                                                args.num_workers,
-                                                                use_validation = args.use_validation,
-                                                                aug = args.aug,
-                                                                dat_per_cls = args.dat_per_cls,
-                                                                seed = args.seed)
+                                                        args.data_path,
+                                                        args.batch_size,
+                                                        args.num_workers,
+                                                        use_validation = args.use_validation,
+                                                        aug = args.aug,
+                                                        dat_per_cls = args.dat_per_cls,
+                                                        seed = args.seed)
     print(f"Load Data : {args.dataset}")
         
 else:
@@ -146,6 +146,8 @@ if args.swag:
 else:
     checkpoint = torch.load(args.load_path)
     model.load_state_dict(checkpoint["state_dict"], strict=False)
+
+model.to(args.device)
 # ------------------------------------------------------------------------------
 
 ## Set save path ---------------------------------------------------------------
@@ -155,7 +157,7 @@ if args.swag:
 else:
     save_path = args.load_path.split("/")[:-1]
     save_path = os.path.join(*save_path)
-    save_path = f"{save_path}/performance"
+    save_path = f"/{save_path}/performance"
     os.makedirs(save_path, exist_ok=True)
 
 print(f"Save path : {save_path}")
