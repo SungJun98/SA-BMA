@@ -57,9 +57,9 @@ parser.add_argument("--load_path", type=str, default=None,
     help="path to load saved model (default: None)")
 
 parser.add_argument(
-    "--swag",
+    "--last_swag",
     action='store_true',
-    help ="When model trained with swag (Default : False)"
+    help ="When model trained with last swag (Default : False)"
 )
 
 parser.add_argument(
@@ -71,6 +71,12 @@ parser.add_argument(
     "--last_layer",
     action='store_true',
     help ="Calculate the hessian of last layer only"
+)
+
+parser.add_argument(
+    "--full_swag",
+    action='store_true',
+    help="When model trained with fully stochastic swag (Default: False)"
 )
 #-------------------------------------------------------------------------
 
@@ -136,7 +142,7 @@ if args.last_layer:
 #----------------------------------------------------------------------------
 
 ## Load Model ---------------------------------------------------------------
-if args.swag:
+if args.last_swag or args.full_swag:
     # Load SWAG weight 
     if args.load_path is not None:
         checkpoint = torch.load(args.load_path)
@@ -151,7 +157,7 @@ model.to(args.device)
 # ------------------------------------------------------------------------------
 
 ## Set save path ---------------------------------------------------------------
-if args.swag:
+if args.last_swag or args.full_swag:
     save_path = f"{args.swag_load_path}/performance"
     os.makedirs(save_path, exist_ok=True)
 else:
@@ -168,7 +174,7 @@ model.eval()
 criterion = torch.nn.CrossEntropyLoss()
 
 ## Calculate Hessian ------------------------------------------------------------
-if args.swag:
+if args.last_swag or args.full_swag:
     model_num_list = list(); acc_list = list(); ece_list = list(); nll_list = list()
     tr_cum_eigenval_list = list() ; tr_max_eigenval_list = list()
     for path in bma_load_paths:
@@ -177,7 +183,7 @@ if args.swag:
         
         # get sampled model
         bma_sample = torch.load(f"{args.swag_load_path}/{path}")
-        bma_state_dict = utils.list_to_state_dict(model, bma_sample, last=True)     ## If use full stochastic SWAG, you need to change argument last to False
+        bma_state_dict = utils.list_to_state_dict(model, bma_sample, last=args.last_swag)     ## If use full stochastic SWAG, you need to change argument last to False
         model.load_state_dict(bma_state_dict, strict=False)
         
         if args.batch_norm:
@@ -185,7 +191,7 @@ if args.swag:
         
         res = utils.eval(te_loader, model, criterion, args.device)
         print(f"Test Accuracy : {res['accuracy']:8.4f}% / ECE : {res['ece']} / NLL : {res['nll']}")
-        acc_list.append(res['accuracy']); ece_list.append(res['ece']); nll_list.append(res['nll'])
+        model_num_list.append(model_num); acc_list.append(res['accuracy']); ece_list.append(res['ece']); nll_list.append(res['nll'])
         
         # get eigenvalue for train set
         try:

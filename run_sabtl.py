@@ -178,7 +178,10 @@ tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(args.dataset,
                                                                 aug = args.aug,
                                                                 dat_per_cls = args.dat_per_cls,
                                                                 seed = args.seed)
-print(f"Load Data : {args.dataset}")
+if args.dat_per_cls >= 0:
+    print(f"Load Data : {args.dataset}-{args.dat_per_cls}shot")
+else:
+    print(f"Load Data : {args.dataset}")
 #----------------------------------------------------------------
 
 # Define Model------------------------------------------------------

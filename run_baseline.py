@@ -177,7 +177,10 @@ tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(args.dataset,
                                                                 aug = args.aug,
                                                                 dat_per_cls = args.dat_per_cls,
                                                                 seed = args.seed)
-print(f"Load Data : {args.dataset}")
+if args.dat_per_cls >= 0:
+    print(f"Load Data : {args.dataset}-{args.dat_per_cls}shot")
+else:
+    print(f"Load Data : {args.dataset}")
 #------------------------------------------------------------------
 
 # Define Model-----------------------------------------------------
@@ -494,16 +497,12 @@ if args.method in ["swag", "last_swag"]:
     wandb.run.summary['bma ece'] = bma_ece
     print(f"bma ece : {bma_ece:8.4f}")
 
-    # Save ece for reliability diagram
-    os.makedirs(f'{args.save_path}/unc_result', exist_ok=True)
-    with open(f"{args.save_path}/unc_result/{args.method}-{args.optim}_bma_uncertainty.pkl", 'wb') as f:
-        pickle.dump(unc, f)
-
     # Save Reliability Diagram 
     utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, True)
 
 
 ### MAP Prediction
+"""
 if args.method in ["swag", "last_swag"]:
     sample = swag_model.sample(0)
     if args.batch_norm:
@@ -531,11 +530,28 @@ unc = utils.calibration_curve(predictions, targets, args.num_bins)
 te_ece = unc["ece"]
 wandb.run.summary["test ece"]  = te_ece
 print(f"test ece : {te_ece:8.4f}")
+"""
 
-# Save ece for reliability diagram
-os.makedirs(f'{args.save_path}/unc_result', exist_ok=True)
-with open(f"{args.save_path}/unc_result/{args.method}-{args.optim}_uncertainty.pkl", 'wb') as f:
-    pickle.dump(unc, f)
+if args.method in ["swag", "last_swag"]:
+    sample = swag_model.sample(0)
+    if args.batch_norm:
+        swag_utils.bn_update(tr_loader, swag_model, verbose=False, subset=1.0)
+    res = utils.eval(te_loader, swag_model, criterion, args.device)
+else:
+    res = utils.eval(te_loader, model, criterion, args.device)
+
+wandb.run.summary['Best epoch'] = checkpoint["epoch"] + 1
+# Acc
+wandb.run.summary['test accuracy'] = res['accuracy']
+print(f"Best test accuracy : {res['accuracy']:8.4f}% on epoch {checkpoint['epoch'] + 1}")
+
+# nll
+wandb.run.summary['test nll'] = res['nll']
+print(f"test nll: {res['nll']:8.4f}")
+
+# ece
+wandb.run.summary["test ece"]  = res['ece']
+print(f"test ece : {res['ece']:8.4f}")
 
 # Save Reliability Diagram 
-utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, False)
+utils.save_reliability_diagram(args.method, args.optim, args.save_path, res['unc'], False)

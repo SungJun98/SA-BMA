@@ -39,9 +39,9 @@ def set_save_path(args):
     '''
     ### Few-shot part
     if args.dat_per_cls >= 0:
-        save_path_ = f"{args.save_path}/{args.dataset}/{args.dat_per_cls}shot"
+        save_path_ = f"{args.save_path}/seed_{args.seed}/{args.dataset}/{args.dat_per_cls}shot"
     else:
-        save_path_ = f"{args.save_path}/{args.dataset}/"
+        save_path_ = f"{args.save_path}/seed_{args.seed}/{args.dataset}/"
         
     ### scheduler part   
     if args.scheduler == "cos_anneal":
@@ -73,9 +73,9 @@ def set_wandb_runname(args):
     '''
     ### Few-shot part
     if args.dat_per_cls >= 0:
-        run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.dat_per_cls}shot"
+        run_name_ = f"seed{args.seed}_{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.dat_per_cls}shot"
     else:
-        run_name_ = f"{args.method}-{args.optim}_{args.model}_{args.dataset}"
+        run_name_ = f"seed{args.seed}_{args.method}-{args.optim}_{args.model}_{args.dataset}"
         
     ### scheduler part
     if args.scheduler == "cos_anneal":
@@ -564,13 +564,14 @@ def eval(loader, model, criterion, device, num_bins=50, eps=1e-8):
 
     accuracy = np.mean(np.argmax(preds, axis=1) == targets)
     nll = -np.mean(np.log(preds[np.arange(preds.shape[0]), targets] + eps))
-    ece = calibration_curve(preds, targets, num_bins)['ece']
-    
+    unc = calibration_curve(preds, targets, num_bins)
+        
     return {
         "loss" : loss_sum / num_objects_total,
         "accuracy" : accuracy * 100.0,
         "nll" : nll,
-        "ece" : ece,
+        "ece" : unc['ece'],
+        "unc" : unc
     }
 
 
@@ -629,7 +630,7 @@ def bma(tr_loader, te_loader, model, bma_num_models, num_classes, bma_save_path=
         swag_nll = -np.mean(
             np.log(swag_predictions[np.arange(swag_predictions.shape[0]), targets] + eps)
         )
-
+    
     print(f"bma Accuracy using {bma_num_models} model : {swag_accuracy * 100:.2f}% / NLL : {swag_nll:.4f}")
     return {"predictions" : swag_predictions,
             "targets" : targets,
@@ -686,8 +687,9 @@ def save_reliability_diagram(method, optim, save_path, unc, bma=False):
     plt.axhline(y=0, color='black')
     plt.title('Reliability Diagram')
     plt.legend()
+    
+    os.makedirs(f'{save_path}/unc_result', exist_ok=True)
     if bma:
-        plt.savefig(f'{save_path}/unc_result/{method}_{optim}_bma_reliability_diagram.png')    
-        
+        plt.savefig(f'{save_path}/unc_result/{method}_{optim}_bma_reliability_diagram.png')           
     else:
         plt.savefig(f'{save_path}/unc_result/{method}_{optim}_reliability_diagram.png')    
