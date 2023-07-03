@@ -180,7 +180,6 @@ class SABTL(torch.nn.Module):
         # mean_fi = torch.autograd.grad(log_prob, self.bnn_param['mean'], retain_graph=True)
         # mean_fi = mean_fi[0]**2
         # mean_fi = 1 / (1 + eta * mean_fi)    
-        # mean_fi = torch.linalg.solve(qdist.covariance_matrix, (params - self.bnn_param['mean']))    ## calculate derivative manually
         mean_fi = covar.inv_matmul((params - self.bnn_param['mean']))   ## calculate derivative manually (gpytorch version)
         mean_fi = mean_fi**2
         mean_fi = 1 / (1 + eta * mean_fi)
@@ -199,7 +198,6 @@ class SABTL(torch.nn.Module):
             if self.low_rank == 0:
                 cov_fi = torch.tril(cov_fi, diagonal=-1) 
             return [mean_fi, std_fi, cov_fi]
-
         else:
             return [mean_fi, std_fi]
 

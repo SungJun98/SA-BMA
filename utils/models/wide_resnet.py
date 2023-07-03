@@ -9,7 +9,7 @@ import torch.nn.init as init
 import torch.nn.functional as F
 import math
 
-# __all__ = ["WideResNet28x10"]
+__all__ = ["WideResNet16x4", "WideResNet28x2",  "WideResNet28x10"]
 
 
 def conv3x3(in_planes, out_planes, stride=1):
@@ -98,40 +98,13 @@ class WideResNet28x10:
     base = WideResNet
     args = list()
     kwargs = {"depth": 28, "widen_factor": 10}
-    # transform_train = transforms.Compose(
-    #     [
-    #         transforms.Resize(32),
-    #         transforms.RandomCrop(32, padding=4),
-    #         transforms.RandomHorizontalFlip(),
-    #         transforms.ToTensor(),
-    #         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    #     ]
-    # )
-    # transform_test = transforms.Compose(
-    #     [
-    #         transforms.Resize(32),
-    #         transforms.ToTensor(),
-    #         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    #     ]
-    # )
-
-class WideResNet40x10:
+    
+class WideResNet16x4:
     base = WideResNet
     args = list()
-    kwargs = {"depth": 40, "widen_factor": 10}
-    # transform_train = transforms.Compose(
-    #     [
-    #         transforms.Resize(32),
-    #         transforms.RandomCrop(32, padding=4),
-    #         transforms.RandomHorizontalFlip(),
-    #         transforms.ToTensor(),
-    #         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    #     ]
-    # )
-    # transform_test = transforms.Compose(
-    #     [
-    #         transforms.Resize(32),
-    #         transforms.ToTensor(),
-    #         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    #     ]
-    # )
+    kwargs = {"depth": 16, "widen_factor": 4}
+    
+class WideResNet28x2:
+    base = WideResNet
+    args = list()
+    kwargs = {"depth": 28, "widen_factor": 2}

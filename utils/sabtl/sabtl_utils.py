@@ -70,15 +70,6 @@ def train_sabtl_sgd(dataloader, sabtl_model, criterion, optimizer, device, scale
         loss_sum += loss.data.item() * X.size(0)
         num_objects_current += X.size(0)
         
-        """
-        # ### Checking accuracy with MAP (Mean) solution
-        params, _, _ = sabtl_model.sample(0.0)
-        params = format_weights(params, sabtl_model)
-        pred = sabtl_model(params, X)
-        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-        loss_sum += loss.data.item() * X.size(0)
-        num_objects_current += X.size(0)
-        """
     return{
         "loss" : loss_sum / num_objects_current,
         "accuracy" : correct / num_objects_current * 100.0,
@@ -148,10 +139,6 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
             loss = criterion(pred, y)        
             loss.backward()
             optimizer.first_step(zero_grad=True, amp=False)
-            
-            # correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-            # loss_sum += loss.data.item() * X.size(0)
-            # num_objects_current += X.size(0)
                       
             ## second forward-backward pass
             params = optimizer.second_sample(z_1, z_2, sabtl_model)
@@ -179,13 +166,10 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
     num_objects_current = 0
     for batch, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
-        # Sample weight
-        params, z_1, z_2 = sabtl_model.sample(1.0)    
+        params, z_1, z_2 = sabtl_model.sample(1.0)    # Sample weight
 
-        # compute Fisher inverse
-        fish_inv = sabtl_model.fish_inv(params, eta)
-        # Change weight sample shape to input model
-        params = utils.format_weights(params, sabtl_model)
+        fish_inv = sabtl_model.fish_inv(params, eta)             # compute Fisher inverse
+        params = utils.format_weights(params, sabtl_model)       # Change weight sample shape to input model
 
         if first_step_scaler is not None:
             ## first forward & backward
@@ -235,10 +219,6 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
             loss = criterion(pred, y)        
             loss.backward()
             optimizer.first_step(fish_inv, zero_grad=True, amp=False)
-            
-            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-            loss_sum += loss.data.item() * X.size(0)
-            num_objects_current += X.size(0)
                       
             ## second forward-backward pass
             params = optimizer.second_sample(z_1, z_2, sabtl_model)

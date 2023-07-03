@@ -145,8 +145,6 @@ args = parser.parse_args()
 
 # Set Device and Seed--------------------------------------------
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Device : {args.device}")
-args.last_layer = True
 
 if args.model.split("-")[-1] == "noBN":
     args.batch_norm = False
@@ -156,37 +154,46 @@ else:
     args.aug = True
 
 utils.set_seed(args.seed)
-#----------------------------------------------------------------
 
-# Set BMA and Save Setting--------------------------------------------
+print(f"Device : {args.device} / Seed : {args.seed} / Augmentation {args.aug}")
+print("-"*30)
+#------------------------------------------------------------------
+
+
+# Set BMA and Save Setting-----------------------------------------
 args.save_path = utils.set_save_path(args)
 print(f"Save Results on {args.save_path}")
-#---------------------------------------------------------------
+print("-"*30)
+#------------------------------------------------------------------
 
 # wandb config---------------------------------------------------
 wandb.config.update(args)
 wandb.run.name = utils.set_wandb_runname(args)
 #----------------------------------------------------------------
 
-# Load Data ------------------------------------------------------
-tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(args.dataset,
-                                                                args.data_path,
-                                                                args.batch_size,
-                                                                args.num_workers,
-                                                                use_validation = args.use_validation,
-                                                                # fe_dat = args.fe_dat,
-                                                                aug = args.aug,
-                                                                dat_per_cls = args.dat_per_cls,
-                                                                seed = args.seed)
+# Load Data --------------------------------------------------------
+tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
+                                                        data_path=args.data_path,
+                                                        dat_per_cls=args.dat_per_cls,
+                                                        use_validation=args.use_validation,
+                                                        batch_size=args.batch_size,
+                                                        num_workers=args.num_workers,
+                                                        seed=args.seed,
+                                                        aug=args.aug,
+                                                        )
+
 if args.dat_per_cls >= 0:
     print(f"Load Data : {args.dataset}-{args.dat_per_cls}shot")
 else:
     print(f"Load Data : {args.dataset}")
-#----------------------------------------------------------------
+print("-"*30)
+#------------------------------------------------------------------
+
 
 # Define Model------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)   
-utils.freeze_fe(model)
+## linear probing일때만 freeze_fe
+# utils.freeze_fe(model)
 
 w_mean = torch.load(args.mean_path)
 w_var = torch.load(args.var_path) 
@@ -199,20 +206,29 @@ sabtl_model = sabtl.SABTL(copy.deepcopy(model),
                         low_rank=args.low_rank,
                         w_cov_sqrt=w_covmat,
                         ).to(args.device)
+
+print(f"Load SABTL Model with prior made of {args.src_bnn}")
+print("-"*30)
 #----------------------------------------------------------------
 
 # Set Criterion------------------------------------------------------
 criterion = torch.nn.CrossEntropyLoss()
+print("Set Criterion as Cross Entropy")
+print("-"*30)
 #-------------------------------------------------------------------
 
 # Set Optimizer--------------------------------------
 ## Optimizer
 optimizer = sabtl_utils.get_optimizer(args, sabtl_model)
+print(f"Set {args.optim} optimizer with lr_init {args.lr_init} / wd {args.wd} / momentum {args.momentum}")
+print("-"*30)
 #----------------------------------------------------------------
 
 ## Set Scheduler-------------------------------------------------------
 if args.scheduler not in ["constant", "swag_lr"]:
     scheduler = utils.get_scheduler(args, optimizer)
+print(f"Set {args.scheduler}")
+print("-"*30)
 #-------------------------------------------------------------------
 
 ## Resume ---------------------------------------------------------------------------
@@ -224,6 +240,7 @@ start_epoch = 0
 
 ## Set AMP --------------------------------------------------------------------------
 scaler, first_step_scaler, second_step_scaler = utils.get_scaler(args)
+print("-"*30)
 #------------------------------------------------------------------------------------
 
 ## Training -------------------------------------------------------------------------
@@ -364,7 +381,7 @@ for epoch in range(start_epoch, int(args.epochs)):
     # if args.scheduler == "cos_anneal":
     #     scheduler.step()
     if args.scheduler in ["cos_anneal", "step_lr", "cos_decay"]:
-        scheduler.step(epoch)
+        scheduler.step(epoch+1)
 #------------------------------------------------------------------------------------------------------------
 
 

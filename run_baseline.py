@@ -72,8 +72,8 @@ parser.add_argument("--dat_per_cls", type=int, default=-1,
 parser.add_argument(
     "--model",
     type=str, default='resnet18', required=True,
-    choices=['resnet18', 'resnet50', 'resnet101', 'wideresnet28x10', 'wideresnet40x10',
-            'resnet18-noBN', 'resnet50-noBN', 'resnet101-noBN', 'wideresnet28x10-noBN', 'wideresnet40x10-noBN',
+    choices=['resnet18', 'resnet34', 'resnet50', 'wideresnet16x4', 'wideresnet28x10', 'wideresnet28x2',
+            'resnet18-noBN', 'wideresnet28x10-noBN',
             "vitb16-i21k"],
     help="model name (default : resnet18)")
 
@@ -140,8 +140,6 @@ args = parser.parse_args()
 
 # Set Device and Seed--------------------------------------------
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Device : {args.device}")
-
 
 if args.model.split("-")[-1] == "noBN":
     args.batch_norm = False
@@ -150,8 +148,10 @@ else:
     args.batch_norm = True
     args.aug = True
 
-
 utils.set_seed(args.seed)
+
+print(f"Device : {args.device} / Seed : {args.seed} / Augmentation {args.aug}")
+print("-"*30)
 #------------------------------------------------------------------
 
 # Set BMA and Save Setting-----------------------------------------
@@ -160,6 +160,7 @@ if args.method == 'dnn':
 
 args.save_path = utils.set_save_path(args)
 print(f"Save Results on {args.save_path}")
+print("-"*30)
 #------------------------------------------------------------------
 
 # wandb config-----------------------------------------------------
@@ -168,19 +169,21 @@ wandb.run.name = utils.set_wandb_runname(args)
 #------------------------------------------------------------------
 
 # Load Data --------------------------------------------------------
-tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(args.dataset,
-                                                                args.data_path,
-                                                                args.batch_size,
-                                                                args.num_workers,
-                                                                use_validation = args.use_validation,
-                                                                # fe_dat = args.fe_dat,
-                                                                aug = args.aug,
-                                                                dat_per_cls = args.dat_per_cls,
-                                                                seed = args.seed)
+tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
+                                                        data_path=args.data_path,
+                                                        dat_per_cls=args.dat_per_cls,
+                                                        use_validation=args.use_validation,
+                                                        batch_size=args.batch_size,
+                                                        num_workers=args.num_workers,
+                                                        seed=args.seed,
+                                                        aug=args.aug,
+                                                        )
+
 if args.dat_per_cls >= 0:
     print(f"Load Data : {args.dataset}-{args.dat_per_cls}shot")
 else:
     print(f"Load Data : {args.dataset}")
+print("-"*30)
 #------------------------------------------------------------------
 
 # Define Model-----------------------------------------------------
@@ -201,24 +204,31 @@ elif args.method == "last_swag":
                         max_num_models=args.max_num_models,
                         last_layer=True).to(args.device)
     print("Preparing Last-SWAG model")
+print("-"*30)
 #-------------------------------------------------------------------
 
 # Set Criterion-----------------------------------------------------
 criterion = torch.nn.CrossEntropyLoss()
+print("Set Criterion as Cross Entropy")
+print("-"*30)
 #-------------------------------------------------------------------
 
 # Set Optimizer--------------------------------------
 optimizer = utils.get_optimizer(args, model)
+print(f"Set {args.optim} optimizer with lr_init {args.lr_init} / wd {args.wd} / momentum {args.momentum}")
+print("-"*30)
 #----------------------------------------------------------------
     
 ## Set Scheduler----------------------------------------------------
 if args.scheduler not in ["constant", "swag_lr"]:
     scheduler = utils.get_scheduler(args, optimizer)
+print(f"Set {args.scheduler} lr scheduler")
+print("-"*30)
 #-------------------------------------------------------------------
 
 
 ## Resume ---------------------------------------------------------------------------
-start_epoch = 0
+start_epoch = 1
 
 if not args.pre_trained and args.resume is not None:
     print(f"Resume training from {args.resume}")
@@ -248,6 +258,7 @@ else:
 
 ## Set AMP --------------------------------------------------------------------------
 scaler, first_step_scaler, second_step_scaler = utils.get_scaler(args)
+print("-"*30)
 #------------------------------------------------------------------------------------
 
 
@@ -267,8 +278,7 @@ if args.method in ["swag", "last_swag"]:
 
 
 best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; cnt=0; swag_cnt = 0; best_swag_val_loss=9999
-print("Start Training!!")
-for epoch in range(start_epoch, int(args.epochs)):
+for epoch in range(start_epoch, int(args.epochs + 1)):
     time_ep = time.time()
 
     ## lr scheduling
@@ -305,17 +315,17 @@ for epoch in range(start_epoch, int(args.epochs)):
 
     ## print result
     if args.method in ["swag", "last_swag"]:
-        values = [epoch + 1, f"{args.method}-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
+        values = [epoch, f"{args.method}-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
             val_res["loss"], val_res["accuracy"], val_res["nll"], val_res["ece"],
             swag_res["loss"], swag_res["accuracy"], swag_res["nll"], swag_res["ece"],
                 time_ep]
     else:
-        values = [epoch + 1, f"{args.method}-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
+        values = [epoch, f"{args.method}-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
             val_res["loss"], val_res["accuracy"], val_res["nll"], val_res["ece"],
             time_ep]
     
     table = tabulate.tabulate([values], columns, tablefmt="simple", floatfmt="8.4f")
-    if epoch % args.print_epoch == 0:
+    if epoch % args.print_epoch == 1:
         table = table.split("\n")
         table = "\n".join([table[1]] + table)
     else:
@@ -345,14 +355,14 @@ for epoch in range(start_epoch, int(args.epochs)):
             best_val_acc = val_res['accuracy']
             best_swag_val_loss = swag_res["loss"]
             best_swag_val_acc = swag_res['accuracy']
-            best_epoch = epoch + 1
+            best_epoch = epoch
 
             # save state_dict
             os.makedirs(args.save_path, exist_ok=True)
             if args.optim == "sgd":
                 if not args.no_amp:
                     utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                        epoch = epoch,
+                                        epoch = best_epoch,
                                         state_dict = swag_model.state_dict(),
                                         optimizer = optimizer.state_dict(),
                                         # scheduler = scheduler.state_dict(),
@@ -360,7 +370,7 @@ for epoch in range(start_epoch, int(args.epochs)):
                                         )
                 else:
                     utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                        epoch = epoch,
+                                        epoch = best_epoch,
                                         state_dict = swag_model.state_dict(),
                                         optimizer = optimizer.state_dict(),
                                         # scheduler = scheduler.state_dict(),
@@ -368,7 +378,7 @@ for epoch in range(start_epoch, int(args.epochs)):
             elif args.optim in ["sam", "bsam"]:
                 if not args.no_amp:
                     utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                        epoch = epoch,
+                                        epoch = best_epoch,
                                         state_dict = swag_model.state_dict(),
                                         optimizer = optimizer.state_dict(),
                                         # scheduler = scheduler.state_dict(),
@@ -377,7 +387,7 @@ for epoch in range(start_epoch, int(args.epochs)):
                                         )
                 else:
                     utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                        epoch = epoch,
+                                        epoch = best_epoch,
                                         state_dict = swag_model.state_dict(),
                                         optimizer = optimizer.state_dict(),
                                         # scheduler = scheduler.state_dict(),
@@ -402,14 +412,14 @@ for epoch in range(start_epoch, int(args.epochs)):
             cnt = 0
             best_val_loss = val_res["loss"]
             best_val_acc = val_res["accuracy"]
-            best_epoch = epoch + 1
+            best_epoch = epoch
 
             # save state_dict
             os.makedirs(args.save_path,exist_ok=True)
             if args.optim == "sgd":
                 if not args.no_amp:
                     utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                    epoch = epoch,
+                                    epoch = best_epoch,
                                     state_dict = model.state_dict(),
                                     optimizer = optimizer.state_dict(),
                                     # scheduler = scheduler.state_dict(),
@@ -417,7 +427,7 @@ for epoch in range(start_epoch, int(args.epochs)):
                                     )
                 else:
                     utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                    epoch = epoch,
+                                    epoch = best_epoch,
                                     state_dict = model.state_dict(),
                                     optimizer = optimizer.state_dict(),
                                     # scheduler = scheduler.state_dict(),
@@ -425,7 +435,7 @@ for epoch in range(start_epoch, int(args.epochs)):
             elif args.optim == "sam":
                 if not args.no_amp:
                     utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                    epoch = epoch,
+                                    epoch = best_epoch,
                                     state_dict = model.state_dict(),
                                     optimizer = optimizer.state_dict(),
                                     # scheduler = scheduler.state_dict(),
@@ -434,7 +444,7 @@ for epoch in range(start_epoch, int(args.epochs)):
                                     )
                 else:
                     utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                    epoch = epoch,
+                                    epoch = best_epoch,
                                     state_dict = model.state_dict(),
                                     optimizer = optimizer.state_dict(),
                                     # scheduler = scheduler.state_dict(),

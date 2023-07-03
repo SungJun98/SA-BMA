@@ -13,7 +13,7 @@ from utils.swag.swag_utils import flatten, bn_update, predict
 from utils.sam import sam, sam_utils
 
 from utils.models import resnet_noBN, wide_resnet, wide_resnet_noBN
-from torchvision.models import resnet18, resnet50, resnet101
+from torchvision.models import resnet18, resnet34, resnet50, resnet101
 import timm
 
 ## ------------------------------------------------------------------------------------
@@ -100,62 +100,35 @@ def set_wandb_runname(args):
 
 
 
-
-def get_dataset(dataset, data_path, batch_size, num_workers, use_validation, aug, dat_per_cls, seed):
-    '''
-    Load Dataset
-    '''
+def get_dataset(dataset='cifar10',
+                data_path='/data2/lsj9862/data/cifar10',
+                dat_per_cls=-1,
+                use_validation=True, 
+                batch_size=256,
+                num_workers=4,
+                seed=0,
+                aug=True,
+                ):
+    
     import utils.data.data as data
-    if dataset == 'cifar10':
-        tr_loader, val_loader, te_loader, num_classes = data.get_cifar10(data_path, batch_size,
-                                                                        num_workers,
-                                                                        use_validation = use_validation,
-                                                                        aug = aug,
-                                                                        dat_per_cls = dat_per_cls,
-                                                                        seed = seed)
-            
-    elif dataset == 'cifar100':
-        tr_loader, val_loader, te_loader, num_classes = data.get_cifar100(data_path, batch_size,
-                                                                    num_workers,
-                                                                    use_validation = use_validation,
-                                                                    aug = aug,
-                                                                    dat_per_cls = dat_per_cls,
-                                                                    seed = seed)
     
-    # elif dataset == 'aircraft':
-    #     if fe_dat is not None:
-    #         tr_loader, val_loader, te_loader, num_classes = data.get_aircraft_fe(fe_dat = fe_dat,
-    #                                                                         batch_size = batch_size,
-    #                                                                         use_validation = use_validation,)
-    #     else:
-    #         tr_loader, val_loader, te_loader, num_classes = data.get_aircraft(data_path, batch_size,
-    #                                                                     num_workers,
-    #                                                                     use_validation = use_validation,
-    #                                                                     aug = aug)
-    # elif dataset == 'nabirds':
-    #     if fe_dat is not None:
-    #         tr_loader, val_loader, te_loader, num_classes = data.get_nabirds_fe(fe_dat = fe_dat
-    #                                                                         ,batch_size = batch_size,
-    #                                                                         use_validation = use_validation,)
-    #     else:
-    #         tr_loader, val_loader, te_loader, num_classes = data.get_nabirds(data_path, batch_size,
-    #                                                                     num_workers,
-    #                                                                     use_validation = use_validation,
-    #                                                                     aug = aug)    
-    # elif dataset == 'stanfordcars':
-    #     if fe_dat is not None:
-    #         tr_loader, val_loader, te_loader, num_classes = data.get_cars_fe(fe_dat = fe_dat,
-    #                                                                         batch_size = batch_size,
-    #                                                                         use_validation = use_validation,)
-    #     else:
-    #         tr_loader, val_loader, te_loader, num_classes = data.get_cars(data_path, batch_size,
-    #                                                                     num_workers,
-    #                                                                     use_validation = use_validation,
-    #                                                                     aug = aug)    
+    ## Define Transform
+    transform_train, transform_test = data.create_transform_v2(aug=aug)
     
-    if not use_validation:
-        val_loader = te_loader
+    ## Load Data
+    tr_data, val_data, te_data, num_classes = data.create_dataset(data_name=dataset, data_path=data_path,
+                                        use_validation=use_validation,
+                                        dat_per_cls=dat_per_cls, seed=seed,
+                                        transform_train=transform_train, transform_test=transform_test,
+                                        )
     
+    ## Create loader
+    tr_loader, val_loader, te_loader = data.create_loader(tr_data=tr_data, val_data=val_data, te_data=te_data,
+                                            use_validation=use_validation,
+                                            batch_size=batch_size, num_workers=num_workers, dat_per_cls=dat_per_cls,
+                                            )
+        
+
     return tr_loader, val_loader, te_loader, num_classes
 
 
@@ -176,7 +149,16 @@ def get_backbone(model_name, num_classes, device, pre_trained=False):
     elif model_name == "resnet18-noBN":
         model = resnet_noBN.resnet18(num_classes=num_classes)
 
-
+    ## ResNet50
+    elif model_name == "resnet34":
+        if pre_trained:
+            model = resnet34(pretrained=True)
+            in_features = model.fc.in_features
+            model.fc = nn.Linear(in_features, num_classes)
+        else:
+            model = resnet34(pretrained=False, num_classes=num_classes)
+    
+    
     ## ResNet50
     elif model_name == "resnet50":
         if pre_trained:
@@ -186,21 +168,17 @@ def get_backbone(model_name, num_classes, device, pre_trained=False):
         else:
             model = resnet50(pretrained=False, num_classes=num_classes)
 
-    elif model_name == "resnet50-noBN":
-        model = resnet_noBN.resnet50(num_classes=num_classes)
 
-    ## ResNet101
-    elif model_name == "resnet101":
-        if pre_trained:
-            model = resnet101(pretrained=True)
-            in_features = model.fc.in_features
-            model.fc = nn.Linear(in_features, num_classes)
-        else:
-            model = resnet101(pretrained=False, num_classes=num_classes)
-
-    elif model_name == "resnet101-noBN":
-        model = resnet_noBN.resnet101(num_classes=num_classes)
-            
+    ## WideResNet16x4
+    elif model_name == "wideresnet16x4":
+        model_cfg = getattr(wide_resnet, "WideResNet16x4")
+        model = model_cfg.base(num_classes=num_classes)
+        
+    ## WideResNet28x2
+    elif model_name == "wideresnet28x2":
+        model_cfg = getattr(wide_resnet, "WideResNet28x2")
+        model = model_cfg.base(num_classes=num_classes)  
+               
     ## WideResNet28x10
     elif model_name == "wideresnet28x10":
         model_cfg = getattr(wide_resnet, "WideResNet28x10")
@@ -208,15 +186,6 @@ def get_backbone(model_name, num_classes, device, pre_trained=False):
         
     elif model_name == "wideresnet28x10-noBN":
         model_cfg = getattr(wide_resnet_noBN, "WideResNet28x10")
-        model = model_cfg.base(num_classes=num_classes)
-
-    ## WideResNet40x10
-    elif model_name == "wideresnet40x10":
-        model_cfg = getattr(wide_resnet, "WideResNet40x10")
-        model = model_cfg.base(num_classes=num_classes)
-        
-    elif model_name == "wideresnet40x10-noBN":
-        model_cfg = getattr(wide_resnet_noBN, "WideResNet40x10")
         model = model_cfg.base(num_classes=num_classes)
     
     
@@ -237,7 +206,7 @@ def get_optimizer(args, model):
     if args.linear_probe:
         if args.model == 'vitb16-i21k':
             optim_param = model.head.parameters()
-        elif args.model == 'resnet101':
+        elif args.model in ['resnet18', 'resnet34', 'resnet50', 'resnet101']:
             optim_param = model.fc.parameters()
     else:
         optim_param = model.parameters()
