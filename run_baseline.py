@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser(description="training baselines")
 parser.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
 
 parser.add_argument("--method", type=str, default="dnn",
-                    choices=["dnn", "swag", "last_swag"],
+                    choices=["dnn", "swag", "last_swag", "vi"],
                     help="Learning Method")
 
 parser.add_argument("--no_amp", action="store_true", default=False, help="Deactivate AMP")
@@ -63,17 +63,14 @@ parser.add_argument("--use_validation", action='store_true', default=True,
 
 parser.add_argument("--dat_per_cls", type=int, default=-1,
             help="Number of data points per class in few-shot setting. -1 denotes deactivate few-shot setting (Default : -1)")
-
-# parser.add_argument("--fe_dat", type=str, default=None, choices=[None, "resnet18-noBN", "vitb16-i21k"],
-#             help = "Use Feature Extracted from Feature Extractor (Default : None)")
 #----------------------------------------------------------------
 
 ## Model ---------------------------------------------------------
 parser.add_argument(
     "--model",
     type=str, default='resnet18', required=True,
-    choices=['resnet18', 'resnet34', 'resnet50', 'wideresnet16x4', 'wideresnet28x10', 'wideresnet28x2',
-            'resnet18-noBN', 'wideresnet28x10-noBN',
+    choices=['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
+            'resnet18-noBN',
             "vitb16-i21k"],
     help="model name (default : resnet18)")
 
@@ -89,7 +86,7 @@ parser.add_argument("--save_path",
 
 ## Optimizer Hyperparameter --------------------------------------
 parser.add_argument("--optim", type=str, default="sgd",
-                    choices=["sgd", "sam"],
+                    choices=["sgd", "sam", "adam"],
                     help="Optimization options")
 
 parser.add_argument("--lr_init", type=float, default=0.01,
@@ -129,7 +126,23 @@ parser.add_argument("--swag_resume", type=str, default=None,
     help="path to load saved swag model to resume training (default: None)",)
 #----------------------------------------------------------------
 
+## VI ---------------------------------------------------------
+parser.add_argument("--vi_prior_mu", type=float, default=0.0,
+                help="Set prior mean for variational ineference (Default: 0.0)")
+parser.add_argument("--vi_prior_sigma", type=float, default=1.0,
+                help="Set prior variance for variational inference (Default: 1.0)")
+parser.add_argument("--vi_posterior_mu_init", type=float, default=0.0,
+                help="Set posterior mean initialization for variatoinal inference (Default: 0.0)")
+parser.add_argument("--vi_posterior_rho_init", type=float, default=-3.0,
+                help="Set perturbation on posterior mean for variational inference (Default: -3.0)")
+parser.add_argument("--vi_type", type=str, default="Reparameterization", choices=["Reparameterization", "Flipout"],
+                help="Set type of variational inference (Default: Reparameterization)")
+parser.add_argument("--vi_moped_delta", type=float, default=0.5,
+                help="Set initial perturbation factor for weight in MOPED framework (Default: 0.5)")
+#----------------------------------------------------------------
+
 ## bma or metrics -----------------------------------------------
+parser.add_argument("--val_mc_num", type=int, default=1, help="number of MC sample in validation phase")
 parser.add_argument("--eps", type=float, default=1e-8, help="small float to calculate nll")
 parser.add_argument("--bma_num_models", type=int, default=30, help="Number of models for bma")
 parser.add_argument("--num_bins", type=int, default=50, help="bin number for ece")
@@ -190,7 +203,7 @@ print("-"*30)
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)   
 if args.linear_probe or args.method == "last_swag":
     utils.freeze_fe(model)
-    
+
 swag_model=None
 if args.method == "swag":
     swag_model = swag.SWAG(copy.deepcopy(model),
@@ -204,6 +217,21 @@ elif args.method == "last_swag":
                         max_num_models=args.max_num_models,
                         last_layer=True).to(args.device)
     print("Preparing Last-SWAG model")
+elif args.method == "vi":
+    from bayesian_torch.models.dnn_to_bnn import dnn_to_bnn
+    const_bnn_prior_parameters = {
+        "prior_mu": args.vi_prior_mu,
+        "prior_sigma": args.vi_prior_sigma,
+        "posterior_mu_init": args.vi_posterior_mu_init,
+        "posterior_rho_init": args.vi_posterior_rho_init,
+        "type": args.vi_type,
+        "moped_enable": True,
+        "moped_delta": args.vi_moped_delta,
+    }
+    dnn_to_bnn(model, const_bnn_prior_parameters)
+    model.to(args.device)
+    print(f"Preparing Model for {args.vi_type} VI with MOPED ")
+
 print("-"*30)
 #-------------------------------------------------------------------
 
@@ -273,7 +301,7 @@ if args.method in ["swag", "last_swag"]:
 
     if args.swa_c_epochs is None:
         raise RuntimeError("swa_c_epochs must not be None!")
-    
+       
     print(f"Running SWAG...")
 
 
@@ -292,13 +320,20 @@ for epoch in range(start_epoch, int(args.epochs + 1)):
         lr = optimizer.param_groups[0]['lr']
     
     ## train
-    if args.optim == "sgd":
-        tr_res = utils.train_sgd(tr_loader, model, criterion, optimizer, args.device, scaler)
-    elif args.optim == "sam":
-        tr_res = utils.train_sam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
+    if args.method in ["vi"]:
+        tr_res = utils.train_vi(tr_loader, model, criterion, optimizer, args.device, scaler, args.batch_size)
+    else:
+        if args.optim in ["sgd", "adam"]:
+            tr_res = utils.train_sgd(tr_loader, model, criterion, optimizer, args.device, scaler)
+        elif args.optim == "sam":
+            tr_res = utils.train_sam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
 
     ## valid
-    val_res = utils.eval(val_loader, model, criterion, args.device, args.num_bins, args.eps)
+    if args.method in ["vi"]:
+        ## eval_vi arg.val_mc_num에 따라서 mc를 하든 map를 가져다 쓰든지 하도록 수정
+        val_res = utils.eval_vi(val_loader, model, num_classes, criterion, args.val_mc_num, args.num_bins, args.eps)
+    else:
+        val_res = utils.eval(val_loader, model, criterion, args.device, args.num_bins, args.eps)
 
     ## swag valid
     if (args.method in ["swag", "last_swag"]) and ((epoch + 1) > args.swa_start) and ((epoch + 1 - args.swa_start) % args.swa_c_epochs == 0):
@@ -359,7 +394,7 @@ for epoch in range(start_epoch, int(args.epochs + 1)):
 
             # save state_dict
             os.makedirs(args.save_path, exist_ok=True)
-            if args.optim == "sgd":
+            if args.optim in ["sgd", "adam"]:
                 if not args.no_amp:
                     utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
                                         epoch = best_epoch,
@@ -416,7 +451,7 @@ for epoch in range(start_epoch, int(args.epochs + 1)):
 
             # save state_dict
             os.makedirs(args.save_path,exist_ok=True)
-            if args.optim == "sgd":
+            if args.optim in ["sgd", "adam"]:
                 if not args.no_amp:
                     utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
                                     epoch = best_epoch,
@@ -453,7 +488,7 @@ for epoch in range(start_epoch, int(args.epochs + 1)):
             cnt +=1
     
     ## Early Stopping
-    if cnt == args.tol and args.method == 'dnn':
+    if cnt == args.tol and args.method in ['dnn', "vi"]:
         break
     elif swag_cnt == args.tol and args.method in ['swag', 'last_swag']:
         break
@@ -483,11 +518,14 @@ else:
 
 
 ### BMA prediction
-if args.method in ["swag", "last_swag"]:
+if args.method in ["swag", "last_swag", "vi"]:
     bma_save_path = f"{args.save_path}/bma_models"
     os.makedirs(bma_save_path, exist_ok=True)
     
-    bma_res = utils.bma(tr_loader, te_loader, swag_model, args.bma_num_models, num_classes, bma_save_path=bma_save_path, eps=args.eps, batch_norm=args.batch_norm)
+    if args.method in ["swag", "last_swag"]:
+        model = swag_model
+    
+    bma_res = utils.bma(tr_loader, te_loader, args.method, model, args.bma_num_models, num_classes, bma_save_path=bma_save_path, eps=args.eps, batch_norm=args.batch_norm)
     bma_predictions = bma_res["predictions"]
     bma_targets = bma_res["targets"]
 
@@ -511,36 +549,6 @@ if args.method in ["swag", "last_swag"]:
     utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, True)
 
 
-### MAP Prediction
-"""
-if args.method in ["swag", "last_swag"]:
-    sample = swag_model.sample(0)
-    if args.batch_norm:
-        swag_utils.bn_update(tr_loader, swag_model, verbose=False, subset=1.0)
-    res = swag_utils.predict(te_loader, swag_model)
-else:
-    res = swag_utils.predict(te_loader, model)
-
-predictions = res["predictions"]
-targets = res["targets"]
-
-wandb.run.summary['Best epoch'] = checkpoint["epoch"] + 1
-# Acc
-te_accuracy = np.mean(np.argmax(predictions, axis=1) == targets) * 100
-wandb.run.summary['test accuracy'] = te_accuracy
-print(f"Best test accuracy : {te_accuracy:8.4f}% on epoch {checkpoint['epoch'] + 1}")
-
-# nll
-te_nll = -np.mean(np.log(predictions[np.arange(predictions.shape[0]), targets] + args.eps))
-wandb.run.summary['test nll'] = te_nll
-print(f"test nll: {te_nll:8.4f}")
-
-# ece
-unc = utils.calibration_curve(predictions, targets, args.num_bins)
-te_ece = unc["ece"]
-wandb.run.summary["test ece"]  = te_ece
-print(f"test ece : {te_ece:8.4f}")
-"""
 
 if args.method in ["swag", "last_swag"]:
     sample = swag_model.sample(0)
@@ -550,10 +558,10 @@ if args.method in ["swag", "last_swag"]:
 else:
     res = utils.eval(te_loader, model, criterion, args.device)
 
-wandb.run.summary['Best epoch'] = checkpoint["epoch"] + 1
+wandb.run.summary['Best epoch'] = checkpoint["epoch"]
 # Acc
 wandb.run.summary['test accuracy'] = res['accuracy']
-print(f"Best test accuracy : {res['accuracy']:8.4f}% on epoch {checkpoint['epoch'] + 1}")
+print(f"Best test accuracy : {res['accuracy']:8.4f}% on epoch {checkpoint['epoch']}")
 
 # nll
 wandb.run.summary['test nll'] = res['nll']

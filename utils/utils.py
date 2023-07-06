@@ -9,11 +9,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from bayesian_torch.models.dnn_to_bnn import get_kl_loss
+
 from utils.swag.swag_utils import flatten, bn_update, predict
 from utils.sam import sam, sam_utils
 
 from utils.models import resnet_noBN, wide_resnet, wide_resnet_noBN
-from torchvision.models import resnet18, resnet34, resnet50, resnet101
+import torchvision.models as torch_models
 import timm
 
 ## ------------------------------------------------------------------------------------
@@ -57,10 +59,12 @@ def set_save_path(args):
     ## learning hyperparameter part
     if args.method in ["swag", "last_swag"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
+    elif args.method in ["vi"]:
+        save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}"
     else:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.momentum}"
         
-    if args.optim != "sgd":
+    if args.optim not in ["sgd", "adam"]:
         save_path_ = f"{save_path_}_{args.rho}"
     
     return save_path_
@@ -90,10 +94,12 @@ def set_wandb_runname(args):
     ## learning hyperparameter part
     if args.method in ["swag", "last_swag"]:
         run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
+    elif args.method in ["vi"]:
+        run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}"
     else:
         run_name_ = f"{run_name_}/{args.lr_init}_{args.wd}_{args.momentum}"
         
-    if args.optim != "sgd":
+    if args.optim not in ["sgd", "adam"]:
         run_name_ = f"{run_name_}_{args.rho}"
     
     return run_name_
@@ -133,61 +139,19 @@ def get_dataset(dataset='cifar10',
 
 
 
-def get_backbone(model_name, num_classes, device, pre_trained=False):
+def get_backbone(model_name, num_classes, device, pre_trained=True):
     '''
     Define Backbone Model
     '''
-    ## ResNet18
-    if model_name == "resnet18":
-        if pre_trained:
-            model = resnet18(pretrained=True)
-            in_features = model.fc.in_features
-            model.fc = nn.Linear(in_features, num_classes)
-        else:
-            model = resnet18(pretrained=False, num_classes=num_classes)
-        
+    ## ResNet
+    if model_name in ['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152']:
+        model_cfg = getattr(torch_models, model_name)
+        model = model_cfg(pretrained=pre_trained)
+        model.fc = nn.Linear(model.fc.in_features, num_classes)
+    
+    ## ResNet18-noBN
     elif model_name == "resnet18-noBN":
         model = resnet_noBN.resnet18(num_classes=num_classes)
-
-    ## ResNet50
-    elif model_name == "resnet34":
-        if pre_trained:
-            model = resnet34(pretrained=True)
-            in_features = model.fc.in_features
-            model.fc = nn.Linear(in_features, num_classes)
-        else:
-            model = resnet34(pretrained=False, num_classes=num_classes)
-    
-    
-    ## ResNet50
-    elif model_name == "resnet50":
-        if pre_trained:
-            model = resnet50(pretrained=True)
-            in_features = model.fc.in_features
-            model.fc = nn.Linear(in_features, num_classes)
-        else:
-            model = resnet50(pretrained=False, num_classes=num_classes)
-
-
-    ## WideResNet16x4
-    elif model_name == "wideresnet16x4":
-        model_cfg = getattr(wide_resnet, "WideResNet16x4")
-        model = model_cfg.base(num_classes=num_classes)
-        
-    ## WideResNet28x2
-    elif model_name == "wideresnet28x2":
-        model_cfg = getattr(wide_resnet, "WideResNet28x2")
-        model = model_cfg.base(num_classes=num_classes)  
-               
-    ## WideResNet28x10
-    elif model_name == "wideresnet28x10":
-        model_cfg = getattr(wide_resnet, "WideResNet28x10")
-        model = model_cfg.base(num_classes=num_classes)
-        
-    elif model_name == "wideresnet28x10-noBN":
-        model_cfg = getattr(wide_resnet_noBN, "WideResNet28x10")
-        model = model_cfg.base(num_classes=num_classes)
-    
     
     ## ViT-B/16-ImageNet21K
     if model_name == "vitb16-i21k":
@@ -206,7 +170,7 @@ def get_optimizer(args, model):
     if args.linear_probe:
         if args.model == 'vitb16-i21k':
             optim_param = model.head.parameters()
-        elif args.model in ['resnet18', 'resnet34', 'resnet50', 'resnet101']:
+        elif args.model in ['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152']:
             optim_param = model.fc.parameters()
     else:
         optim_param = model.parameters()
@@ -215,10 +179,14 @@ def get_optimizer(args, model):
         optimizer = torch.optim.SGD(optim_param,
                             lr=args.lr_init, weight_decay=args.wd,
                             momentum=args.momentum)
+    elif args.optim == "adam":
+        optimizer = torch.optim.Adam(optim_param,
+                            lr=args.lr_init, weight_decay=args.wd)
     elif args.optim == "sam":
         base_optimizer = torch.optim.SGD
         optimizer = sam.SAM(optim_param, base_optimizer, rho=args.rho, lr=args.lr_init, momentum=args.momentum,
                         weight_decay=args.wd)
+        
     return optimizer
 
 
@@ -229,20 +197,14 @@ def get_scheduler(args, optimizer):
     '''
     if args.scheduler == "step_lr":
         from timm.scheduler.step_lr import StepLRScheduler
-        if args.optim == 'sgd':
+        if args.optim in ['sgd', "adam"]:
             scheduler_ = StepLRScheduler(optimizer, decay_rate=0.2, )
-        elif args.optim == 'sam':
+        elif args.optim in ['sam', 'bsam']:
             scheduler_ = StepLRScheduler(optimizer.base_optimizer, decay_rate=0.2, )
-            
-    elif args.scheduler == "cos_anneal":
-        if args.optim == "sgd":
-            scheduler_ = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.t_max)    
-        elif args.optim == "sam":
-            scheduler_ = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer.base_optimizer, T_max=args.t_max)
             
     elif args.scheduler == "cos_decay":
         from timm.scheduler.cosine_lr import CosineLRScheduler
-        if args.optim == 'sgd':
+        if args.optim in ["sgd", "adam"]:
             scheduler_ = CosineLRScheduler(optimizer = optimizer,
                                         t_initial= args.epochs,
                                         lr_min=args.lr_min,
@@ -272,7 +234,7 @@ def get_scaler(args):
     Define Scaler for AMP
     '''
     if not args.no_amp:
-        if args.optim == "sgd":
+        if args.optim in ["sgd", "adam"]:
             scaler = torch.cuda.amp.GradScaler()
             first_step_scaler = None
             second_step_scaler = None
@@ -502,6 +464,48 @@ def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler
     }
 
 
+# train variational inference
+def train_vi(dataloader, model, criterion, optimizer, device, scaler, batch_size):
+    loss_sum = 0.0
+    correct = 0.0
+
+    num_objects_current = 0
+    num_batches = len(dataloader)
+
+    model.train()
+    for batch, (X, y) in enumerate(dataloader):
+        X, y = X.to(device), y.to(device)
+
+        if scaler is not None:
+            with torch.cuda.amp.autocast():
+                pred = model(X)
+                kl = get_kl_loss(model)
+                loss = criterion(pred, y)
+                loss += kl / batch_size
+                
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)  # optimizer.step()
+                scaler.update()
+                optimizer.zero_grad()
+        else:
+            pred = model(X)
+            kl = get_kl_loss(model)
+            loss = criterion(pred, y)
+            loss += kl/batch_size
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
+    return {
+        "loss": loss_sum / num_objects_current,
+        "accuracy": correct / num_objects_current * 100.0,
+    }
+
+
 
 
 # Test
@@ -545,46 +549,80 @@ def eval(loader, model, criterion, device, num_bins=50, eps=1e-8):
 
 
 
-def bma(tr_loader, te_loader, model, bma_num_models, num_classes, bma_save_path=None, eps=1e-8, batch_norm=True):
+def eval_vi(val_loader, model, num_classes, criterion, val_mc_num, num_bins=50, eps=1e-8):
+    mc_predictions = np.zeros((len(val_loader.dataset), num_classes))
+    with torch.no_grad():
+        if val_mc_num == 1:
+            res = predict(val_loader, model, verbose=False)
+            predictions = res["predictions"]; targets = res["targets"]
+            loss = criterion(torch.tensor(predictions), torch.tensor(targets)).item()
+            accuracy = np.mean(np.argmax(predictions, axis=1) == targets)
+            nll = -np.mean(np.log(predictions[np.arange(predictions.shape[0]), targets] + eps))
+            ece = calibration_curve(predictions, targets, num_bins)['ece']
+            
+        else:
+            for i in range(val_mc_num):
+                res = predict(val_loader, model, verbose=False)
+                mc_predictions += res["predictions"]
+            mc_predictions /= val_mc_num
+
+            loss = criterion(torch.tensor(mc_predictions), torch.tensor(res['targets'])).item()
+            accuracy = np.mean(np.argmax(mc_predictions, axis=1) == res["targets"])
+            nll = -np.mean(np.log(mc_predictions[np.arange(mc_predictions.shape[0]), res["targets"]] + eps))
+            ece = calibration_curve(mc_predictions, res["targets"], num_bins)['ece']
+            
+            predictions = mc_predictions
+            targets = res["targets"]
+            
+    return {
+        "predictions" : predictions,
+        "targets" : targets,
+        "loss" : loss, # loss_sum / num_objects_total,
+        "accuracy" : accuracy * 100.0,
+        "nll" : nll,
+        "ece" : ece,
+    }
+    
+
+
+def bma(tr_loader, te_loader, method, model, bma_num_models, num_classes, bma_save_path=None, eps=1e-8, batch_norm=True):
     '''
     run bayesian model averaging in test step
     '''
-    swag_predictions = np.zeros((len(te_loader.dataset), num_classes))
+    
+    bma_predictions = np.zeros((len(te_loader.dataset), num_classes))
     with torch.no_grad():
         for i in range(bma_num_models):
             
-            if i == 0:
-                sample = model.sample(0)
-            else:
-                sample = model.sample(1.0, cov=True)
+            if method in ["swag", "last_swag"]:
+                if i == 0:
+                    sample = model.sample(0)
+                else:
+                    sample = model.sample(1.0, cov=True)                
             
-            # print("SWAG Sample %d/%d. BN update" % (i + 1, bma_num_models))
-            if batch_norm:
-                bn_update(tr_loader, model, verbose=False, subset=1.0)
+                if batch_norm:
+                    bn_update(tr_loader, model, verbose=False, subset=1.0)
             
-            # save sampled weight for bma
-            if bma_save_path is not None:
-                torch.save(sample, f'{bma_save_path}/bma_model-{i}.pt')
-            
-            # print("SWAG Sample %d/%d. EVAL" % (i + 1, bma_num_models))
+                # save sampled weight for bma
+                if bma_save_path is not None:
+                    torch.save(sample, f'{bma_save_path}/bma_model-{i}.pt')
+                 
             res = predict(te_loader, model, verbose=False)
-
-            predictions = res["predictions"]
-            targets = res["targets"]
+            predictions = res["predictions"];targets = res["targets"]
 
             accuracy = np.mean(np.argmax(predictions, axis=1) == targets)
             nll = -np.mean(np.log(predictions[np.arange(predictions.shape[0]), targets] + eps))
             print(
-                "SWAG Sample %d/%d. Accuracy: %.2f%% NLL: %.4f"
+                "Sample %d/%d. Accuracy: %.2f%% NLL: %.4f"
                 % (i + 1, bma_num_models, accuracy * 100, nll)
             )
 
-            swag_predictions += predictions
+            bma_predictions += predictions
 
-            ens_accuracy = np.mean(np.argmax(swag_predictions, axis=1) == targets)
+            ens_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
             ens_nll = -np.mean(
                 np.log(
-                    swag_predictions[np.arange(swag_predictions.shape[0]), targets] / (i + 1)
+                    bma_predictions[np.arange(bma_predictions.shape[0]), targets] / (i + 1)
                     + eps
                 )
             )
@@ -593,18 +631,18 @@ def bma(tr_loader, te_loader, model, bma_num_models, num_classes, bma_save_path=
                 % (i + 1, bma_num_models, ens_accuracy * 100, ens_nll)
             )
 
-        swag_predictions /= bma_num_models
+        bma_predictions /= bma_num_models
 
-        swag_accuracy = np.mean(np.argmax(swag_predictions, axis=1) == targets)
-        swag_nll = -np.mean(
-            np.log(swag_predictions[np.arange(swag_predictions.shape[0]), targets] + eps)
+        bma_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
+        bma_nll = -np.mean(
+            np.log(bma_predictions[np.arange(bma_predictions.shape[0]), targets] + eps)
         )
     
-    print(f"bma Accuracy using {bma_num_models} model : {swag_accuracy * 100:.2f}% / NLL : {swag_nll:.4f}")
-    return {"predictions" : swag_predictions,
+    print(f"bma Accuracy using {bma_num_models} model : {bma_accuracy * 100:.2f}% / NLL : {bma_nll:.4f}")
+    return {"predictions" : bma_predictions,
             "targets" : targets,
-            "bma_accuracy" : swag_accuracy,
-            "nll" : swag_nll
+            "bma_accuracy" : bma_accuracy,
+            "nll" : bma_nll
     }
 
 
