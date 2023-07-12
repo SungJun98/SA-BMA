@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser(description="training baselines")
 parser.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
 
 parser.add_argument("--method", type=str, default="dnn",
-                    choices=["dnn", "swag", "last_swag", "vi"],
+                    choices=["dnn", "swag", "last_swag", "vi", "la"],
                     help="Learning Method")
 
 parser.add_argument("--no_amp", action="store_true", default=False, help="Deactivate AMP")
@@ -200,7 +200,7 @@ print("-"*30)
 #------------------------------------------------------------------
 
 # Define Model-----------------------------------------------------
-model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)   
+model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
 if args.linear_probe or args.method == "last_swag":
     utils.freeze_fe(model)
 
@@ -231,6 +231,8 @@ elif args.method == "vi":
     dnn_to_bnn(model, const_bnn_prior_parameters)
     model.to(args.device)
     print(f"Preparing Model for {args.vi_type} VI with MOPED ")
+elif args.method == "la":
+    raise ValueError("Add code for Laplace Approximation")
 
 print("-"*30)
 #-------------------------------------------------------------------
@@ -286,6 +288,8 @@ else:
 
 ## Set AMP --------------------------------------------------------------------------
 scaler, first_step_scaler, second_step_scaler = utils.get_scaler(args)
+if args.resume:
+    raise ValueError("Add code to load scalar from resume")
 print("-"*30)
 #------------------------------------------------------------------------------------
 
@@ -306,7 +310,7 @@ if args.method in ["swag", "last_swag"]:
 
 
 best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; cnt=0; swag_cnt = 0; best_swag_val_loss=9999
-for epoch in range(start_epoch, int(args.epochs + 1)):
+for epoch in range(start_epoch, int(args.epochs)+1):
     time_ep = time.time()
 
     ## lr scheduling
@@ -330,7 +334,6 @@ for epoch in range(start_epoch, int(args.epochs + 1)):
 
     ## valid
     if args.method in ["vi"]:
-        ## eval_vi arg.val_mc_num에 따라서 mc를 하든 map를 가져다 쓰든지 하도록 수정
         val_res = utils.eval_vi(val_loader, model, num_classes, criterion, args.val_mc_num, args.num_bins, args.eps)
     else:
         val_res = utils.eval(val_loader, model, criterion, args.device, args.num_bins, args.eps)
@@ -394,51 +397,7 @@ for epoch in range(start_epoch, int(args.epochs + 1)):
 
             # save state_dict
             os.makedirs(args.save_path, exist_ok=True)
-            if args.optim in ["sgd", "adam"]:
-                if not args.no_amp:
-                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                        epoch = best_epoch,
-                                        state_dict = swag_model.state_dict(),
-                                        optimizer = optimizer.state_dict(),
-                                        # scheduler = scheduler.state_dict(),
-                                        scaler = scaler.state_dict()
-                                        )
-                else:
-                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                        epoch = best_epoch,
-                                        state_dict = swag_model.state_dict(),
-                                        optimizer = optimizer.state_dict(),
-                                        # scheduler = scheduler.state_dict(),
-                                        )
-            elif args.optim in ["sam", "bsam"]:
-                if not args.no_amp:
-                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                        epoch = best_epoch,
-                                        state_dict = swag_model.state_dict(),
-                                        optimizer = optimizer.state_dict(),
-                                        # scheduler = scheduler.state_dict(),
-                                        first_step_scaler = first_step_scaler.state_dict(),
-                                        second_step_scaler = second_step_scaler.state_dict()
-                                        )
-                else:
-                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                        epoch = best_epoch,
-                                        state_dict = swag_model.state_dict(),
-                                        optimizer = optimizer.state_dict(),
-                                        # scheduler = scheduler.state_dict(),
-                                        )
-            torch.save(model.state_dict(),f'{args.save_path}/{args.method}-{args.optim}_best_val_model.pt')
-            
-            # Save Mean, variance, Covariance matrix
-            # mean, variance, cov_mat_sqrt = swag_model.generate_mean_var_covar()
-            mean = swag_model.get_mean_vector()
-            variance = swag_model.get_variance_vector()
-            cov_mat_list = swag_model.get_covariance_matrix()
-                
-            torch.save(mean,f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
-            torch.save(variance, f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
-            torch.save(cov_mat_list, f'{args.save_path}/{args.method}-{args.optim}_best_val_covmat.pt')
-
+            utils.save_best_swag_model(args, best_epoch, model, swag_model, optimizer, scaler, first_step_scaler, second_step_scaler)
         else:
             swag_cnt += 1
 
@@ -450,40 +409,11 @@ for epoch in range(start_epoch, int(args.epochs + 1)):
             best_epoch = epoch
 
             # save state_dict
-            os.makedirs(args.save_path,exist_ok=True)
-            if args.optim in ["sgd", "adam"]:
-                if not args.no_amp:
-                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                    epoch = best_epoch,
-                                    state_dict = model.state_dict(),
-                                    optimizer = optimizer.state_dict(),
-                                    # scheduler = scheduler.state_dict(),
-                                    scaler = scaler.state_dict()
-                                    )
-                else:
-                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                    epoch = best_epoch,
-                                    state_dict = model.state_dict(),
-                                    optimizer = optimizer.state_dict(),
-                                    # scheduler = scheduler.state_dict(),
-                                    )
-            elif args.optim == "sam":
-                if not args.no_amp:
-                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                    epoch = best_epoch,
-                                    state_dict = model.state_dict(),
-                                    optimizer = optimizer.state_dict(),
-                                    # scheduler = scheduler.state_dict(),
-                                    first_step_scaler = first_step_scaler.state_dict(),
-                                    second_step_scaler = second_step_scaler.state_dict()
-                                    )
-                else:
-                    utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                    epoch = best_epoch,
-                                    state_dict = model.state_dict(),
-                                    optimizer = optimizer.state_dict(),
-                                    # scheduler = scheduler.state_dict(),
-                                    )
+            os.makedirs(args.save_path, exist_ok=True)
+            if args.method == "vi":
+                utils.save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
+            elif args.method == "dnn":
+                utils.save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
         else:
             cnt +=1
     
@@ -493,9 +423,11 @@ for epoch in range(start_epoch, int(args.epochs + 1)):
     elif swag_cnt == args.tol and args.method in ['swag', 'last_swag']:
         break
 
-    if args.scheduler in ["cos_anneal", "cos_decay", "step_lr"]:
+    if args.scheduler in ["cos_decay", "step_lr"]:
         scheduler.step(epoch)
 #------------------------------------------------------------------------------------------------------------
+
+
 
 
 

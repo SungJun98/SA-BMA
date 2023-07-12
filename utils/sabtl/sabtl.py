@@ -23,6 +23,7 @@ class SABTL(torch.nn.Module):
         w_cov_sqrt=None,
         prior_cov_scale = 1,
         var_clamp = 1e-16,
+        last_layer=False,
     ):
         super(SABTL, self).__init__()
         
@@ -30,6 +31,7 @@ class SABTL(torch.nn.Module):
         self.var_clamp = var_clamp
         self.diag_only = diag_only
         self.low_rank = low_rank
+        self.last_layer = last_layer
         
         self.backbone = backbone
         
@@ -39,44 +41,45 @@ class SABTL(torch.nn.Module):
             self.full_model_shape.append(p.shape)
 
         # Get Last Layer Name and Last Layer Shape
-        for name, _ in self.backbone.named_modules():
-            self.last_layer_name = name
-        self.last_layer_shape = self.full_model_shape[-2:]
+        if last_layer:
+            for name, _ in self.backbone.named_modules():
+                self.last_layer_name = name
+            self.last_layer_shape = self.full_model_shape[-2:]
             
         ## Load Pre-Trained Model
         if w_mean is not None:
-            self.load_backbone(w_mean, src_bnn)
+            self.load_backbone(w_mean)
         else:
             raise RuntimeError("We need pre-trained weight to define model")
         
-
-
         # Get total number of parameters and backbone shape which are updated during training
         self.num_params = 0
         for name, param in self.backbone.named_parameters():
-            if name.split('.')[0] == self.last_layer_name:
+            if last_layer:
+                if name.split('.')[0] == self.last_layer_name:
+                    self.num_params += param.numel()
+            else:
                 self.num_params += param.numel()
-
-        
 
         ### Add Mean, Var, Cov layer ---------------------------------------------------------------
         self.bnn_param = nn.ParameterDict()
 
+        
+        ## Mean
+        w_mean = w_mean[-self.num_params:]
+        self.bnn_param.update({"mean" : nn.Parameter(w_mean)})
+
+        ## Variance
+        if w_var is not None:
+            w_var = w_var[-self.num_params:]
+        else:
+            w_var = torch.rand(self.num_params)
+        w_var = torch.clamp(w_var, self.var_clamp)
+        w_std = 0.5*torch.log(w_var)    # log_std       
+        self.bnn_param.update({"log_std" : nn.Parameter(w_std)})   
+        
+        ## Covariance           
         if src_bnn == 'swag':
-            ## Mean
-            w_mean = w_mean[-self.num_params:]
-            self.bnn_param.update({"mean" : nn.Parameter(w_mean)})
-
-            ## Variance
-            if w_var is not None:
-                w_var = w_var[-self.num_params:]
-            else:
-                w_var = torch.rand(self.num_params)
-            w_var = torch.clamp(w_var, self.var_clamp)
-            w_std = 0.5*torch.log(w_var)    # log_std       
-            self.bnn_param.update({"log_std" : nn.Parameter(w_std)})      
-
-            ## Covariance
             if not self.diag_only:
                 if w_cov_sqrt is not None:
                     if type(w_cov_sqrt) == list:
@@ -94,31 +97,38 @@ class SABTL(torch.nn.Module):
                     else:
                         self.low_rank = w_cov_sqrt.size(0)
                         self.bnn_param.update({"cov_sqrt" : nn.Parameter(w_cov_sqrt)})
+                else:
+                    self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((low_rank, self.num_params)*1e-3))})
 
         elif src_bnn == 'la':
             raise RuntimeError("Add Load for Laplace Approximation")
         
         elif src_bnn == 'vi':
-            raise RuntimeError("Add Load for Variational Inference")
+            if not self.diag_only:
+                self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((low_rank, self.num_params)*1e-3))})
         
         print(f"Load covariance of weight from pre-trained {src_bnn} model")
         # -----------------------------------------------------------------------------------------------------
         
     
 
-    def load_backbone(self, w_mean, src_bnn):
+    def load_backbone(self, w_mean):
         '''
         Reform Saved Weight As State Dict
         and Load Pre-Trained Backbone Model
         '''
-        if src_bnn == 'swag':
+        if self.last_layer:
             unflatten_mean_list = utils.unflatten_like_size(w_mean, self.last_layer_shape)
             st_dict = dict()
             st_dict[f'{self.last_layer_name}.weight'] = unflatten_mean_list[0]
             st_dict[f'{self.last_layer_name}.bias'] = unflatten_mean_list[1]
-                
-        self.backbone.load_state_dict(st_dict, strict=False)
-        ## bn의 running_mean, running_var는 trainable parameter가 아니라 save할 때 제대로 안 됨
+            self.backbone.load_state_dict(st_dict, strict=False)
+        else:
+            unflatten_mean_list = utils.unflatten_like_size(w_mean, self.full_model_shape)
+            st_dict = dict()
+            for idx, (name, _) in enumerate(self.backbone.named_parameters()):
+                st_dict[name] = unflatten_mean_list[idx]
+            self.backbone.load_state_dict(st_dict, strict=False)
 
 
     def forward(self, params, input):

@@ -107,29 +107,19 @@ utils.set_seed(args.seed)
 
 # Load Data -----------------------------------------------------------------
 if not args.last_layer:
-    tr_loader, _, te_loader, num_classes = utils.get_dataset(args.dataset,
-                                                        args.data_path,
-                                                        args.batch_size,
-                                                        args.num_workers,
-                                                        use_validation = args.use_validation,
-                                                        aug = args.aug,
-                                                        dat_per_cls = args.dat_per_cls,
-                                                        seed = args.seed)
+    tr_loader, _, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
+                                                data_path=args.data_path,
+                                                dat_per_cls=args.dat_per_cls,
+                                                use_validation=args.use_validation, 
+                                                batch_size=args.batch_size,
+                                                num_workers=args.num_workers,
+                                                seed=args.seed,
+                                                aug=args.aug,
+                                                )
     print(f"Load Data : {args.dataset}")
         
 else:
-    if args.dataset == 'cifar10':
-        tr_loader, _, te_loader, num_classes = data.get_cifar10_fe(fe_dat=args.model,
-                                                    batch_size=args.batch_size,
-                                                    num_workers=0,
-                                                    use_validation=args.use_validation,
-                                                    dat_per_cls=args.dat_per_cls)
-    elif args.dataset == 'cifar100':
-        tr_loader, _, te_loader, num_classes = data.get_cifar100_fe(fe_dat=args.model,
-                                                    batch_size=args.batch_size,
-                                                    num_workers=0,
-                                                    use_validation=args.use_validation,
-                                                    dat_per_cls=args.dat_per_cls)
+    raise ValueError("Add code that loads the Feature Extracted dataset")
     print(f"Load Data : Feature Extracted {args.dataset}")
 #---------------------------------------------------------------------------
 
@@ -213,8 +203,8 @@ if args.last_swag or args.full_swag:
             print(f"Train Eigenvalues for {model_num}-th bma model : {tr_eigenvals}")
         except:
            print(f"Numerical Issue on {model_num}-th model with train data")
-           tr_cum_eigenval_list.append(99999)
-           tr_max_eigenval_list.append(99999)
+           tr_cum_eigenval_list.append(9999999)
+           tr_max_eigenval_list.append(9999999)
         
         # save results
         performance = dict({"model_num" : model_num_list,

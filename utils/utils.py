@@ -13,6 +13,7 @@ from bayesian_torch.models.dnn_to_bnn import get_kl_loss
 
 from utils.swag.swag_utils import flatten, bn_update, predict
 from utils.sam import sam, sam_utils
+from utils.vi import vi_utils
 
 from utils.models import resnet_noBN, wide_resnet, wide_resnet_noBN
 import torchvision.models as torch_models
@@ -66,6 +67,9 @@ def set_save_path(args):
         
     if args.optim not in ["sgd", "adam"]:
         save_path_ = f"{save_path_}_{args.rho}"
+        
+    if args.optim in ["bsam"]:
+        save_path_ = f"{save_path_}_{args.eta}"
     
     return save_path_
     
@@ -101,6 +105,9 @@ def set_wandb_runname(args):
         
     if args.optim not in ["sgd", "adam"]:
         run_name_ = f"{run_name_}_{args.rho}"
+    
+    if args.optim in ["bsam"]:
+        run_name_ = f"{run_name_}_{args.eta}"
     
     return run_name_
 
@@ -279,6 +286,148 @@ def save_checkpoint(file_path, epoch, **kwargs):
     state.update(kwargs)
     torch.save(state, file_path)
 
+
+
+
+def save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler):
+    if args.optim in ["sgd", "adam"]:
+        if not args.no_amp:
+            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                            epoch = best_epoch,
+                            state_dict = model.state_dict(),
+                            optimizer = optimizer.state_dict(),
+                            # scheduler = scheduler.state_dict(),
+                            scaler = scaler.state_dict()
+                            )
+        else:
+            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                            epoch = best_epoch,
+                            state_dict = model.state_dict(),
+                            optimizer = optimizer.state_dict(),
+                            # scheduler = scheduler.state_dict(),
+                            )
+    elif args.optim == "sam":
+        if not args.no_amp:
+            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                            epoch = best_epoch,
+                            state_dict = model.state_dict(),
+                            optimizer = optimizer.state_dict(),
+                            # scheduler = scheduler.state_dict(),
+                            first_step_scaler = first_step_scaler.state_dict(),
+                            second_step_scaler = second_step_scaler.state_dict()
+                            )
+        else:
+            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                            epoch = best_epoch,
+                            state_dict = model.state_dict(),
+                            optimizer = optimizer.state_dict(),
+                            # scheduler = scheduler.state_dict(),
+                            )
+
+
+def save_best_swag_model(args, best_epoch, model, swag_model, optimizer, scaler, first_step_scaler, second_step_scaler):
+    if args.optim in ["sgd", "adam"]:
+        if not args.no_amp:
+            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                epoch = best_epoch,
+                                state_dict = swag_model.state_dict(),
+                                optimizer = optimizer.state_dict(),
+                                # scheduler = scheduler.state_dict(),
+                                scaler = scaler.state_dict()
+                                )
+        else:
+            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                epoch = best_epoch,
+                                state_dict = swag_model.state_dict(),
+                                optimizer = optimizer.state_dict(),
+                                # scheduler = scheduler.state_dict(),
+                                )
+    elif args.optim in ["sam", "bsam"]:
+        if not args.no_amp:
+            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                epoch = best_epoch,
+                                state_dict = swag_model.state_dict(),
+                                optimizer = optimizer.state_dict(),
+                                # scheduler = scheduler.state_dict(),
+                                first_step_scaler = first_step_scaler.state_dict(),
+                                second_step_scaler = second_step_scaler.state_dict()
+                                )
+        else:
+            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                epoch = best_epoch,
+                                state_dict = swag_model.state_dict(),
+                                optimizer = optimizer.state_dict(),
+                                # scheduler = scheduler.state_dict(),
+                                )
+    torch.save(model.state_dict(),f'{args.save_path}/{args.method}-{args.optim}_best_val_model.pt')
+    
+    # Save Mean, variance, Covariance matrix
+    mean = swag_model.get_mean_vector()
+    torch.save(mean,f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
+    
+    variance = swag_model.get_variance_vector()
+    torch.save(variance, f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
+    
+    cov_mat_list = swag_model.get_covariance_matrix()
+    torch.save(cov_mat_list, f'{args.save_path}/{args.method}-{args.optim}_best_val_covmat.pt')    
+
+
+
+def save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler):
+    save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
+    
+    mean = vi_utils.get_vi_mean_vector(model)
+    torch.save(mean,f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
+    
+    variance = vi_utils.get_vi_variance_vector(model)
+    torch.save(variance, f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
+
+
+
+def save_best_sabtl_model(args, best_epoch, sabtl_model, optimizer, scaler, first_step_scaler, second_step_scaler):
+    if args.optim == "sgd":
+        if not args.no_amp:
+            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                            epoch = best_epoch,
+                            state_dict =sabtl_model.state_dict(),
+                            optimizer = optimizer.state_dict(),
+                            # scheduler = scheduler.state_dict(),
+                            scaler = scaler.state_dict(),
+                            )
+        else:
+            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                            epoch = best_epoch,
+                            state_dict =sabtl_model.state_dict(),
+                            optimizer = optimizer.state_dict(),
+                            # scheduler = scheduler.state_dict(),
+                            )
+    elif args.optim in ["sam", "bsam"]:
+        if not args.no_amp:
+            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                epoch = best_epoch,
+                                state_dict = sabtl_model.state_dict(),
+                                optimizer = optimizer.state_dict(),
+                                # scheduler = scheduler.state_dict(),
+                                first_step_scaler = first_step_scaler.state_dict(),
+                                second_step_scaler = second_step_scaler.state_dict()
+                                )
+        else:
+            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                epoch = best_epoch,
+                                state_dict = sabtl_model.state_dict(),
+                                optimizer = optimizer.state_dict(),
+                                # scheduler = scheduler.state_dict(),
+                                )
+    # Save Mean, variance, Covariance matrix
+    mean = sabtl_model.get_mean_vector()
+    torch.save(mean,f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
+    
+    variance = sabtl_model.get_variance_vector()
+    torch.save(variance, f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
+    
+    cov_mat_list = sabtl_model.get_covariance_matrix()
+    torch.save(cov_mat_list, f'{args.save_path}/{args.method}-{args.optim}_best_val_covmat.pt')    
+    
 
 """
 ##################################################################################################
@@ -602,11 +751,15 @@ def bma(tr_loader, te_loader, method, model, bma_num_models, num_classes, bma_sa
             
                 if batch_norm:
                     bn_update(tr_loader, model, verbose=False, subset=1.0)
-            
+                
                 # save sampled weight for bma
                 if bma_save_path is not None:
                     torch.save(sample, f'{bma_save_path}/bma_model-{i}.pt')
-                 
+            
+            elif method in ["vi"]:
+                pass
+                ### "Add code to save each state dict for BMA in Variational Inference"
+ 
             res = predict(te_loader, model, verbose=False)
             predictions = res["predictions"];targets = res["targets"]
 

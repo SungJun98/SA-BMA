@@ -61,17 +61,14 @@ parser.add_argument("--use_validation", action='store_true',
 
 parser.add_argument("--dat_per_cls", type=int, default=-1,
             help="Number of data points per class in few-shot setting. -1 denotes deactivate few-shot setting (Default : -1)")
-
-# parser.add_argument("--fe_dat", type=str, default=None, choices=[None, "resnet18-noBN", "vitb16-i21k"],
-#             help = "Use Feature Extracted from Feature Extractor (Default : None)")
 #----------------------------------------------------------------
 
 ## Model ---------------------------------------------------------
 parser.add_argument(
     "--model",
     type=str, default='resnet18', required=True,
-    choices=['resnet18', 'resnet50', 'resnet101', 'wideresnet28x10', 'wideresnet40x10',
-            'resnet18-noBN', 'resnet50-noBN', 'resnet101-noBN', 'wideresnet28x10-noBN', 'wideresnet40x10-noBN',
+    choices=['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
+            'resnet18-noBN',
             "vitb16-i21k"],
     help="model name (default : resnet18)")
 
@@ -121,7 +118,6 @@ parser.add_argument("--warmup_lr_init", type=float, default=1e-7,
 ## SABTL ---------------------------------------------------------
 parser.add_argument("--src_bnn", type=str, default="swag", choices=["swag", "la", "vi"],
         help="Type of pre-trained BNN model")
-# parser.add_argument("--z_scale", type=float, default=1e-2, help="Sampling scale for weight")
 parser.add_argument("--diag_only", action="store_true", default=False, help="Consider only diagonal variance")
 parser.add_argument("--low_rank", type=int, default=20, help="Low-rank component")
 
@@ -192,8 +188,8 @@ print("-"*30)
 
 # Define Model------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)   
-## linear probing일때만 freeze_fe
-# utils.freeze_fe(model)
+if args.linear_probe:
+    utils.freeze_fe(model)
 
 w_mean = torch.load(args.mean_path)
 w_var = torch.load(args.var_path) 
@@ -208,6 +204,7 @@ sabtl_model = sabtl.SABTL(copy.deepcopy(model),
                         ).to(args.device)
 
 print(f"Load SABTL Model with prior made of {args.src_bnn}")
+print(f"# of trainable parameters : {sabtl_model.num_params}")
 print("-"*30)
 #----------------------------------------------------------------
 
@@ -235,7 +232,7 @@ print("-"*30)
 """
 나중에 필요하면 채우기
 """
-start_epoch = 0
+start_epoch = 1
 #------------------------------------------------------------------------------------
 
 ## Set AMP --------------------------------------------------------------------------
@@ -246,6 +243,9 @@ print("-"*30)
 ## Training -------------------------------------------------------------------------
 print(f"Start training SABTL with {args.optim} optimizer from {start_epoch} epoch!")
 
+"""
+table = tabulate.tabulate([values], columns, tablefmt="simple", floatfmt="8.4f")
+"""
 ## print setting
 columns = ["epoch", "method", "lr",
         "tr_loss", "tr_acc",
@@ -254,7 +254,7 @@ columns = ["epoch", "method", "lr",
 
 best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; duration=0
 print("Start Training!!")
-for epoch in range(start_epoch, int(args.epochs)):
+for epoch in range(start_epoch, int(args.epochs)+1):
     time_ep = time.time()
 
     ## lr scheduling
@@ -278,9 +278,6 @@ for epoch in range(start_epoch, int(args.epochs)):
         params = utils.format_weights(params, sabtl_model)
         val_res = sabtl_utils.eval_sabtl(val_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
     else:
-        """
-        근데 mc prediction의 acc가 낮고, loss가 높게 나온다..
-        """
         val_res = sabtl_utils.bma_sabtl(val_loader, sabtl_model, args.val_mc_num,
                             num_classes, criterion, args.device,
                             bma_save_path=None, eps=1e-8, num_bins=50,
@@ -289,12 +286,12 @@ for epoch in range(start_epoch, int(args.epochs)):
     
     time_ep = time.time() - time_ep
 
-    values = [epoch + 1, f"sabtl-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
+    values = [epoch, f"sabtl-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
         val_res["loss"], val_res["accuracy"], val_res["nll"], val_res["ece"],
         time_ep]
 
     table = tabulate.tabulate([values], columns, tablefmt="simple", floatfmt="8.4f")
-    if epoch % args.print_epoch == 0:
+    if epoch % args.print_epoch == 1:
         table = table.split("\n")
         table = "\n".join([table[1]] + table)
     else:
@@ -329,59 +326,15 @@ for epoch in range(start_epoch, int(args.epochs)):
     # if (val_res['accuracy'] > best_val_acc) or (val_res['loss'] < best_val_loss):
         best_val_loss = val_res['loss']
         best_val_acc = val_res['accuracy']
-        best_epoch = epoch + 1
-
+        best_epoch = epoch
+        
         # save state_dict
         os.makedirs(args.save_path, exist_ok=True)
-        if args.optim == "sgd":
-            if not args.no_amp:
-                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                epoch = epoch,
-                                state_dict =sabtl_model.state_dict(),
-                                optimizer = optimizer.state_dict(),
-                                # scheduler = scheduler.state_dict(),
-                                scaler = scaler.state_dict(),
-                                )
-            else:
-                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                epoch = epoch,
-                                state_dict =sabtl_model.state_dict(),
-                                optimizer = optimizer.state_dict(),
-                                # scheduler = scheduler.state_dict(),
-                                )
-        elif args.optim in ["sam", "bsam"]:
-            if not args.no_amp:
-                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                    epoch = epoch,
-                                    state_dict = sabtl_model.state_dict(),
-                                    optimizer = optimizer.state_dict(),
-                                    # scheduler = scheduler.state_dict(),
-                                    first_step_scaler = first_step_scaler.state_dict(),
-                                    second_step_scaler = second_step_scaler.state_dict()
-                                    )
-            else:
-                utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                    epoch = epoch,
-                                    state_dict = sabtl_model.state_dict(),
-                                    optimizer = optimizer.state_dict(),
-                                    # scheduler = scheduler.state_dict(),
-                                    )
-        # Save Mean, variance, Covariance matrix
-        # mean, variance, cov_mat_sqrt = swag_model.generate_mean_var_covar()
-        mean = sabtl_model.get_mean_vector()
-        variance = sabtl_model.get_variance_vector()
-        cov_mat_list = sabtl_model.get_covariance_matrix()
-            
-        torch.save(mean,f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
-        torch.save(variance, f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
-        torch.save(cov_mat_list, f'{args.save_path}/{args.method}-{args.optim}_best_val_covmat.pt')
-    
-        
+        utils.save_best_sabtl_model(args, best_epoch, sabtl_model, optimizer, scaler, first_step_scaler, second_step_scaler)
+                
     ## Scheduler step
-    # if args.scheduler == "cos_anneal":
-    #     scheduler.step()
-    if args.scheduler in ["cos_anneal", "step_lr", "cos_decay"]:
-        scheduler.step(epoch+1)
+    if args.scheduler in ["step_lr", "cos_decay"]:
+        scheduler.step(epoch)
 #------------------------------------------------------------------------------------------------------------
 
 
