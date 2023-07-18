@@ -129,6 +129,7 @@ if args.last_layer:
     # Get last layer name
     for name, mod in model.named_modules():
         model = mod
+        last_layer_name = name
 #----------------------------------------------------------------------------
 
 ## Load Model ---------------------------------------------------------------
@@ -173,7 +174,7 @@ if args.last_swag or args.full_swag:
         
         # get sampled model
         bma_sample = torch.load(f"{args.swag_load_path}/{path}")
-        bma_state_dict = utils.list_to_state_dict(model, bma_sample, last=args.last_swag)     ## If use full stochastic SWAG, you need to change argument last to False
+        bma_state_dict = utils.list_to_state_dict(model, bma_sample, last=args.last_swag, last_layer_name=last_layer_name)     ## If use full stochastic SWAG, you need to change argument last to False
         model.load_state_dict(bma_state_dict, strict=False)
         
         if args.batch_norm:

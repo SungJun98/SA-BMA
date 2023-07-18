@@ -18,10 +18,10 @@ class SABTL(torch.nn.Module):
         w_mean = None,
         diag_only = False,
         w_var=None,
-        prior_var_scale = 1,
+        var_scale = 1e2,
         low_rank = 20,
         w_cov_sqrt=None,
-        prior_cov_scale = 1,
+        cov_scale = 1e1,
         var_clamp = 1e-16,
         last_layer=False,
     ):
@@ -64,14 +64,13 @@ class SABTL(torch.nn.Module):
         ### Add Mean, Var, Cov layer ---------------------------------------------------------------
         self.bnn_param = nn.ParameterDict()
 
-        
         ## Mean
         w_mean = w_mean[-self.num_params:]
         self.bnn_param.update({"mean" : nn.Parameter(w_mean)})
 
         ## Variance
         if w_var is not None:
-            w_var = w_var[-self.num_params:]
+            w_var = w_var[-self.num_params:]*var_scale
         else:
             w_var = torch.rand(self.num_params)
         w_var = torch.clamp(w_var, self.var_clamp)
@@ -85,7 +84,7 @@ class SABTL(torch.nn.Module):
                     if type(w_cov_sqrt) == list:
                         # cat covmat list as matrix
                         w_cov_sqrt = torch.cat(w_cov_sqrt, dim=1)         
-                    w_cov_sqrt = w_cov_sqrt[:, -self.num_params:]
+                    w_cov_sqrt = w_cov_sqrt[:, -self.num_params:]*cov_scale
                     if self.low_rank == 0:
                         L = w_cov_sqrt.t().matmul(w_cov_sqrt)
                         L += torch.diag(w_var)
@@ -98,14 +97,14 @@ class SABTL(torch.nn.Module):
                         self.low_rank = w_cov_sqrt.size(0)
                         self.bnn_param.update({"cov_sqrt" : nn.Parameter(w_cov_sqrt)})
                 else:
-                    self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((low_rank, self.num_params)*1e-3))})
+                    self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((low_rank, self.num_params)*1e-2))})
 
         elif src_bnn == 'la':
             raise RuntimeError("Add Load for Laplace Approximation")
         
         elif src_bnn == 'vi':
             if not self.diag_only:
-                self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((low_rank, self.num_params)*1e-3))})
+                self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((low_rank, self.num_params)*1e-2))})
         
         print(f"Load covariance of weight from pre-trained {src_bnn} model")
         # -----------------------------------------------------------------------------------------------------
@@ -135,13 +134,13 @@ class SABTL(torch.nn.Module):
         return nn.utils.stateless.functional_call(self.backbone, params, input)
     
     
-    def sample(self, z_scale=0.0):
+    def sample(self, z_scale=1.0):
         '''
         Sample weight from bnn params
         '''
         if not self.diag_only:
             if self.low_rank == 0:
-                z_1 = self.bnn_param['cov_sqrt'].new_empty((self.bnn_param['cov_sqrt'].size(0),), requires_grad=False).normal_(std=z_scale) ###
+                z_1 = self.bnn_param['cov_sqrt'].new_empty((self.bnn_param['cov_sqrt'].size(0),), requires_grad=False).normal_(std=z_scale)
                 rand_sample = (torch.exp(self.bnn_param['log_std']) + self.var_clamp**0.5) * z_1
                 rand_sample += self.bnn_param['cov_sqrt'].matmul(z_1)
                 z_2 = None

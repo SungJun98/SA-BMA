@@ -8,11 +8,11 @@ import torch.nn.functional as F
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pickle
 import wandb
 
 import utils.utils as utils
 from utils.swag import swag, swag_utils
+from utils.vi import vi_utils
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser(description="training baselines")
 parser.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
 
 parser.add_argument("--method", type=str, default="dnn",
-                    choices=["dnn", "swag", "last_swag", "vi", "la"],
+                    choices=["dnn", "swag", "last_swag", "vi", "last_vi", "la", "last_la"],
                     help="Learning Method")
 
 parser.add_argument("--no_amp", action="store_true", default=False, help="Deactivate AMP")
@@ -225,14 +225,27 @@ elif args.method == "vi":
         "posterior_mu_init": args.vi_posterior_mu_init,
         "posterior_rho_init": args.vi_posterior_rho_init,
         "type": args.vi_type,
-        "moped_enable": True,
+        "moped_enable": args.pre_trained,
         "moped_delta": args.vi_moped_delta,
     }
     dnn_to_bnn(model, const_bnn_prior_parameters)
     model.to(args.device)
     print(f"Preparing Model for {args.vi_type} VI with MOPED ")
+elif args.method == "last_vi":
+    raise ValueError("Add code for Last-layer VI")
 elif args.method == "la":
-    raise ValueError("Add code for Laplace Approximation")
+    from laplace import Laplace
+    la = Laplace(model, 'classification',
+             subset_of_weights='all',
+             hessian_structure='lowrank')
+    la.fit(tr_loader)
+
+elif args.method == "last_la":
+    from laplace import Laplace
+    la = Laplace(model, 'classification',
+             subset_of_weights='last_layer',
+             hessian_structure='kron')
+    la.fit(tr_loader)
 
 print("-"*30)
 #-------------------------------------------------------------------
@@ -295,136 +308,145 @@ print("-"*30)
 
 
 ## Training -------------------------------------------------------------------------
-print(f"Start training {args.method} with {args.optim} optimizer from {start_epoch} epoch!")
+if args.method not in ["la", "last_la"]:
+    print(f"Start training {args.method} with {args.optim} optimizer from {start_epoch} epoch!")
 
-## print setting
-columns = ["epoch", "method", "lr", "tr_loss", "tr_acc", "val_loss", "val_acc", "val_nll", "val_ece", "time"]
-if args.method in ["swag", "last_swag"]:
-    columns = columns[:-1] + ["swag_val_loss", "swag_val_acc", "swag_val_nll", "swag_val_ece"] + columns[-1:]
-    swag_res = {"loss": None, "accuracy": None, "nll" : None, "ece" : None}
+    ## print setting
+    columns = ["epoch", "method", "lr", "tr_loss", "tr_acc", "val_loss", "val_acc", "val_nll", "val_ece", "time"]
+    if args.method in ["swag", "last_swag"]:
+        columns = columns[:-1] + ["swag_val_loss", "swag_val_acc", "swag_val_nll", "swag_val_ece"] + columns[-1:]
+        swag_res = {"loss": None, "accuracy": None, "nll" : None, "ece" : None}
 
-    if args.swa_c_epochs is None:
-        raise RuntimeError("swa_c_epochs must not be None!")
-       
-    print(f"Running SWAG...")
-
-
-best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; cnt=0; swag_cnt = 0; best_swag_val_loss=9999
-for epoch in range(start_epoch, int(args.epochs)+1):
-    time_ep = time.time()
-
-    ## lr scheduling
-    if args.scheduler == "swag_lr":
-        if args.method in ["swag", "last_swag"]:
-            lr = swag_utils.schedule(epoch, args.lr_init, args.epochs, True, args.swa_start, args.swa_lr)
-        else:
-            lr = swag_utils.schedule(epoch, args.lr_init, args.epochs, False, None, None)
-        swag_utils.adjust_learning_rate(optimizer, lr)
-    else:
-        lr = optimizer.param_groups[0]['lr']
-    
-    ## train
-    if args.method in ["vi"]:
-        tr_res = utils.train_vi(tr_loader, model, criterion, optimizer, args.device, scaler, args.batch_size)
-    else:
-        if args.optim in ["sgd", "adam"]:
-            tr_res = utils.train_sgd(tr_loader, model, criterion, optimizer, args.device, scaler)
-        elif args.optim == "sam":
-            tr_res = utils.train_sam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
-
-    ## valid
-    if args.method in ["vi"]:
-        val_res = utils.eval_vi(val_loader, model, num_classes, criterion, args.val_mc_num, args.num_bins, args.eps)
-    else:
-        val_res = utils.eval(val_loader, model, criterion, args.device, args.num_bins, args.eps)
-
-    ## swag valid
-    if (args.method in ["swag", "last_swag"]) and ((epoch + 1) > args.swa_start) and ((epoch + 1 - args.swa_start) % args.swa_c_epochs == 0):
-
-        swag_model.collect_model(model)
-        swag_model.sample(0.0)
+        if args.swa_c_epochs is None:
+            raise RuntimeError("swa_c_epochs must not be None!")
         
-        if args.batch_norm == True:
-            swag_utils.bn_update(tr_loader, swag_model)
+        print(f"Running SWAG...")
+
+
+    best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; cnt=0; swag_cnt = 0; best_swag_val_loss=9999
+    for epoch in range(start_epoch, int(args.epochs)+1):
+        time_ep = time.time()
+
+        ## lr scheduling
+        if args.scheduler == "swag_lr":
+            if args.method in ["swag", "last_swag"]:
+                lr = swag_utils.schedule(epoch, args.lr_init, args.epochs, True, args.swa_start, args.swa_lr)
+            else:
+                lr = swag_utils.schedule(epoch, args.lr_init, args.epochs, False, None, None)
+            swag_utils.adjust_learning_rate(optimizer, lr)
+        else:
+            lr = optimizer.param_groups[0]['lr']
+        
+        ## train
+        if args.method in ["vi"]:
+            tr_res = vi_utils.train_vi(tr_loader, model, criterion, optimizer, args.device, scaler, args.batch_size)
+        else:
+            if args.optim in ["sgd", "adam"]:
+                tr_res = utils.train_sgd(tr_loader, model, criterion, optimizer, args.device, scaler)
+            elif args.optim == "sam":
+                tr_res = utils.train_sam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
+
+        ## valid
+        if args.method in ["vi"]:
+            val_res = vi_utils.eval_vi(val_loader, model, num_classes, criterion, args.val_mc_num, args.num_bins, args.eps)
+        else:
+            val_res = utils.eval(val_loader, model, criterion, args.device, args.num_bins, args.eps)
+
+        ## swag valid
+        if (args.method in ["swag", "last_swag"]) and ((epoch + 1) > args.swa_start) and ((epoch + 1 - args.swa_start) % args.swa_c_epochs == 0):
+
+            swag_model.collect_model(model)
+            swag_model.sample(0.0)
             
-        swag_res = utils.eval(val_loader, swag_model, criterion, args.device, args.num_bins, args.eps)
+            if args.batch_norm == True:
+                swag_utils.bn_update(tr_loader, swag_model)
+                
+            swag_res = utils.eval(val_loader, swag_model, criterion, args.device, args.num_bins, args.eps)
 
-    time_ep = time.time() - time_ep
+        time_ep = time.time() - time_ep
 
-    ## print result
-    if args.method in ["swag", "last_swag"]:
-        values = [epoch, f"{args.method}-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
-            val_res["loss"], val_res["accuracy"], val_res["nll"], val_res["ece"],
-            swag_res["loss"], swag_res["accuracy"], swag_res["nll"], swag_res["ece"],
+        ## print result
+        if args.method in ["swag", "last_swag"]:
+            values = [epoch, f"{args.method}-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
+                val_res["loss"], val_res["accuracy"], val_res["nll"], val_res["ece"],
+                swag_res["loss"], swag_res["accuracy"], swag_res["nll"], swag_res["ece"],
+                    time_ep]
+        else:
+            values = [epoch, f"{args.method}-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
+                val_res["loss"], val_res["accuracy"], val_res["nll"], val_res["ece"],
                 time_ep]
-    else:
-        values = [epoch, f"{args.method}-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
-            val_res["loss"], val_res["accuracy"], val_res["nll"], val_res["ece"],
-            time_ep]
-    
-    table = tabulate.tabulate([values], columns, tablefmt="simple", floatfmt="8.4f")
-    if epoch % args.print_epoch == 1:
-        table = table.split("\n")
-        table = "\n".join([table[1]] + table)
-    else:
-        table = table.split("\n")[2]
-    print(table)
-
-
-    ## wandb
-    if args.method in ["swag", "last_swag"]:
-        wandb.log({"Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
-            "Validation loss" : val_res["loss"], "Validation Accuracy" : val_res["accuracy"],
-            "SWAG Validation loss" : swag_res["loss"], "SWAG Validation Accuracy" : swag_res["accuracy"],
-            "SWAG Validation nll" : swag_res["nll"], "SWAG Validation ece" : swag_res["ece"],
-            "lr" : lr,})
-    else:
-        wandb.log({"Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
-            "Validation loss" : val_res["loss"], "Validation Accuracy" : val_res["accuracy"],
-            "Validation nll" : val_res["nll"], "Validation ece" : val_res["ece"],
-            "lr" : lr,})
-
-
-    ## Save best model (Early Stopping)
-    if (args.method in ["swag", "last_swag"]) and (swag_res['loss'] is not None):
-        if swag_res['loss'] < best_swag_val_loss:
-            swag_cnt = 0
-            best_val_loss = val_res["loss"]
-            best_val_acc = val_res['accuracy']
-            best_swag_val_loss = swag_res["loss"]
-            best_swag_val_acc = swag_res['accuracy']
-            best_epoch = epoch
-
-            # save state_dict
-            os.makedirs(args.save_path, exist_ok=True)
-            utils.save_best_swag_model(args, best_epoch, model, swag_model, optimizer, scaler, first_step_scaler, second_step_scaler)
+        
+        table = tabulate.tabulate([values], columns, tablefmt="simple", floatfmt="8.4f")
+        if epoch % args.print_epoch == 1:
+            table = table.split("\n")
+            table = "\n".join([table[1]] + table)
         else:
-            swag_cnt += 1
+            table = table.split("\n")[2]
+        print(table)
 
-    else:
-        if val_res["loss"] < best_val_loss:
-            cnt = 0
-            best_val_loss = val_res["loss"]
-            best_val_acc = val_res["accuracy"]
-            best_epoch = epoch
 
-            # save state_dict
-            os.makedirs(args.save_path, exist_ok=True)
-            if args.method == "vi":
-                utils.save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
-            elif args.method == "dnn":
-                utils.save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
+        ## wandb
+        if args.method in ["swag", "last_swag"]:
+            wandb.log({"Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
+                "Validation loss" : val_res["loss"], "Validation Accuracy" : val_res["accuracy"],
+                "SWAG Validation loss" : swag_res["loss"], "SWAG Validation Accuracy" : swag_res["accuracy"],
+                "SWAG Validation nll" : swag_res["nll"], "SWAG Validation ece" : swag_res["ece"],
+                "lr" : lr,})
         else:
-            cnt +=1
-    
-    ## Early Stopping
-    if cnt == args.tol and args.method in ['dnn', "vi"]:
-        break
-    elif swag_cnt == args.tol and args.method in ['swag', 'last_swag']:
-        break
+            wandb.log({"Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
+                "Validation loss" : val_res["loss"], "Validation Accuracy" : val_res["accuracy"],
+                "Validation nll" : val_res["nll"], "Validation ece" : val_res["ece"],
+                "lr" : lr,})
 
-    if args.scheduler in ["cos_decay", "step_lr"]:
-        scheduler.step(epoch)
+
+        ## Save best model (Early Stopping)
+        if (args.method in ["swag", "last_swag"]) and (swag_res['loss'] is not None):
+            if swag_res['loss'] < best_swag_val_loss:
+                swag_cnt = 0
+                best_val_loss = val_res["loss"]
+                best_val_acc = val_res['accuracy']
+                best_swag_val_loss = swag_res["loss"]
+                best_swag_val_acc = swag_res['accuracy']
+                best_epoch = epoch
+
+                # save state_dict
+                os.makedirs(args.save_path, exist_ok=True)
+                utils.save_best_swag_model(args, best_epoch, model, swag_model, optimizer, scaler, first_step_scaler, second_step_scaler)
+            else:
+                swag_cnt += 1
+
+        else:
+            if val_res["loss"] < best_val_loss:
+                cnt = 0
+                best_val_loss = val_res["loss"]
+                best_val_acc = val_res["accuracy"]
+                best_epoch = epoch
+
+                # save state_dict
+                os.makedirs(args.save_path, exist_ok=True)
+                if args.method == "vi":
+                    mean, variance = utils.save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
+                elif args.method == "dnn":
+                    utils.save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
+            else:
+                cnt +=1
+        
+        ## Early Stopping
+        if cnt == args.tol and args.method in ['dnn', "vi"]:
+            break
+        elif swag_cnt == args.tol and args.method in ['swag', 'last_swag']:
+            break
+
+        if args.scheduler in ["cos_decay", "step_lr"]:
+            scheduler.step(epoch)
+
+else:
+    ## Save Mean, Cov Values
+    raise ValueError("Add code for save mean, var, cov value for Laplace Approximation")
+    ##########################################################
+    ##########################################################
+    ##########################################################
+        
 #------------------------------------------------------------------------------------------------------------
 
 
@@ -433,9 +455,6 @@ for epoch in range(start_epoch, int(args.epochs)+1):
 
 
 ## Test ------------------------------------------------------------------------------------------------------
-"""
-이 부분도 bma.py로 따로 파놓자
-"""
 ##### Get test nll, Entropy, ece, Reliability Diagram on best model
 # Load Best Model
 print("Load Best Validation Model (Lowest Loss)")
@@ -444,20 +463,32 @@ checkpoint = torch.load(state_dict_path)
 if args.method in ["swag", "last_swag"]:
     swag_model.load_state_dict(checkpoint["state_dict"])
     swag_model.to(args.device)
+elif args.method in ["vi", "last_vi"]:
+    model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
+    ## load only bn (non-dnn) params
+    import collections
+    st_dict = collections.OrderedDict()
+    for name in checkpoint["state_dict"].copy():
+        if not ("mean" in name) or not ("rho" in name):
+            st_dict[name] = checkpoint["state_dict"][name]
+    model.load_state_dict(st_dict, strict=False)    
 else:
     model.load_state_dict(checkpoint["state_dict"])
     model.to(args.device)
 
 
 ### BMA prediction
-if args.method in ["swag", "last_swag", "vi"]:
+if args.method in ["swag", "last_swag", "vi", "last_vi", "la", "last_la"]:
     bma_save_path = f"{args.save_path}/bma_models"
     os.makedirs(bma_save_path, exist_ok=True)
     
     if args.method in ["swag", "last_swag"]:
         model = swag_model
-    
-    bma_res = utils.bma(tr_loader, te_loader, args.method, model, args.bma_num_models, num_classes, bma_save_path=bma_save_path, eps=args.eps, batch_norm=args.batch_norm)
+        bma_res = swag_utils.bma_swag(tr_loader, te_loader,model, args.bma_num_models, num_classes, bma_save_path=bma_save_path, eps=args.eps, batch_norm=args.batch_norm)
+    elif args.method in ["vi", "last_vi"]:
+        bma_res = vi_utils.bma_vi(te_loader, mean, variance, model, args.method, args.bma_num_models, num_classes, bma_save_path=bma_save_path, eps=args.eps)
+        
+        
     bma_predictions = bma_res["predictions"]
     bma_targets = bma_res["targets"]
 

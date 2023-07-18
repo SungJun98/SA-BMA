@@ -167,6 +167,7 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
     for batch, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
         params, z_1, z_2 = sabtl_model.sample(1.0)    # Sample weight
+        import pdb;pdb.set_trace()
 
         fish_inv = sabtl_model.fish_inv(params, eta)             # compute Fisher inverse
         params = utils.format_weights(params, sabtl_model)       # Change weight sample shape to input model

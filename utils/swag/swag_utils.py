@@ -181,3 +181,64 @@ def schedule(epoch, lr_init, epochs, swa, swa_start=None, swa_lr=None):
     else:
         factor = lr_ratio
     return lr_init * factor
+
+
+
+def bma_swag(tr_loader, te_loader, model, bma_num_models, num_classes, bma_save_path=None, eps=1e-8, batch_norm=True):
+    '''
+    run bayesian model averaging in test step
+    '''
+    
+    bma_predictions = np.zeros((len(te_loader.dataset), num_classes))
+    with torch.no_grad():
+        for i in range(bma_num_models):
+            
+            if i == 0:
+                sample = model.sample(0)
+            else:
+                sample = model.sample(1.0, cov=True)                
+        
+            if batch_norm:
+                bn_update(tr_loader, model, verbose=False, subset=1.0)
+                
+            # save sampled weight for bma
+            if bma_save_path is not None:
+                torch.save(sample, f'{bma_save_path}/bma_model-{i}.pt')
+ 
+            res = predict(te_loader, model, verbose=False)
+            predictions = res["predictions"];targets = res["targets"]
+
+            accuracy = np.mean(np.argmax(predictions, axis=1) == targets)
+            nll = -np.mean(np.log(predictions[np.arange(predictions.shape[0]), targets] + eps))
+            print(
+                "Sample %d/%d. Accuracy: %.2f%% NLL: %.4f"
+                % (i + 1, bma_num_models, accuracy * 100, nll)
+            )
+
+            bma_predictions += predictions
+
+            ens_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
+            ens_nll = -np.mean(
+                np.log(
+                    bma_predictions[np.arange(bma_predictions.shape[0]), targets] / (i + 1)
+                    + eps
+                )
+            )
+            print(
+                "Ensemble %d/%d. Accuracy: %.2f%% NLL: %.4f"
+                % (i + 1, bma_num_models, ens_accuracy * 100, ens_nll)
+            )
+
+        bma_predictions /= bma_num_models
+
+        bma_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
+        bma_nll = -np.mean(
+            np.log(bma_predictions[np.arange(bma_predictions.shape[0]), targets] + eps)
+        )
+    
+    print(f"bma Accuracy using {bma_num_models} model : {bma_accuracy * 100:.2f}% / NLL : {bma_nll:.4f}")
+    return {"predictions" : bma_predictions,
+            "targets" : targets,
+            "bma_accuracy" : bma_accuracy,
+            "nll" : bma_nll
+    }

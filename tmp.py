@@ -4,70 +4,74 @@ import utils.utils as utils
 
 # %%
 MODEL='resnet18'
-NUM_CLASSES=10
+DATASET = "cifar10"
+DAT_PER_CLS = 10
 PRE_TRAINED=True
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+SEED=2
+
+utils.set_seed(SEED)
+# %%
+## Load Data
+tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=DATASET,
+                                                        data_path='/data1/lsj9862/data/cifar10',
+                                                        dat_per_cls=DAT_PER_CLS,
+                                                        use_validation=True,
+                                                        batch_size=256,
+                                                        num_workers=4,
+                                                        seed=0,
+                                                        aug=True,
+                                                        )
 
 
 # %%
-model = utils.get_backbone(MODEL, NUM_CLASSES, DEVICE, PRE_TRAINED)
-"""
-전체 paramter 개수 : 11181642
-"""
+## Load Model
+model = utils.get_backbone(MODEL, num_classes, DEVICE, PRE_TRAINED)
 
 
-# %%
-from bayesian_torch.models.dnn_to_bnn import dnn_to_bnn
-const_bnn_prior_parameters = {
-    "prior_mu": 0.0,
-    "prior_sigma": 1.0,
-    "posterior_mu_init": 0.0,
-    "posterior_rho_init": -3.0,
-    "type": "Reparameterization",
-    "moped_enable": True,
-    "moped_delta": 0.2,
-}
-dnn_to_bnn(model, const_bnn_prior_parameters)
-model.to(DEVICE)
-    
-# %%
-mu_param=0; rho_param=0; res_param=0
-for name, param in model.named_parameters():
-    if ("rho" not in name) and ("mu" not in name):
-        res_param += param.numel()   # 9600
-    elif "mu" in name:
-        mu_param += param.numel()   # 11172042
-    elif "rho" in name:
-        rho_param += param.numel()  # 11172042
-      
-
-# %%        
-"""
-그럼 res_param에 대해서 mean, var은 어떻게 해줄까?
-mean은 그냥 weight, bias 값 그대로 가져가면 되고
-var은 rand_initialization하자.
-근데 flatten하는 순서도 중요..!
-즉, mean, var을 만들고 flatten해야 swag에서의 flatten과 일치할 것 같다!
------
-저장할 떄
-1. weight, bias로 되어있는 애들(res_param)의 mean, var를 다 만들어놓자
-2. weight를 list로 받기 (swag_utils.flatten 사용 목적)
-3. flatten
-4. mean, var 저장
-"""
-
-# %% 
-DELTA = 0.2
-
-mean_param_list = list(); var_param_list = list()
-
-for name, param in model.named_parameters():
-    if "mu" in name:
-        mean_param_list.append(param)
-    elif "rho" in name:
-        var_param_list.append(param)
-    else:
-        mean_param_list.append(param)
-        var_param_list.append(torch.log(torch.expm1(DELTA*torch.abs(param)) + 1e-20))
 
 # %%
+from laplace import Laplace
+
+# Laplace
+la = Laplace(model, 'classification',
+             subset_of_weights='all',
+             hessian_structure='lowrank')
+la.fit(tr_loader)
+# la.optimize_prior_precision(method='marglik')
+
+# %%
+from utils.swag.swag_utils import flatten
+
+# mean value 뽑아내기
+mean_list = []
+for param in model.parameters():
+    mean_list.append(param.cpu())
+mean = flatten(mean_list)
+
+# variance value 뽑아내기
+variance = 1 / la.posterior_precision[1]
+
+# covariacne value 뽑아내기 (low-rank)
+cov_sqrt = torch.diag(torch.sqrt(1/la.posterior_precision[0][1])).cpu()
+cov_sqrt = cov_sqrt.matmul((1/la.posterior_precision[0][0].cpu()).t())
+
+# %%
+# BMA test code 넣기
+import numpy as np
+def predict(loader, model):
+    preds = list()
+    targets = list()
+
+    offset = 0
+    with torch.no_grad():
+        for input, target in loader:
+            input = input.cuda(non_blocking=True)
+            output = model(input)
+
+            batch_size = input.size(0)
+            preds.append(output)
+            targets.append(target.cpu().numpy())
+            offset += batch_size
+
+    return {"predictions": np.vstack(preds), "targets": np.concatenate(targets)}

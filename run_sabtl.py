@@ -118,14 +118,16 @@ parser.add_argument("--warmup_lr_init", type=float, default=1e-7,
 ## SABTL ---------------------------------------------------------
 parser.add_argument("--src_bnn", type=str, default="swag", choices=["swag", "la", "vi"],
         help="Type of pre-trained BNN model")
+
 parser.add_argument("--diag_only", action="store_true", default=False, help="Consider only diagonal variance")
+
 parser.add_argument("--low_rank", type=int, default=20, help="Low-rank component")
 
-parser.add_argument("--mean_path", type=str, default="/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_mean.pt",
+parser.add_argument("--mean_path", type=str, required=True,
     help="path to load saved mean of swag model for transfer learning (default: None)")
-parser.add_argument("--var_path", type=str, default="/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_variance.pt",
+parser.add_argument("--var_path", type=str, required=True,
     help="path to load saved variance of swag model for transfer learning (default: None)")
-parser.add_argument("--covmat_path", type=str, default="/home/lsj9862/BayesianSAM/exp_result/resnet18-noBN/swag-sgd_best_val_covmat.pt",
+parser.add_argument("--covmat_path", type=str, required=True,
     help="path to load saved covariance matrix of swag model for transfer learning (default: None)")
 #----------------------------------------------------------------
 
@@ -201,10 +203,12 @@ sabtl_model = sabtl.SABTL(copy.deepcopy(model),
                         w_var=w_var,
                         low_rank=args.low_rank,
                         w_cov_sqrt=w_covmat,
+                        last_layer=args.linear_probe,
                         ).to(args.device)
-
 print(f"Load SABTL Model with prior made of {args.src_bnn}")
-print(f"# of trainable parameters : {sabtl_model.num_params}")
+print(f"# of trainable mean parameters : {sabtl_model.bnn_param.mean.numel()}")
+print(f"# of trainable variance parameters : {sabtl_model.bnn_param.log_std.numel()}")
+print(f"# of trainable covariance parameters : {sabtl_model.bnn_param.cov_sqrt.numel()}")
 print("-"*30)
 #----------------------------------------------------------------
 
