@@ -9,14 +9,14 @@ from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 from timm.data.transforms_factory import create_transform
 
 # %%
-dataset='cifar100'
+dataset='cifar10'
 data_path=f'/data1/lsj9862/data/{dataset}'
 batch_size=256
 use_validation=True
 aug=True
 val_ratio=0.1
-dat_per_cls=16
-seed=2
+dat_per_cls=1
+seed=1
 
 
 # %%
@@ -94,7 +94,7 @@ sampler = SubsetRandomSampler(few_shot_indices)
 ## Make Loader
 tr_loader = DataLoader(tr_data,
                     batch_size=batch_size,
-                    num_workers=0,
+                    num_workers=4,
                     pin_memory=True,
                     sampler=sampler)
     

@@ -121,10 +121,11 @@ def bma_vi(te_loader, mean, variance, model, method, bma_num_models, num_classes
     if "last" in method:
         last = True
         model_shape = model_shape[-2:]
-        for name, _ in model.named_modules():
-            last_layer_name = name
     else:
         last = False
+        
+    for name, _ in model.named_modules():
+        last_layer_name = name
     
     bma_predictions = np.zeros((len(te_loader.dataset), num_classes))
     with torch.no_grad():
