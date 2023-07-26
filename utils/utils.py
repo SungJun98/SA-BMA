@@ -43,16 +43,19 @@ def set_save_path(args):
     else:
         save_path_ = f"{args.save_path}/seed_{args.seed}/{args.dataset}/"
         
+    ### method part    
+    if args.method == "sabtl":
+        method = f"{args.method}-{args.src_bnn}"
+    else:
+        method = args.method
+
     ### scheduler part   
-    if args.scheduler == "cos_anneal":
-        save_path_ = f"{save_path_}/{args.model}/{args.method}-{args.optim}/{args.scheduler}_{args.t_max}"
-    elif args.scheduler == "swag_lr":
-        save_path_ = f"{save_path_}/{args.model}/{args.method}-{args.optim}/{args.scheduler}_{args.swa_lr}"
+    if args.scheduler == "swag_lr":
+        save_path_ = f"{save_path_}/{args.model}/{method}-{args.optim}/{args.scheduler}_{args.swa_lr}"
     elif args.scheduler == "cos_decay":
-        # save_path_ = f"{args.save_path}/{args.dataset}/{args.model}/{args.method}-{args.optim}/{args.scheduler}({args.first_cycle_steps}/{args.cycle_mult}/{args.min_lr}/{args.warmup_steps}/{args.decay_ratio})"
-        save_path_ = f"{save_path_}/{args.model}/{args.method}-{args.optim}/{args.scheduler}_{args.lr_min}/{args.warmup_t}_{args.warmup_lr_init}"
+        save_path_ = f"{save_path_}/{args.model}/{method}-{args.optim}/{args.scheduler}_{args.lr_min}/{args.warmup_t}_{args.warmup_lr_init}"
     else:    
-        save_path_ = f"{save_path_}/{args.model}/{args.method}-{args.optim}/{args.scheduler}"
+        save_path_ = f"{save_path_}/{args.model}/{method}-{args.optim}/{args.scheduler}"
     
     ## learning hyperparameter part
     if args.method in ["swag", "last_swag"]:
@@ -76,16 +79,19 @@ def set_wandb_runname(args):
     '''
     Set wandb run name following the method / model / dataset / optimizer / hyperparameters
     '''
+    if args.method == "sabtl":
+        method = f"{args.method}-{args.src_bnn}"
+    else:
+        method = args.method
+
     ### Few-shot part
     if args.dat_per_cls >= 0:
-        run_name_ = f"seed{args.seed}_{args.method}-{args.optim}_{args.model}_{args.dataset}_{args.dat_per_cls}shot"
+        run_name_ = f"seed{args.seed}_{method}-{args.optim}_{args.model}_{args.dataset}_{args.dat_per_cls}shot"
     else:
-        run_name_ = f"seed{args.seed}_{args.method}-{args.optim}_{args.model}_{args.dataset}"
-        
+        run_name_ = f"seed{args.seed}_{method}-{args.optim}_{args.model}_{args.dataset}"
+
     ### scheduler part
-    if args.scheduler == "cos_anneal":
-        run_name_ = f"{run_name_}_{args.scheduler}({args.t_max})"
-    elif args.scheduler == "swag_lr":
+    if args.scheduler == "swag_lr":
         run_name_ = f"{run_name_}_{args.scheduler}({args.swa_lr})"
     elif args.scheduler == "cos_decay":
         run_name_ = f"{run_name_}_{args.scheduler}({args.lr_min}_{args.warmup_t}_{args.warmup_lr_init})"
@@ -322,67 +328,12 @@ def save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_s
                             )
 
 
-def save_best_swag_model(args, best_epoch, model, swag_model, optimizer, scaler, first_step_scaler, second_step_scaler):
-    if args.optim in ["sgd", "adam"]:
-        if not args.no_amp:
-            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                epoch = best_epoch,
-                                state_dict = swag_model.state_dict(),
-                                optimizer = optimizer.state_dict(),
-                                # scheduler = scheduler.state_dict(),
-                                scaler = scaler.state_dict()
-                                )
-        else:
-            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                epoch = best_epoch,
-                                state_dict = swag_model.state_dict(),
-                                optimizer = optimizer.state_dict(),
-                                # scheduler = scheduler.state_dict(),
-                                )
-    elif args.optim in ["sam", "bsam"]:
-        if not args.no_amp:
-            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                epoch = best_epoch,
-                                state_dict = swag_model.state_dict(),
-                                optimizer = optimizer.state_dict(),
-                                # scheduler = scheduler.state_dict(),
-                                first_step_scaler = first_step_scaler.state_dict(),
-                                second_step_scaler = second_step_scaler.state_dict()
-                                )
-        else:
-            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                epoch = best_epoch,
-                                state_dict = swag_model.state_dict(),
-                                optimizer = optimizer.state_dict(),
-                                # scheduler = scheduler.state_dict(),
-                                )
-    torch.save(model.state_dict(),f'{args.save_path}/{args.method}-{args.optim}_best_val_model.pt')
-    
-    # Save Mean, variance, Covariance matrix
-    mean = swag_model.get_mean_vector()
-    torch.save(mean,f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
-    
-    variance = swag_model.get_variance_vector()
-    torch.save(variance, f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
-    
-    cov_mat_list = swag_model.get_covariance_matrix()
-    torch.save(cov_mat_list, f'{args.save_path}/{args.method}-{args.optim}_best_val_covmat.pt')    
 
 
 
-def save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler):
-    save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
-    
-    mean = vi_utils.get_vi_mean_vector(model)
-    torch.save(mean,f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
-    
-    variance = vi_utils.get_vi_variance_vector(model)
-    torch.save(variance, f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
-    
-    return mean, variance
-
-
-
+"""
+나중에 sabtl_utils로 옮기기
+"""
 def save_best_sabtl_model(args, best_epoch, sabtl_model, optimizer, scaler, first_step_scaler, second_step_scaler):
     if args.optim == "sgd":
         if not args.no_amp:
@@ -478,7 +429,7 @@ def format_weights(sample, sabtl_model):
     
     state_dict = sabtl_model.backbone.state_dict().copy()
     if sabtl_model.last_layer:
-        for name,  in sabtl_model.backbone.named_modules():
+        for name, _  in sabtl_model.backbone.named_modules():
             if sabtl_model.last_layer_name in name:
                 state_dict[f"{sabtl_model.last_layer_name}.weight"] = sample[0]
                 state_dict[f"{sabtl_model.last_layer_name}.bias"] = sample[1]

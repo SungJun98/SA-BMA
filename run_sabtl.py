@@ -123,11 +123,11 @@ parser.add_argument("--diag_only", action="store_true", default=False, help="Con
 
 parser.add_argument("--low_rank", type=int, default=20, help="Low-rank component")
 
-parser.add_argument("--mean_path", type=str, required=True,
+parser.add_argument("--mean_path", type=str, required=True, default=None,
     help="path to load saved mean of swag model for transfer learning (default: None)")
-parser.add_argument("--var_path", type=str, required=True,
+parser.add_argument("--var_path", type=str, required=True, default=None,
     help="path to load saved variance of swag model for transfer learning (default: None)")
-parser.add_argument("--covmat_path", type=str, required=True,
+parser.add_argument("--covmat_path", type=str, default=None,
     help="path to load saved covariance matrix of swag model for transfer learning (default: None)")
 #----------------------------------------------------------------
 
@@ -194,8 +194,11 @@ if args.linear_probe:
     utils.freeze_fe(model)
 
 w_mean = torch.load(args.mean_path)
-w_var = torch.load(args.var_path) 
-w_covmat = torch.load(args.covmat_path)
+w_var = torch.load(args.var_path)
+if args.covmat_path is not None:
+    w_covmat = torch.load(args.covmat_path)
+else:
+    w_covmat=None
 sabtl_model = sabtl.SABTL(copy.deepcopy(model),
                         src_bnn=args.src_bnn,
                         w_mean = w_mean,

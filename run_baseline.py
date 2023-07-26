@@ -13,6 +13,7 @@ import wandb
 import utils.utils as utils
 from utils.swag import swag, swag_utils
 from utils.vi import vi_utils
+from utils.la import la_utils
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -141,6 +142,11 @@ parser.add_argument("--vi_moped_delta", type=float, default=0.5,
                 help="Set initial perturbation factor for weight in MOPED framework (Default: 0.5)")
 #----------------------------------------------------------------
 
+## LA -----------------------------------------------------------
+parser.add_argument("--la_pt_model", type=str, default=None,
+    help="path to load pre-trained DNN model on downstream task (Default: None)",)
+#----------------------------------------------------------------
+
 ## bma or metrics -----------------------------------------------
 parser.add_argument("--val_mc_num", type=int, default=1, help="number of MC sample in validation phase")
 parser.add_argument("--eps", type=float, default=1e-8, help="small float to calculate nll")
@@ -234,6 +240,7 @@ elif args.method == "vi":
 elif args.method == "last_vi":
     raise ValueError("Add code for Last-layer VI")
 elif args.method == "la":
+    model.load_state_dict(args.la_pt_model)
     from laplace import Laplace
     la = Laplace(model, 'classification',
              subset_of_weights='all',
@@ -241,10 +248,11 @@ elif args.method == "la":
     la.fit(tr_loader)
 
 elif args.method == "last_la":
+    model.load_state_dict(args.la_pt_model)
     from laplace import Laplace
     la = Laplace(model, 'classification',
              subset_of_weights='last_layer',
-             hessian_structure='kron')
+             hessian_structure='lowrank')
     la.fit(tr_loader)
 
 print("-"*30)
@@ -411,7 +419,7 @@ if args.method not in ["la", "last_la"]:
 
                 # save state_dict
                 os.makedirs(args.save_path, exist_ok=True)
-                utils.save_best_swag_model(args, best_epoch, model, swag_model, optimizer, scaler, first_step_scaler, second_step_scaler)
+                swag_utils.save_best_swag_model(args, best_epoch, model, swag_model, optimizer, scaler, first_step_scaler, second_step_scaler)
             else:
                 swag_cnt += 1
 
@@ -425,7 +433,7 @@ if args.method not in ["la", "last_la"]:
                 # save state_dict
                 os.makedirs(args.save_path, exist_ok=True)
                 if args.method == "vi":
-                    mean, variance = utils.save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
+                    mean, variance = vi_utils.save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
                 elif args.method == "dnn":
                     utils.save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
             else:
@@ -442,7 +450,10 @@ if args.method not in ["la", "last_la"]:
 
 else:
     ## Save Mean, Cov Values
-    raise ValueError("Add code for save mean, var, cov value for Laplace Approximation")
+    la_utils.get_la_mean_vector(model)
+    la_utils.get_la_variance_vector(la)
+    la_utils.get_la_covariance_matrix(la)
+    
     ##########################################################
     ##########################################################
     ##########################################################

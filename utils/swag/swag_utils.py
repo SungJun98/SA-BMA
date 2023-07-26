@@ -1,14 +1,12 @@
 # https://github.com/wjmaddox/swa_gaussian/blob/ed5fd56e34083b42630239e59076952dee44daf4/swag/utils.py
 import itertools
 import torch
-import os
-import copy
-from datetime import datetime
 import math
 import numpy as np
 import tqdm
-
 import torch.nn.functional as F
+
+import utils.utils as utils
 
 
 def flatten(lst):
@@ -45,6 +43,53 @@ def adjust_learning_rate(optimizer, lr):
     for param_group in optimizer.param_groups:
         param_group["lr"] = lr
     return lr
+
+
+def save_best_swag_model(args, best_epoch, model, swag_model, optimizer, scaler, first_step_scaler, second_step_scaler):
+    if args.optim in ["sgd", "adam"]:
+        if not args.no_amp:
+            utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                epoch = best_epoch,
+                                state_dict = swag_model.state_dict(),
+                                optimizer = optimizer.state_dict(),
+                                # scheduler = scheduler.state_dict(),
+                                scaler = scaler.state_dict()
+                                )
+        else:
+            utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                epoch = best_epoch,
+                                state_dict = swag_model.state_dict(),
+                                optimizer = optimizer.state_dict(),
+                                # scheduler = scheduler.state_dict(),
+                                )
+    elif args.optim in ["sam", "bsam"]:
+        if not args.no_amp:
+            utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                epoch = best_epoch,
+                                state_dict = swag_model.state_dict(),
+                                optimizer = optimizer.state_dict(),
+                                # scheduler = scheduler.state_dict(),
+                                first_step_scaler = first_step_scaler.state_dict(),
+                                second_step_scaler = second_step_scaler.state_dict()
+                                )
+        else:
+            utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                epoch = best_epoch,
+                                state_dict = swag_model.state_dict(),
+                                optimizer = optimizer.state_dict(),
+                                # scheduler = scheduler.state_dict(),
+                                )
+    torch.save(model.state_dict(),f'{args.save_path}/{args.method}-{args.optim}_best_val_model.pt')
+    
+    # Save Mean, variance, Covariance matrix
+    mean = swag_model.get_mean_vector()
+    torch.save(mean,f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
+    
+    variance = swag_model.get_variance_vector()
+    torch.save(variance, f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
+    
+    cov_mat_list = swag_model.get_covariance_matrix()
+    torch.save(cov_mat_list, f'{args.save_path}/{args.method}-{args.optim}_best_val_covmat.pt')    
 
 
 

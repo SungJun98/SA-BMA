@@ -28,6 +28,18 @@ def get_vi_variance_vector(model, delta=0.2):
     return flatten(var_list)
 
 
+def save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler):
+    utils.save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
+    
+    mean = get_vi_mean_vector(model)
+    torch.save(mean,f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
+    
+    variance = get_vi_variance_vector(model)
+    torch.save(variance, f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
+    
+    return mean, variance
+
+
 # train variational inference
 def train_vi(dataloader, model, criterion, optimizer, device, scaler, batch_size):
     loss_sum = 0.0

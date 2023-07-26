@@ -97,14 +97,14 @@ class SABTL(torch.nn.Module):
                         self.low_rank = w_cov_sqrt.size(0)
                         self.bnn_param.update({"cov_sqrt" : nn.Parameter(w_cov_sqrt)})
                 else:
-                    self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((low_rank, self.num_params)*1e-2))})
+                    self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((low_rank, self.num_params))*1e-2)})
 
         elif src_bnn == 'la':
             raise RuntimeError("Add Load for Laplace Approximation")
         
         elif src_bnn == 'vi':
             if not self.diag_only:
-                self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((low_rank, self.num_params)*1e-2))})
+                self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((low_rank, self.num_params))*1e-2)})
         
         print(f"Load covariance of weight from pre-trained {src_bnn} model")
         # -----------------------------------------------------------------------------------------------------
@@ -138,22 +138,14 @@ class SABTL(torch.nn.Module):
         '''
         Sample weight from bnn params
         '''
-        if not self.diag_only:
-            if self.low_rank == 0:
-                z_1 = self.bnn_param['cov_sqrt'].new_empty((self.bnn_param['cov_sqrt'].size(0),), requires_grad=False).normal_(std=z_scale)
-                rand_sample = (torch.exp(self.bnn_param['log_std']) + self.var_clamp**0.5) * z_1
-                rand_sample += self.bnn_param['cov_sqrt'].matmul(z_1)
-                z_2 = None
-                sample = self.bnn_param['mean'] + rand_sample
-
-            else:
-                z_1 = torch.randn_like(self.bnn_param['log_std'], requires_grad=False) * z_scale
-                rand_sample = torch.exp(self.bnn_param['log_std']) * z_1
-                z_2 = self.bnn_param['cov_sqrt'].new_empty((self.bnn_param['cov_sqrt'].size(0),), requires_grad=False).normal_(std=z_scale)
-                cov_sample = self.bnn_param['cov_sqrt'].t().matmul(z_2)
-                cov_sample /= (self.low_rank - 1)**0.5
-                rand_sample += cov_sample
-                sample = self.bnn_param['mean'] + 0.5**0.5 * rand_sample
+        if not self.diag_only:            
+            z_1 = torch.randn_like(self.bnn_param['log_std'], requires_grad=False) * z_scale
+            rand_sample = torch.exp(self.bnn_param['log_std']) * z_1
+            z_2 = self.bnn_param['cov_sqrt'].new_empty((self.bnn_param['cov_sqrt'].size(0),), requires_grad=False).normal_(std=z_scale)
+            cov_sample = self.bnn_param['cov_sqrt'].t().matmul(z_2)
+            cov_sample /= (self.low_rank - 1)**0.5
+            rand_sample += cov_sample
+            sample = self.bnn_param['mean'] + 0.5**0.5 * rand_sample
                 
         else:
             z_1 = torch.randn_like(self.bnn_param['log_std'], requires_grad=False) * z_scale
@@ -170,13 +162,9 @@ class SABTL(torch.nn.Module):
         '''
         soft_std = torch.exp(self.bnn_param['log_std']) + self.var_clamp**0.5
         if not self.diag_only:
-            if self.low_rank == 0:
-                covar = torch.tril(self.bnn_param['cov_sqrt'], diagonal=-1) + torch.diag(soft_std)
-                covar = covar.matmul(covar.t())
-            else:
-                cov_mat_lt = RootLazyTensor(self.bnn_param['cov_sqrt'].t())
-                var_lt = DiagLazyTensor(soft_std**2) #  + self.var_clamp)
-                covar = AddedDiagLazyTensor(var_lt, cov_mat_lt).add_jitter(1e-6)
+            cov_mat_lt = RootLazyTensor(self.bnn_param['cov_sqrt'].t())
+            var_lt = DiagLazyTensor(soft_std**2) #  + self.var_clamp)
+            covar = AddedDiagLazyTensor(var_lt, cov_mat_lt).add_jitter(1e-6)
         else:
             covar = torch.diag(soft_std**2)
         
@@ -184,6 +172,7 @@ class SABTL(torch.nn.Module):
 
         with gpytorch.settings.num_trace_samples(1) and gpytorch.settings.max_cg_iterations(25):
             log_prob =  qdist.log_prob(params)
+
         ## Fisher Inverse w.r.t. mean
         # \nabla_\mean p(w | \theta)
         # mean_fi = torch.autograd.grad(log_prob, self.bnn_param['mean'], retain_graph=True)
