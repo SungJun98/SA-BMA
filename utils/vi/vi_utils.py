@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from ..swag.swag_utils import predict, flatten
+import utils.sam.sam_utils as sam_utils
 import utils.utils as utils
 from bayesian_torch.models.dnn_to_bnn import get_kl_loss
     
@@ -41,7 +42,7 @@ def save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_sc
 
 
 # train variational inference
-def train_vi(dataloader, model, criterion, optimizer, device, scaler, batch_size):
+def train_vi_sgd(dataloader, model, criterion, optimizer, device, scaler, batch_size, kl_beta=1.0):
     loss_sum = 0.0
     correct = 0.0
 
@@ -57,7 +58,7 @@ def train_vi(dataloader, model, criterion, optimizer, device, scaler, batch_size
                 pred = model(X)
                 kl = get_kl_loss(model)
                 loss = criterion(pred, y)
-                loss += kl / batch_size
+                loss += kl_beta * kl / batch_size
                 
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)  # optimizer.step()
@@ -67,7 +68,7 @@ def train_vi(dataloader, model, criterion, optimizer, device, scaler, batch_size
             pred = model(X)
             kl = get_kl_loss(model)
             loss = criterion(pred, y)
-            loss += kl/batch_size
+            loss += kl_beta * kl/batch_size
             
             optimizer.zero_grad()
             loss.backward()
@@ -81,6 +82,79 @@ def train_vi(dataloader, model, criterion, optimizer, device, scaler, batch_size
         "accuracy": correct / num_objects_current * 100.0,
     }
 
+
+def train_vi_sam(dataloader, model, criterion, optimizer, device, first_step_scaler, second_step_scaler, batch_size, kl_beta=1.0):
+    loss_sum = 0.0
+    correct = 0.0
+
+    num_objects_current = 0
+    num_batches = len(dataloader)
+
+    model.train()
+    for batch, (X, y) in enumerate(dataloader):
+        X, y = X.to(device), y.to(device)
+        optimizer.zero_grad()
+
+        if first_step_scaler is not None:
+            sam_utils.enable_running_stats(model)
+            with torch.cuda.amp.autocast():
+                pred = model(X)
+                kl = get_kl_loss(model)
+                loss = criterion(pred, y)
+                loss += kl_beta * kl / batch_size
+                
+            first_step_scaler.scale(loss).backward()
+            first_step_scaler.unscale_(optimizer)
+                
+            optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
+            inf_grad_cnt = sum(v.item() for v in optimizer_state["found_inf_per_device"].values())      # Check if any gradients are inf/nan
+            
+            if inf_grad_cnt == 0:
+                # if valid graident, apply sam_first_step
+                optimizer.first_step(zero_grad=True)
+                sam_first_step_applied = True
+            else:
+                # if invalid graident, skip sam and revert to single optimization step
+                optimizer.zero_grad()
+                sam_first_step_applied = False
+
+            first_step_scaler.update()
+            sam_utils.disable_running_stats(model)
+                
+            with torch.cuda.amp.autocast():
+                pred = model(X)
+                kl = get_kl_loss(model)
+                loss = criterion(pred, y)
+                loss += kl_beta * kl / batch_size
+            second_step_scaler.scale(loss).backward()
+            if sam_first_step_applied:
+                optimizer.second_step()
+            second_step_scaler.step(optimizer)
+            second_step_scaler.update()
+        else:
+            pred = model(X)
+            kl = get_kl_loss(model)
+            loss = criterion(pred, y)
+            loss += kl_beta * kl/batch_size
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.first_step(zero_grad=True, amp=False)
+            
+            pred = model(X)
+            kl = get_kl_loss(model)
+            loss = criterion(pred, y)
+            loss += kl_beta * kl/batch_size
+            loss.backward()
+            optimizer.second_step(zero_grad=True, amp=False)
+            
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
+    return {
+        "loss": loss_sum / num_objects_current,
+        "accuracy": correct / num_objects_current * 100.0,
+    }
 
 
 

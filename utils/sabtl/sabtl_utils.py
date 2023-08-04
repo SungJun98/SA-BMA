@@ -37,6 +37,8 @@ def train_sabtl_sgd(dataloader, sabtl_model, criterion, optimizer, device, scale
     loss_sum = 0.0
     correct = 0.0
     num_objects_current = 0
+    
+    sabtl_model.backbone.train()
     for batch, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
            
@@ -45,6 +47,7 @@ def train_sabtl_sgd(dataloader, sabtl_model, criterion, optimizer, device, scale
         
         # Change weight sample shape to input model
         params = utils.format_weights(params, sabtl_model)
+        # params = utils.list_to_state_dict(sabtl_model.backbone, params, last=(not sabtl_model.last_layer))
 
         if scaler is not None:
             with torch.cuda.amp.autocast():
@@ -82,6 +85,8 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
     loss_sum = 0.0
     correct = 0.0
     num_objects_current = 0
+    
+    sabtl_model.backbone.train()
     for batch, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
            
@@ -97,10 +102,6 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
                 loss = criterion(pred, y)        
             first_step_scaler.scale(loss).backward()
             first_step_scaler.unscale_(optimizer)
-            
-            # correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-            # loss_sum += loss.data.item() * X.size(0)
-            # num_objects_current += X.size(0)
             
             optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
             
@@ -164,12 +165,15 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
     loss_sum = 0.0
     correct = 0.0
     num_objects_current = 0
+    
+    sabtl_model.backbone.train()
     for batch, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
         params, z_1, z_2 = sabtl_model.sample(1.0)    # Sample weight
 
         fish_inv = sabtl_model.fish_inv(params, eta)             # compute Fisher inverse
-        params = utils.format_weights(params, sabtl_model)       # Change weight sample shape to input model
+        # params = utils.format_weights(params, sabtl_model)       # Change weight sample shape to input model
+        params = utils.format_weights(params, sabtl_model, last_only=True)
 
         if first_step_scaler is not None:
             ## first forward & backward
@@ -179,10 +183,6 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
 
             first_step_scaler.scale(loss).backward()
             first_step_scaler.unscale_(optimizer)
-
-            # correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-            # loss_sum += loss.data.item() * X.size(0)
-            # num_objects_current += X.size(0)
             
             optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
             
@@ -247,7 +247,7 @@ def eval_sabtl(loader, sabtl_model, params, criterion, device, num_bins=50, eps=
     preds = list()
     targets = list()
 
-    sabtl_model.eval()
+    sabtl_model.backbone.eval()
     offset = 0
     with torch.no_grad():
         for _, (input, target) in enumerate(loader):
@@ -290,15 +290,16 @@ def bma_sabtl(te_loader, sabtl_model, bma_num_models,
         for i in range(bma_num_models):
             
             if i == 0:
-                params, _, _ = sabtl_model.sample(0)
+                params, _, _ = sabtl_model.sample(z_scale=0, last_only=False)
             else:
-                params, _, _  = sabtl_model.sample(1.0)
+                params, _, _  = sabtl_model.sample(z_scale=1.0, last_only=False)
             
             # save sampled weight for bma
             if (bma_save_path is not None) and (not validation):
                 torch.save(params, f'{bma_save_path}/bma_model-{i}.pt')
             
-            params = utils.format_weights(params, sabtl_model)
+            # params = utils.format_weights(params, sabtl_model)
+            params = utils.format_weights(params, sabtl_model, last_only=False)
             res = eval_sabtl(te_loader, sabtl_model, params, criterion, device, num_bins, eps)
 
             if not validation:

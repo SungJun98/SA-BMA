@@ -36,8 +36,11 @@ parser.add_argument("--print_epoch", type=int, default=10, help="Printing epoch"
 parser.add_argument("--resume", type=str, default=None,
     help="path to load saved model to resume training (default: None)",)
 
-parser.add_argument("--linear_probe", action="store_true", default=False,
-        help = "When we do Linear Probing (Default : False)")
+# parser.add_argument("--last_layer", action="store_true", default=False,
+#         help = "When we do Linear Probing (Default : False)")
+
+parser.add_argument("--tol", type=int, default=30,
+        help="tolerance for early stopping (Default : 30)")
 
 ## Data ---------------------------------------------------------
 parser.add_argument(
@@ -76,6 +79,10 @@ parser.add_argument(
     "--pre_trained", action='store_true', default=False,
     help="Using pre-trained model from zoo"
     )
+
+parser.add_argument("--model_path",
+            type=str, required=True,
+            help="Path to load state dict of backbone (to get bn statistics)")
 
 parser.add_argument("--save_path",
             type=str, default="/data2/lsj9862/exp_result",
@@ -121,7 +128,10 @@ parser.add_argument("--src_bnn", type=str, default="swag", choices=["swag", "la"
 
 parser.add_argument("--diag_only", action="store_true", default=False, help="Consider only diagonal variance")
 
-parser.add_argument("--low_rank", type=int, default=20, help="Low-rank component")
+parser.add_argument("--low_rank", type=int, default=3, help="Low-rank component")
+
+parser.add_argument("--var_scale", type=float, default=1, help="Scaling prior variance")
+parser.add_argument("--cov_scale", type=float, default=1, help="Scaling prior covariance")
 
 parser.add_argument("--mean_path", type=str, required=True, default=None,
     help="path to load saved mean of swag model for transfer learning (default: None)")
@@ -189,9 +199,13 @@ print("-"*30)
 
 
 # Define Model------------------------------------------------------
-model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)   
-if args.linear_probe:
-    utils.freeze_fe(model)
+model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
+if args.src_bnn == 'swag':
+    model.load_state_dict(torch.load(args.model_path))
+
+# if args.linear_probe:
+utils.freeze_fe(model)
+
 
 w_mean = torch.load(args.mean_path)
 w_var = torch.load(args.var_path)
@@ -204,9 +218,11 @@ sabtl_model = sabtl.SABTL(copy.deepcopy(model),
                         w_mean = w_mean,
                         diag_only=args.diag_only,
                         w_var=w_var,
+                        var_scale=args.var_scale,
                         low_rank=args.low_rank,
                         w_cov_sqrt=w_covmat,
-                        last_layer=args.linear_probe,
+                        cov_scale=args.cov_scale,
+                        last_layer=True,
                         ).to(args.device)
 print(f"Load SABTL Model with prior made of {args.src_bnn}")
 print(f"# of trainable mean parameters : {sabtl_model.bnn_param.mean.numel()}")
@@ -236,9 +252,6 @@ print("-"*30)
 #-------------------------------------------------------------------
 
 ## Resume ---------------------------------------------------------------------------
-"""
-나중에 필요하면 채우기
-"""
 start_epoch = 1
 #------------------------------------------------------------------------------------
 
@@ -250,9 +263,7 @@ print("-"*30)
 ## Training -------------------------------------------------------------------------
 print(f"Start training SABTL with {args.optim} optimizer from {start_epoch} epoch!")
 
-"""
-table = tabulate.tabulate([values], columns, tablefmt="simple", floatfmt="8.4f")
-"""
+
 ## print setting
 columns = ["epoch", "method", "lr",
         "tr_loss", "tr_acc",
@@ -278,7 +289,7 @@ for epoch in range(start_epoch, int(args.epochs)+1):
         tr_res = sabtl_utils.train_sabtl_sam(tr_loader, sabtl_model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
     elif args.optim == "bsam":
         tr_res = sabtl_utils.train_sabtl_bsam(tr_loader, sabtl_model, criterion, optimizer, args.device, args.eta, first_step_scaler, second_step_scaler)
-        
+    
     # validation / test
     if args.val_mc_num ==1:
         params, _, _ = sabtl_model.sample(0.0)
@@ -331,6 +342,7 @@ for epoch in range(start_epoch, int(args.epochs)+1):
     # Save best model (Early Stopping)
     if (val_res['loss'] < best_val_loss):
     # if (val_res['accuracy'] > best_val_acc) or (val_res['loss'] < best_val_loss):
+        cnt = 0
         best_val_loss = val_res['loss']
         best_val_acc = val_res['accuracy']
         best_epoch = epoch
@@ -338,10 +350,16 @@ for epoch in range(start_epoch, int(args.epochs)+1):
         # save state_dict
         os.makedirs(args.save_path, exist_ok=True)
         utils.save_best_sabtl_model(args, best_epoch, sabtl_model, optimizer, scaler, first_step_scaler, second_step_scaler)
-                
+    else:
+        cnt += 1
+
     ## Scheduler step
     if args.scheduler in ["step_lr", "cos_decay"]:
         scheduler.step(epoch)
+
+    ## Early Stopping
+    if cnt == args.tol and args.method:
+        break
 #------------------------------------------------------------------------------------------------------------
 
 
@@ -395,8 +413,8 @@ utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, Tru
 
 
 ### MAP Prediction
-params, _, _ = sabtl_model.sample(0)
-params = utils.format_weights(params, sabtl_model)
+params, _, _ = sabtl_model.sample(0, last_only=False)
+params = utils.format_weights(params, sabtl_model, last_only=False)
 
 res = sabtl_utils.eval_sabtl(te_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
 

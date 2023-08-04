@@ -121,7 +121,7 @@ parser.add_argument("--swa_start", type=int, default=161, help="Start epoch of S
 parser.add_argument("--swa_lr", type=float, default=0.05, help="Learning rate for SWAG")
 parser.add_argument("--diag_only", action="store_true", default=False, help="Calculate only diagonal covariance")
 parser.add_argument("--swa_c_epochs", type=int, default=1, help="Cycle to calculate SWAG statistics")
-parser.add_argument("--max_num_models", type=int, default=20, help="Number of models to get SWAG statistics")
+parser.add_argument("--max_num_models", type=int, default=3, help="Number of models to get SWAG statistics")
 
 parser.add_argument("--swag_resume", type=str, default=None,
     help="path to load saved swag model to resume training (default: None)",)
@@ -138,8 +138,10 @@ parser.add_argument("--vi_posterior_rho_init", type=float, default=-3.0,
                 help="Set perturbation on posterior mean for variational inference (Default: -3.0)")
 parser.add_argument("--vi_type", type=str, default="Reparameterization", choices=["Reparameterization", "Flipout"],
                 help="Set type of variational inference (Default: Reparameterization)")
-parser.add_argument("--vi_moped_delta", type=float, default=0.5,
-                help="Set initial perturbation factor for weight in MOPED framework (Default: 0.5)")
+parser.add_argument("--vi_moped_delta", type=float, default=0.2,
+                help="Set initial perturbation factor for weight in MOPED framework (Default: 0.2)")
+parser.add_argument("--kl_beta", type=float, default=1.0,
+                help="Hyperparameter to adjust kld term on vi loss function (Default: 1.0)")
 #----------------------------------------------------------------
 
 ## LA -----------------------------------------------------------
@@ -231,7 +233,7 @@ elif args.method == "vi":
         "posterior_mu_init": args.vi_posterior_mu_init,
         "posterior_rho_init": args.vi_posterior_rho_init,
         "type": args.vi_type,
-        "moped_enable": args.pre_trained,
+        "moped_enable": True,
         "moped_delta": args.vi_moped_delta,
     }
     dnn_to_bnn(model, const_bnn_prior_parameters)
@@ -242,9 +244,11 @@ elif args.method == "last_vi":
 elif args.method == "la":
     model.load_state_dict(args.la_pt_model)
     from laplace import Laplace
+    from laplace.curvature import AsdlGGN
     la = Laplace(model, 'classification',
-             subset_of_weights='all',
-             hessian_structure='lowrank')
+            subset_of_weights='all',
+            hessian_structure='lowrank',
+            backend=AsdlGGN)
     la.fit(tr_loader)
 
 elif args.method == "last_la":
@@ -347,7 +351,10 @@ if args.method not in ["la", "last_la"]:
         
         ## train
         if args.method in ["vi"]:
-            tr_res = vi_utils.train_vi(tr_loader, model, criterion, optimizer, args.device, scaler, args.batch_size)
+            if args.optim in ["sgd", "adam"]:
+                tr_res = vi_utils.train_vi_sgd(tr_loader, model, criterion, optimizer, args.device, scaler, args.batch_size, args.kl_beta)
+            elif args.optim == "sam":
+                tr_res = vi_utils.train_vi_sam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler, args.batch_size, args.kl_beta)
         else:
             if args.optim in ["sgd", "adam"]:
                 tr_res = utils.train_sgd(tr_loader, model, criterion, optimizer, args.device, scaler)
@@ -452,11 +459,6 @@ else:
     ## Save Mean, Cov Values
     la_utils.get_la_mean_vector(model)
     la_utils.get_la_variance_vector(la)
-    la_utils.get_la_covariance_matrix(la)
-    
-    ##########################################################
-    ##########################################################
-    ##########################################################
         
 #------------------------------------------------------------------------------------------------------------
 

@@ -62,6 +62,8 @@ def set_save_path(args):
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
     elif args.method in ["vi"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}"
+    elif args.method in ["sabtl"]:
+        save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.momentum}_{args.low_rank}"
     else:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.momentum}"
         
@@ -103,6 +105,8 @@ def set_wandb_runname(args):
         run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
     elif args.method in ["vi"]:
         run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}"
+    elif args.method in ["sabtl"]:
+        run_name_ = f"{run_name_}/{args.lr_init}_{args.wd}_{args.momentum}_{args.low_rank}"
     else:
         run_name_ = f"{run_name_}/{args.lr_init}_{args.wd}_{args.momentum}"
         
@@ -113,7 +117,6 @@ def set_wandb_runname(args):
         run_name_ = f"{run_name_}_{args.eta}"
     
     return run_name_
-
 
 
 def get_dataset(dataset='cifar10',
@@ -379,14 +382,6 @@ def save_best_sabtl_model(args, best_epoch, sabtl_model, optimizer, scaler, firs
     torch.save(cov_mat_list, f'{args.save_path}/{args.method}-{args.optim}_best_val_covmat.pt')    
     
 
-"""
-##################################################################################################
-#
-# 아래 부분 수정
-#
-##################################################################################################
-"""
-
 # parameter list to state_dict(ordered Dict)
 def list_to_state_dict(model, sample_list, last=False, last_layer_name="fc"):
     '''
@@ -398,15 +393,17 @@ def list_to_state_dict(model, sample_list, last=False, last_layer_name="fc"):
         ordDict[f"{last_layer_name}.bias"] = sample_list[1]   
     else:        
         for sample, (name, param) in zip(sample_list, model.named_parameters()):
-                ordDict[name] = sample
+            ordDict[name] = sample
     return ordDict
 
 
 def unflatten_like_size(vector, likeTensorSize):
-    # Takes a flat torch.tensor and unflattens it to a list of torch.tensors
-    # Input
-    #  - vector : flattened parameters
-    #  - likeTensorSize : list of torch.Size
+    """
+    Takes a flat torch.tensor and unflattens it to a list of torch.tensors
+    Input
+     - vector : flattened parameters
+     - likeTensorSize : list of torch.Size
+    """
     outList = []
     i = 0
     for layer_size in likeTensorSize:
@@ -417,25 +414,16 @@ def unflatten_like_size(vector, likeTensorSize):
     return outList
 
 
-def format_weights(sample, sabtl_model):
+def format_weights(sample, sabtl_model, last_only=False):
     '''
     Format sampled vector to state dict
     '''  
-    if sabtl_model.last_layer:
+    if last_only:
         model_shape = sabtl_model.last_layer_shape
     else:
         model_shape = sabtl_model.full_model_shape
     sample = unflatten_like_size(sample, model_shape)
-    
-    state_dict = sabtl_model.backbone.state_dict().copy()
-    if sabtl_model.last_layer:
-        for name, _  in sabtl_model.backbone.named_modules():
-            if sabtl_model.last_layer_name in name:
-                state_dict[f"{sabtl_model.last_layer_name}.weight"] = sample[0]
-                state_dict[f"{sabtl_model.last_layer_name}.bias"] = sample[1]
-    else:
-        for idx, (name, _) in enumerate(sabtl_model.backbone.named_parameters()):
-            state_dict[name] = sample[idx]
+    state_dict = list_to_state_dict(sabtl_model.backbone, sample, last=last_only, last_layer_name=sabtl_model.last_layer_name)
     return state_dict
 
     
@@ -552,7 +540,7 @@ def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler
             optimizer.first_step(zero_grad=True, amp=False)
             
             ## second forward-backward pass
-            pred = model( X)
+            pred = model(X)
             loss = criterion(pred, y)
             loss.backward()
             optimizer.second_step(zero_grad=True, amp=False)   
