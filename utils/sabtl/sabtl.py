@@ -124,7 +124,7 @@ class SABTL(torch.nn.Module):
         ## -------------------------------------------------
         ## concatenate -------------------------------------
         if not last_only:
-            sample = torch.cat((sample_fe, sample_ll))
+            sample = torch.cat((sample_fe.detach(), sample_ll))
             z_1 = torch.cat((z_1_fe, z_1_ll))
         else:
             sample = sample_ll
