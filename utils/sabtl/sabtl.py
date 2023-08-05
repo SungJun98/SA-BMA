@@ -98,26 +98,6 @@ class SABTL(torch.nn.Module):
         Sample weight from bnn params
         '''
         if not last_only:
-            sample = torch.cat((self.fe_mean, self.bnn_param.mean))
-            z_1 = torch.randn_like(sample, requires_grad=False)
-            if not self.diag_only:
-                z_2 = self.bnn_param.cov_sqrt.new_empty((self.bnn_param.cov_sqrt.size(0), ), requires_grad=False).normal_(z_scale)
-            else:
-                z_2 = None
-            sample += 0.5**0.5 * (torch.exp(torch.cat((self.fe_log_std, self.bnn_param.log_std))) * z_1 + torch.cat((self.fe_cov_sqrt, self.bnn_param.cov_sqrt)).t().matmul(z_2))
-        
-        else:
-            z_1 = torch.randn_likfe(self.bnn_param.mean, requires_grad=False)
-            if not self.diag_only:
-                z_2 = self.bnn_param.cov_sqrt.new_empty((self.bnn_param.cov_sqrt.size(0), ), requires_grad=False).normal_(z_scale)
-            else:
-                z_2 = None
-            sample = self.bnn_param.mean + 0.5**0.5 * (torch.exp(self.bnn_param.log_std)*z_1 + self.bnn_param.cov_sqrt.t().matmul(z_2))            
-            
-        return sample, z_1, z_2
-
-        """
-        if not last_only:
             # feature extractor -------------------------------
             z_1_fe = torch.randn_like(self.fe_mean, requires_grad=False)
             rand_sample_fe = torch.exp(self.fe_log_std) * z_1_fe
@@ -130,7 +110,6 @@ class SABTL(torch.nn.Module):
                             
             sample_fe = self.fe_mean + rand_sample_fe
             # -------------------------------------------------
-
         ## last layer --------------------------------------
         z_1_ll = torch.randn_like(self.bnn_param.mean, requires_grad=False)
         rand_sample_ll = torch.exp(self.bnn_param['log_std']) * z_1_ll
@@ -143,7 +122,6 @@ class SABTL(torch.nn.Module):
             z_2 = None
         sample_ll = self.bnn_param['mean'] + rand_sample_ll
         ## -------------------------------------------------
-
         ## concatenate -------------------------------------
         if not last_only:
             sample = torch.cat((sample_fe, sample_ll))
@@ -152,9 +130,32 @@ class SABTL(torch.nn.Module):
             sample = sample_ll
             z_1 = z_1_ll
         ## -------------------------------------------------
-
+        return sample, z_1, z_2
+    
+        """
+        if not last_only:
+            sample = torch.cat((self.fe_mean, self.bnn_param.mean))
+            var_sqrt = torch.exp(torch.cat((self.fe_log_std, self.bnn_param.log_std)))
+            z_1 = torch.randn_like(sample, requires_grad=False)
+            if not self.diag_only:
+                cov_sqrt = torch.cat((self.fe_cov_sqrt, self.bnn_param.cov_sqrt))
+                z_2 = self.bnn_param.cov_sqrt.new_empty((cov_sqrt.size(0), ), requires_grad=False).normal_(z_scale)
+            else:
+                z_2 = None
+            sample += 0.5**0.5 * (var_sqrt * z_1 + cov_sqrt.t().matmul(z_2))
+        
+        else:
+            z_1 = torch.randn_like(self.bnn_param.mean, requires_grad=False)
+            if not self.diag_only:
+                z_2 = self.bnn_param.cov_sqrt.new_empty((self.bnn_param.cov_sqrt.size(0), ), requires_grad=False).normal_(z_scale)
+            else:
+                z_2 = None
+            sample = self.bnn_param.mean + 0.5**0.5 * (torch.exp(self.bnn_param.log_std)*z_1 + self.bnn_param.cov_sqrt.t().matmul(z_2))            
+            
         return sample, z_1, z_2
         """
+
+        
     
     def fish_inv(self, params, eta=1.0):
         '''

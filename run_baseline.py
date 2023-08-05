@@ -209,7 +209,7 @@ print("-"*30)
 
 # Define Model-----------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
-if args.linear_probe or args.method == "last_swag":
+if args.linear_probe or args.method in ["last_swag", "last_vi"]:
     utils.freeze_fe(model)
 
 swag_model=None
@@ -239,15 +239,31 @@ elif args.method == "vi":
     dnn_to_bnn(model, const_bnn_prior_parameters)
     model.to(args.device)
     print(f"Preparing Model for {args.vi_type} VI with MOPED ")
+    
 elif args.method == "last_vi":
-    raise ValueError("Add code for Last-layer VI")
+    from bayesian_torch.models.dnn_to_bnn import dnn_to_bnn
+    
+    bayesian_last_layer = torch.nn.Sequential(list(model.children())[-1])
+    const_bnn_prior_parameters = {
+        "prior_mu": args.vi_prior_mu,
+        "prior_sigma": args.vi_prior_sigma,
+        "posterior_mu_init": args.vi_posterior_mu_init,
+        "posterior_rho_init": args.vi_posterior_rho_init,
+        "type": args.vi_type,
+        "moped_enable": True,
+        "moped_delta": args.vi_moped_delta,
+    }
+    dnn_to_bnn(bayesian_last_layer, const_bnn_prior_parameters)
+    model.head = bayesian_last_layer.to(args.device)
+    print(f"Preparing Model for last-layer {args.vi_type} VI with MOPED ")
+    
 elif args.method == "la":
     model.load_state_dict(args.la_pt_model)
     from laplace import Laplace
     from laplace.curvature import AsdlGGN
     la = Laplace(model, 'classification',
             subset_of_weights='all',
-            hessian_structure='lowrank',
+            hessian_structure='diag',
             backend=AsdlGGN)
     la.fit(tr_loader)
 
@@ -256,7 +272,7 @@ elif args.method == "last_la":
     from laplace import Laplace
     la = Laplace(model, 'classification',
              subset_of_weights='last_layer',
-             hessian_structure='lowrank')
+             hessian_structure='diag')
     la.fit(tr_loader)
 
 print("-"*30)
@@ -350,7 +366,7 @@ if args.method not in ["la", "last_la"]:
             lr = optimizer.param_groups[0]['lr']
         
         ## train
-        if args.method in ["vi"]:
+        if args.method in ["vi", "last_vi"]:
             if args.optim in ["sgd", "adam"]:
                 tr_res = vi_utils.train_vi_sgd(tr_loader, model, criterion, optimizer, args.device, scaler, args.batch_size, args.kl_beta)
             elif args.optim == "sam":
@@ -362,7 +378,7 @@ if args.method not in ["la", "last_la"]:
                 tr_res = utils.train_sam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
 
         ## valid
-        if args.method in ["vi"]:
+        if args.method in ["vi", "last_vi"]:
             val_res = vi_utils.eval_vi(val_loader, model, num_classes, criterion, args.val_mc_num, args.num_bins, args.eps)
         else:
             val_res = utils.eval(val_loader, model, criterion, args.device, args.num_bins, args.eps)
@@ -439,7 +455,7 @@ if args.method not in ["la", "last_la"]:
 
                 # save state_dict
                 os.makedirs(args.save_path, exist_ok=True)
-                if args.method == "vi":
+                if args.method in ["vi", "last_vi"]:
                     mean, variance = vi_utils.save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
                 elif args.method == "dnn":
                     utils.save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
@@ -447,7 +463,7 @@ if args.method not in ["la", "last_la"]:
                 cnt +=1
         
         ## Early Stopping
-        if cnt == args.tol and args.method in ['dnn', "vi"]:
+        if cnt == args.tol and args.method in ['dnn', "vi", "last_vi"]:
             break
         elif swag_cnt == args.tol and args.method in ['swag', 'last_swag']:
             break

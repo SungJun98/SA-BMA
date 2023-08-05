@@ -60,7 +60,7 @@ def set_save_path(args):
     ## learning hyperparameter part
     if args.method in ["swag", "last_swag"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
-    elif args.method in ["vi"]:
+    elif args.method in ["vi", "last_vi"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}"
     elif args.method in ["sabtl"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.momentum}_{args.low_rank}"
@@ -103,7 +103,7 @@ def set_wandb_runname(args):
     ## learning hyperparameter part
     if args.method in ["swag", "last_swag"]:
         run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
-    elif args.method in ["vi"]:
+    elif args.method in ["vi", "last_vi"]:
         run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}"
     elif args.method in ["sabtl"]:
         run_name_ = f"{run_name_}/{args.lr_init}_{args.wd}_{args.momentum}_{args.low_rank}"

@@ -36,8 +36,8 @@ parser.add_argument("--print_epoch", type=int, default=10, help="Printing epoch"
 parser.add_argument("--resume", type=str, default=None,
     help="path to load saved model to resume training (default: None)",)
 
-# parser.add_argument("--last_layer", action="store_true", default=False,
-#         help = "When we do Linear Probing (Default : False)")
+parser.add_argument("--last_layer", action="store_true", default=False,
+        help = "When we do Linear Probing (Default : False)")
 
 parser.add_argument("--tol", type=int, default=30,
         help="tolerance for early stopping (Default : 30)")
@@ -202,10 +202,13 @@ print("-"*30)
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
 if args.src_bnn == 'swag':
     model.load_state_dict(torch.load(args.model_path))
-
+elif args.src_bnn == "vi":
+    checkpoint = torch.load(args.model_path)
+    bn_state_dict = {key: value for key, value in checkpoint["state_dict"].items() if 'bn' in key}
+    model.load_state_dict(bn_state_dict, strict=False)
+    
 # if args.linear_probe:
 utils.freeze_fe(model)
-
 
 w_mean = torch.load(args.mean_path)
 w_var = torch.load(args.var_path)
@@ -222,12 +225,13 @@ sabtl_model = sabtl.SABTL(copy.deepcopy(model),
                         low_rank=args.low_rank,
                         w_cov_sqrt=w_covmat,
                         cov_scale=args.cov_scale,
-                        last_layer=True,
+                        last_layer=args.last_layer,
                         ).to(args.device)
 print(f"Load SABTL Model with prior made of {args.src_bnn}")
 print(f"# of trainable mean parameters : {sabtl_model.bnn_param.mean.numel()}")
 print(f"# of trainable variance parameters : {sabtl_model.bnn_param.log_std.numel()}")
-print(f"# of trainable covariance parameters : {sabtl_model.bnn_param.cov_sqrt.numel()}")
+if not args.diag_only:
+    print(f"# of trainable covariance parameters : {sabtl_model.bnn_param.cov_sqrt.numel()}")
 print("-"*30)
 #----------------------------------------------------------------
 

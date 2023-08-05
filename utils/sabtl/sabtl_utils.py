@@ -173,7 +173,7 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
 
         fish_inv = sabtl_model.fish_inv(params, eta)             # compute Fisher inverse
         # params = utils.format_weights(params, sabtl_model)       # Change weight sample shape to input model
-        params = utils.format_weights(params, sabtl_model, last_only=True)
+        params = utils.format_weights(params, sabtl_model)
 
         if first_step_scaler is not None:
             ## first forward & backward
