@@ -39,8 +39,8 @@ parser.add_argument("--resume", type=str, default=None,
 parser.add_argument("--last_layer", action="store_true", default=False,
         help = "When we do Linear Probing (Default : False)")
 
-parser.add_argument("--tol", type=int, default=30,
-        help="tolerance for early stopping (Default : 30)")
+parser.add_argument("--tol", type=int, default=50,
+        help="tolerance for early stopping (Default : 50)")
 
 ## Data ---------------------------------------------------------
 parser.add_argument(

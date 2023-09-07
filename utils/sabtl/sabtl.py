@@ -76,14 +76,14 @@ class SABTL(torch.nn.Module):
                     self.bnn_param.update({"cov_sqrt" : nn.Parameter(w_cov_sqrt[:,-self.ll_num_params:] * cov_scale)})
                     self.low_rank = w_cov_sqrt.size(0)
                 else:
-                    self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((self.low_rank, self.ll_num_params))*1e-2)})
+                    self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((self.low_rank, self.ll_num_params))*cov_scale)})
 
         elif src_bnn == 'la':
             raise RuntimeError("Add Load for Laplace Approximation")
         
         elif src_bnn == 'vi':
             if not self.diag_only:
-                self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((self.low_rank, self.ll_num_params))*1e-2)})
+                self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((self.low_rank, self.ll_num_params))*cov_scale)})
         
         print(f"Load covariance of weight from pre-trained {src_bnn} model")
         # -----------------------------------------------------------------------------------------------------    

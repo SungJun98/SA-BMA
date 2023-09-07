@@ -64,6 +64,9 @@ parser.add_argument("--use_validation", action='store_true', default=True,
 
 parser.add_argument("--dat_per_cls", type=int, default=-1,
             help="Number of data points per class in few-shot setting. -1 denotes deactivate few-shot setting (Default : -1)")
+
+parser.add_argument("--no_aug", action="store_true", default=False,
+            help="Deactivate augmentation")
 #----------------------------------------------------------------
 
 ## Model ---------------------------------------------------------
@@ -169,9 +172,12 @@ else:
     args.batch_norm = True
     args.aug = True
 
+if args.no_aug:
+    args.aug = False
+
 utils.set_seed(args.seed)
 
-print(f"Device : {args.device} / Seed : {args.seed} / Augmentation {args.aug}")
+print(f"Device : {args.device} / Seed : {args.seed} / Augmentation : {args.aug}")
 print("-"*30)
 #------------------------------------------------------------------
 
@@ -241,20 +247,7 @@ elif args.method == "vi":
     print(f"Preparing Model for {args.vi_type} VI with MOPED ")
     
 elif args.method == "last_vi":
-    from bayesian_torch.models.dnn_to_bnn import dnn_to_bnn
-    
-    bayesian_last_layer = torch.nn.Sequential(list(model.children())[-1])
-    const_bnn_prior_parameters = {
-        "prior_mu": args.vi_prior_mu,
-        "prior_sigma": args.vi_prior_sigma,
-        "posterior_mu_init": args.vi_posterior_mu_init,
-        "posterior_rho_init": args.vi_posterior_rho_init,
-        "type": args.vi_type,
-        "moped_enable": True,
-        "moped_delta": args.vi_moped_delta,
-    }
-    dnn_to_bnn(bayesian_last_layer, const_bnn_prior_parameters)
-    model.head = bayesian_last_layer.to(args.device)
+    vi_utils.make_last_vi(args, model)
     print(f"Preparing Model for last-layer {args.vi_type} VI with MOPED ")
     
 elif args.method == "la":
@@ -494,13 +487,10 @@ if args.method in ["swag", "last_swag"]:
     swag_model.to(args.device)
 elif args.method in ["vi", "last_vi"]:
     model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
-    ## load only bn (non-dnn) params
-    import collections
-    st_dict = collections.OrderedDict()
-    for name in checkpoint["state_dict"].copy():
-        if not ("mean" in name) or not ("rho" in name):
-            st_dict[name] = checkpoint["state_dict"][name]
-    model.load_state_dict(st_dict, strict=False)    
+    if args.method == "last_vi":
+        vi_utils.make_last_vi(args, model)
+    vi_utils.load_vi(model, checkpoint)
+    
 else:
     model.load_state_dict(checkpoint["state_dict"])
     model.to(args.device)

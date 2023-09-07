@@ -29,6 +29,32 @@ def get_vi_variance_vector(model, delta=0.2):
     return flatten(var_list)
 
 
+def make_last_vi(args, model):
+    from bayesian_torch.models.dnn_to_bnn import dnn_to_bnn
+    bayesian_last_layer = torch.nn.Sequential(list(model.children())[-1])
+    const_bnn_prior_parameters = {
+        "prior_mu": args.vi_prior_mu,
+        "prior_sigma": args.vi_prior_sigma,
+        "posterior_mu_init": args.vi_posterior_mu_init,
+        "posterior_rho_init": args.vi_posterior_rho_init,
+        "type": args.vi_type,
+        "moped_enable": True,
+        "moped_delta": args.vi_moped_delta,
+    }
+    dnn_to_bnn(bayesian_last_layer, const_bnn_prior_parameters)
+    model.head = bayesian_last_layer.to(args.device)
+
+
+def load_vi(model, checkpoint):
+    import collections
+    ## load only bn (non-dnn) params
+    st_dict = collections.OrderedDict()
+    for name in checkpoint["state_dict"].copy():
+        if not ("mean" in name) or not ("rho" in name):
+            st_dict[name] = checkpoint["state_dict"][name]
+    model.load_state_dict(st_dict, strict=False)   
+
+
 def save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler):
     utils.save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
     

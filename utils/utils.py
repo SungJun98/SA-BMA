@@ -49,13 +49,19 @@ def set_save_path(args):
     else:
         method = args.method
 
-    ### scheduler part   
+    ### pre-trained / linear_probe / scratch
+    if args.pre_trained:
+        am = "pretrained"
+    else:
+        am = "scratch"        
+
+    ### scheduler part  
     if args.scheduler == "swag_lr":
-        save_path_ = f"{save_path_}/{args.model}/{method}-{args.optim}/{args.scheduler}_{args.swa_lr}"
+        save_path_ = f"{save_path_}/{am}_{args.model}/{method}-{args.optim}/{args.scheduler}_{args.swa_lr}"
     elif args.scheduler == "cos_decay":
-        save_path_ = f"{save_path_}/{args.model}/{method}-{args.optim}/{args.scheduler}_{args.lr_min}/{args.warmup_t}_{args.warmup_lr_init}"
+        save_path_ = f"{save_path_}/{am}_{args.model}/{method}-{args.optim}/{args.scheduler}_{args.lr_min}/{args.warmup_t}_{args.warmup_lr_init}"
     else:    
-        save_path_ = f"{save_path_}/{args.model}/{method}-{args.optim}/{args.scheduler}"
+        save_path_ = f"{save_path_}/{am}_{args.model}/{method}-{args.optim}/{args.scheduler}"
     
     ## learning hyperparameter part
     if args.method in ["swag", "last_swag"]:
@@ -86,11 +92,17 @@ def set_wandb_runname(args):
     else:
         method = args.method
 
+    ### pre-trained / linear_probe / scratch
+    if args.pre_trained:
+        am = "pretrained"
+    else:
+        am = "scratch" 
+    
     ### Few-shot part
     if args.dat_per_cls >= 0:
-        run_name_ = f"seed{args.seed}_{method}-{args.optim}_{args.model}_{args.dataset}_{args.dat_per_cls}shot"
+        run_name_ = f"seed{args.seed}_{method}-{args.optim}_{am}-{args.model}_{args.dataset}_{args.dat_per_cls}shot"
     else:
-        run_name_ = f"seed{args.seed}_{method}-{args.optim}_{args.model}_{args.dataset}"
+        run_name_ = f"seed{args.seed}_{method}-{args.optim}_{am}-{args.model}_{args.dataset}"
 
     ### scheduler part
     if args.scheduler == "swag_lr":
