@@ -7,7 +7,7 @@ import tqdm
 import torch.nn.functional as F
 
 import utils.utils as utils
-
+from utils import temperature_scaling as ts
 
 def flatten(lst):
     '''
@@ -79,6 +79,7 @@ def save_best_swag_model(args, best_epoch, model, swag_model, optimizer, scaler,
                                 optimizer = optimizer.state_dict(),
                                 # scheduler = scheduler.state_dict(),
                                 )
+            
     torch.save(model.state_dict(),f'{args.save_path}/{args.method}-{args.optim}_best_val_model.pt')
     
     # Save Mean, variance, Covariance matrix
@@ -93,15 +94,13 @@ def save_best_swag_model(args, best_epoch, model, swag_model, optimizer, scaler,
 
 
 
-def predict(loader, model, verbose=False):
+def predict(loader, model, temperature=None):
+    outputs = list()
     preds = list()
     targets = list()
 
     model.eval()
-
-    if verbose:
-        loader = tqdm.tqdm(loader)
-
+    
     offset = 0
     with torch.no_grad():
         for input, target in loader:
@@ -109,11 +108,15 @@ def predict(loader, model, verbose=False):
             output = model(input)
 
             batch_size = input.size(0)
+            if temperature is not None:
+                temperature.unsqueeze(1).expand(output.size(0), output.size(1))
+                output = output / temperature           
+            outputs.append(output.cpu().numpy())
             preds.append(F.softmax(output, dim=1).cpu().numpy())
             targets.append(target.cpu().numpy())
             offset += batch_size
 
-    return {"predictions": np.vstack(preds), "targets": np.concatenate(targets)}
+    return {"outputs" : np.vstack(outputs), "predictions": np.vstack(preds), "targets": np.concatenate(targets)}
 
 
 def moving_average(net1, net2, alpha=1):
@@ -171,7 +174,6 @@ def bn_update(loader, model, verbose=False, subset=None, **kwargs):
             num_batches = int(num_batches * subset)
             loader = itertools.islice(loader, num_batches)
         if verbose:
-
             loader = tqdm.tqdm(loader, total=num_batches)
         for input, _ in loader:
             input = input.cuda(non_blocking=True)
@@ -229,37 +231,43 @@ def schedule(epoch, lr_init, epochs, swa, swa_start=None, swa_lr=None):
 
 
 
-def bma_swag(tr_loader, te_loader, model, bma_num_models, num_classes, bma_save_path=None, eps=1e-8, batch_norm=True):
+def bma_swag(tr_loader, val_loader, te_loader, model, num_classes, temperature=None, bma_num_models=30, bma_save_path=None, eps=1e-8, batch_norm=True, seed=None):
     '''
     run bayesian model averaging in test step
     '''
-    
+    if seed is not None:
+        utils.set_seed(seed)
+    bma_logits = np.zeros((len(te_loader.dataset), num_classes))
     bma_predictions = np.zeros((len(te_loader.dataset), num_classes))
     with torch.no_grad():
         for i in range(bma_num_models):
             
-            if i == 0:
-                sample = model.sample(0)
-            else:
-                sample = model.sample(1.0, cov=True)                
-        
+            model.sample(1.0, cov=True, seed=seed)
             if batch_norm:
                 bn_update(tr_loader, model, verbose=False, subset=1.0)
-                
+
+            if temperature == 'local':
+                scaled_model = ts.ModelWithTemperature(model)
+                scaled_model.set_temperature(val_loader)
+                temperature_ = scaled_model.temperature
+            else:
+                temperature_ = temperature
+                            
             # save sampled weight for bma
             if bma_save_path is not None:
-                torch.save(sample, f'{bma_save_path}/bma_model-{i}.pt')
- 
-            res = predict(te_loader, model, verbose=False)
-            predictions = res["predictions"];targets = res["targets"]
+                if temperature == 'local':
+                    torch.save(scaled_model, f'{bma_save_path}/bma_model-{i}.pt')
+                else:
+                    torch.save(model, f'{bma_save_path}/bma_model-{i}.pt')
 
+            res = predict(te_loader, model, temperature_)
+            logits = res["outputs"];predictions = res["predictions"];targets = res["targets"]
+            
             accuracy = np.mean(np.argmax(predictions, axis=1) == targets)
             nll = -np.mean(np.log(predictions[np.arange(predictions.shape[0]), targets] + eps))
-            print(
-                "Sample %d/%d. Accuracy: %.2f%% NLL: %.4f"
-                % (i + 1, bma_num_models, accuracy * 100, nll)
-            )
-
+            print(f"Sample {i+1}/{bma_num_models}. Accuracy: {accuracy*100:.2f}% NLL: {nll:.4f}")
+            
+            bma_logits += logits
             bma_predictions += predictions
 
             ens_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
@@ -269,11 +277,9 @@ def bma_swag(tr_loader, te_loader, model, bma_num_models, num_classes, bma_save_
                     + eps
                 )
             )
-            print(
-                "Ensemble %d/%d. Accuracy: %.2f%% NLL: %.4f"
-                % (i + 1, bma_num_models, ens_accuracy * 100, ens_nll)
-            )
+            print(f"Ensemble {i+1}/{bma_num_models}. Accuracy: {ens_accuracy*100:.2f}% NLL: {ens_nll:.4f}")
 
+        bma_logits += logits
         bma_predictions /= bma_num_models
 
         bma_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
@@ -282,7 +288,8 @@ def bma_swag(tr_loader, te_loader, model, bma_num_models, num_classes, bma_save_
         )
     
     print(f"bma Accuracy using {bma_num_models} model : {bma_accuracy * 100:.2f}% / NLL : {bma_nll:.4f}")
-    return {"predictions" : bma_predictions,
+    return {"logits" : bma_logits, 
+            "predictions" : bma_predictions,
             "targets" : targets,
             "bma_accuracy" : bma_accuracy,
             "nll" : bma_nll

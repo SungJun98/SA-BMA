@@ -56,14 +56,20 @@ class SABTL(torch.nn.Module):
         self.bnn_param = nn.ParameterDict()
 
         ## Mean
-        self.register_buffer('fe_mean', w_mean[:-self.ll_num_params])
-        self.bnn_param.update({"mean" : nn.Parameter(w_mean[-self.ll_num_params:])})
+        if self.last_layer:
+            self.register_buffer('fe_mean', w_mean[:-self.ll_num_params])
+            self.bnn_param.update({"mean" : nn.Parameter(w_mean[-self.ll_num_params:])})
+        else:
+            self.bnn_param.update({"mean" : nn.Parameter(w_mean)})
 
         ## Variance
         w_var = torch.clamp(w_var, self.var_clamp)
         w_log_std = 0.5 * torch.log(w_var)              # log_std
-        self.register_buffer('fe_log_std', w_log_std[:-self.ll_num_params])
-        self.bnn_param.update({"log_std" : nn.Parameter(w_log_std[-self.ll_num_params:] * var_scale)})
+        if self.last_layer:
+            self.register_buffer('fe_log_std', w_log_std[:-self.ll_num_params])
+            self.bnn_param.update({"log_std" : nn.Parameter(w_log_std[-self.ll_num_params:] * var_scale)})
+        else:
+            self.bnn_param.update({"log_std" : nn.Parameter(w_log_std * var_scale)})
         
         ## Covariance           
         if src_bnn == 'swag':
@@ -72,20 +78,23 @@ class SABTL(torch.nn.Module):
                     if type(w_cov_sqrt) == list:
                         # cat covmat list as matrix
                         w_cov_sqrt = torch.cat(w_cov_sqrt, dim=1) 
-                    self.register_buffer('fe_cov_sqrt', w_cov_sqrt[:, :-self.ll_num_params])
-                    self.bnn_param.update({"cov_sqrt" : nn.Parameter(w_cov_sqrt[:,-self.ll_num_params:] * cov_scale)})
+                    if self.last_layer:
+                        self.register_buffer('fe_cov_sqrt', w_cov_sqrt[:, :-self.ll_num_params])
+                        self.bnn_param.update({"cov_sqrt" : nn.Parameter(w_cov_sqrt[:,-self.ll_num_params:] * cov_scale)})
+                    else:
+                        self.bnn_param.update({"cov_sqrt" : nn.Parameter(w_cov_sqrt * cov_scale)})
                     self.low_rank = w_cov_sqrt.size(0)
                 else:
                     self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((self.low_rank, self.ll_num_params))*cov_scale)})
 
-        elif src_bnn == 'la':
-            raise RuntimeError("Add Load for Laplace Approximation")
+        # elif src_bnn == 'la':
+        #     raise RuntimeError("Add Load for Laplace Approximation")
         
-        elif src_bnn == 'vi':
-            if not self.diag_only:
-                self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((self.low_rank, self.ll_num_params))*cov_scale)})
+        # elif src_bnn == 'vi':
+        #     if not self.diag_only:
+        #         self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((self.low_rank, self.ll_num_params))*cov_scale)})
         
-        print(f"Load covariance of weight from pre-trained {src_bnn} model")
+        # print(f"Load covariance of weight from pre-trained {src_bnn} model")
         # -----------------------------------------------------------------------------------------------------    
 
 
@@ -99,63 +108,66 @@ class SABTL(torch.nn.Module):
         '''
         if not last_only:
             # feature extractor -------------------------------
-            z_1_fe = torch.randn_like(self.fe_mean, requires_grad=False)
-            rand_sample_fe = torch.exp(self.fe_log_std) * z_1_fe
+            if self.last_layer:
+                z_1_fe = torch.randn_like(self.fe_mean, requires_grad=False)
+                rand_sample_fe = torch.exp(self.fe_log_std) * z_1_fe
+            else:
+                z_1_fe = torch.randn_like(self.bnn_param.log_std[:-self.ll_num_params], requires_grad=False)
+                rand_sample_fe = torch.exp(self.bnn_param.log_std[:-self.ll_num_params]) * z_1_fe
+                
             if not self.diag_only:
                 z_2 = self.bnn_param.cov_sqrt.new_empty((self.bnn_param.cov_sqrt.size(0), ), requires_grad=False).normal_(z_scale)
                 if hasattr(self, "fe_cov_sqrt"):
-                    cov_sample_fe = self.fe_cov_sqrt.t().matmul(z_2)
-                    cov_sample_fe /= (self.fe_cov_sqrt.size(0) - 1) ** 0.5
-                    rand_sample_fe = 0.5**0.5 * (rand_sample_fe + cov_sample_fe)
-                            
-            sample_fe = self.fe_mean + rand_sample_fe
+                    cov_sample_fe = self.fe_cov_sqrt.t().matmul(z_2)    
+                elif self.bnn_param.cov_sqrt.size(1) == self.total_num_params:
+                    cov_sample_fe = self.bnn_param.cov_sqrt[:,:-self.ll_num_params].t().matmul(z_2)
+                cov_sample_fe /= (self.bnn_param.cov_sqrt.size(0) - 1) ** 0.5
+                rand_sample_fe = 0.5**0.5 * (rand_sample_fe + cov_sample_fe)
+            
+            if self.last_layer:                
+                sample_fe = self.fe_mean + rand_sample_fe
+            else:
+                sample_fe = self.bnn_param.mean[:-self.ll_num_params] + rand_sample_fe
             # -------------------------------------------------
+            
         ## last layer --------------------------------------
-        z_1_ll = torch.randn_like(self.bnn_param.mean, requires_grad=False)
-        rand_sample_ll = torch.exp(self.bnn_param['log_std']) * z_1_ll
+        if self.last_layer:
+            z_1_ll = torch.randn_like(self.bnn_param.mean, requires_grad=False)
+            rand_sample_ll = torch.exp(self.bnn_param.log_std) * z_1_ll
+        else:
+            z_1_ll = torch.randn_like(self.bnn_param.log_std[-self.ll_num_params:], requires_grad=False)
+            rand_sample_ll = torch.exp(self.bnn_param.log_std[-self.ll_num_params:] * z_1_ll)
+            
         if not self.diag_only:            
-            z_2 = self.bnn_param.cov_sqrt.new_empty((self.bnn_param.cov_sqrt.size(0), ), requires_grad=False).normal_(z_scale)
-            cov_sample_ll = self.bnn_param['cov_sqrt'].t().matmul(z_2)
+            # z_2 = self.bnn_param.cov_sqrt.new_empty((self.bnn_param.cov_sqrt.size(0), ), requires_grad=False).normal_(z_scale)
+            if self.last_layer:
+                cov_sample_ll = self.bnn_param.cov_sqrt.t().matmul(z_2)
+            else:
+                cov_sample_ll = self.bnn_param.cov_sqrt[:,-self.ll_num_params:].t().matmul(z_2)
             cov_sample_ll /= (self.low_rank - 1)**0.5
             rand_sample_ll = 0.5**0.5 * (rand_sample_ll + cov_sample_ll)
         else:
             z_2 = None
-        sample_ll = self.bnn_param['mean'] + rand_sample_ll
+        
+        if self.last_layer:
+            sample_ll = self.bnn_param.mean + rand_sample_ll
+        else:
+            sample_ll = self.bnn_param.mean[-self.ll_num_params:] + rand_sample_ll
         ## -------------------------------------------------
+        
         ## concatenate -------------------------------------
         if not last_only:
-            sample = torch.cat((sample_fe.detach(), sample_ll))
+            if self.last_layer:
+                sample = torch.cat((sample_fe.detach(), sample_ll))
+            else:
+                sample = torch.cat((sample_fe, sample_ll))
             z_1 = torch.cat((z_1_fe, z_1_ll))
         else:
             sample = sample_ll
             z_1 = z_1_ll
         ## -------------------------------------------------
         return sample, z_1, z_2
-    
-        """
-        if not last_only:
-            sample = torch.cat((self.fe_mean, self.bnn_param.mean))
-            var_sqrt = torch.exp(torch.cat((self.fe_log_std, self.bnn_param.log_std)))
-            z_1 = torch.randn_like(sample, requires_grad=False)
-            if not self.diag_only:
-                cov_sqrt = torch.cat((self.fe_cov_sqrt, self.bnn_param.cov_sqrt))
-                z_2 = self.bnn_param.cov_sqrt.new_empty((cov_sqrt.size(0), ), requires_grad=False).normal_(z_scale)
-            else:
-                z_2 = None
-            sample += 0.5**0.5 * (var_sqrt * z_1 + cov_sqrt.t().matmul(z_2))
-        
-        else:
-            z_1 = torch.randn_like(self.bnn_param.mean, requires_grad=False)
-            if not self.diag_only:
-                z_2 = self.bnn_param.cov_sqrt.new_empty((self.bnn_param.cov_sqrt.size(0), ), requires_grad=False).normal_(z_scale)
-            else:
-                z_2 = None
-            sample = self.bnn_param.mean + 0.5**0.5 * (torch.exp(self.bnn_param.log_std)*z_1 + self.bnn_param.cov_sqrt.t().matmul(z_2))            
-            
-        return sample, z_1, z_2
-        """
 
-        
     
     def fish_inv(self, params, eta=1.0):
         '''
@@ -164,28 +176,26 @@ class SABTL(torch.nn.Module):
         if self.last_layer:
             params = params[-self.ll_num_params:]
 
-        soft_std = torch.exp(self.bnn_param['log_std']) # + self.var_clamp**0.5
+        soft_std = torch.exp(self.bnn_param['log_std'])
         if not self.diag_only:
             cov_mat_lt = RootLazyTensor(self.bnn_param['cov_sqrt'].t())
             var_lt = DiagLazyTensor(soft_std**2)
             covar = AddedDiagLazyTensor(var_lt, cov_mat_lt).add_jitter(1e-6)
         else:
-            covar = torch.diag(soft_std**2)
+            covar = DiagLazyTensor(soft_std**2)
 
         qdist = MultivariateNormal(self.bnn_param['mean'], covar)
         with gpytorch.settings.num_trace_samples(1) and gpytorch.settings.max_cg_iterations(25):
             log_prob =  qdist.log_prob(params)
         
         ## Fisher Inverse w.r.t. mean
-        # \nabla_\mean p(w | \theta)
-        # mean_fi = torch.autograd.grad(log_prob, self.bnn_param['mean'], retain_graph=True)
-        # mean_fi = mean_fi[0]**2
-        # mean_fi = 1 / (1 + eta * mean_fi)    
+        # \nabla_\mean p(w | \theta)  
         mean_fi = covar.inv_matmul((params - self.bnn_param['mean']))   ## calculate derivative manually (gpytorch version)
         mean_fi = mean_fi**2
         mean_fi = 1 / (1 + eta * mean_fi)
 
         ## Fisher Inverse w.r.t. variance
+        # \nabla_\var p(w | \theta)
         std_fi = torch.autograd.grad(log_prob, self.bnn_param['log_std'], retain_graph=True)
         std_fi = std_fi[0]**2
         std_fi = 1 / (1 + eta * std_fi)
@@ -205,7 +215,11 @@ class SABTL(torch.nn.Module):
         '''
         Load mean vector
         '''
-        mean_param = torch.cat((self.fe_mean, self.bnn_param['mean']))
+        if self.last_layer:
+            mean_param = torch.cat((self.fe_mean, self.bnn_param.mean))
+        else:
+            mean_param = self.bnn_param.mean
+            
         if unflatten:
             return utils.unflatten_like_size(mean_param, self.backbone_shape)
         else:
@@ -216,8 +230,12 @@ class SABTL(torch.nn.Module):
         '''
         Load variance vector (Not std)
         '''
-        var_param = torch.cat((self.fe_log_std, self.bnn_param['log_std']))
+        if self.last_layer:
+            var_param = torch.cat((self.fe_log_std, self.bnn_param['log_std']))
+        else:
+            var_param = self.bnn_param.log_std
         var_param = torch.exp(2*var_param)
+        
         if unflatten:
             return utils.unflatten_like_size(var_param, self.backbone_shape)
         else:

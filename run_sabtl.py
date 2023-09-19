@@ -70,7 +70,7 @@ parser.add_argument("--dat_per_cls", type=int, default=-1,
 parser.add_argument(
     "--model",
     type=str, default='resnet18', required=True,
-    choices=['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
+    choices=['resnet14', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
             'resnet18-noBN',
             "vitb16-i21k"],
     help="model name (default : resnet18)")
@@ -81,7 +81,7 @@ parser.add_argument(
     )
 
 parser.add_argument("--model_path",
-            type=str, required=True,
+            type=str,
             help="Path to load state dict of backbone (to get bn statistics)")
 
 parser.add_argument("--save_path",
@@ -131,6 +131,7 @@ parser.add_argument("--diag_only", action="store_true", default=False, help="Con
 parser.add_argument("--low_rank", type=int, default=3, help="Low-rank component")
 
 parser.add_argument("--var_scale", type=float, default=1, help="Scaling prior variance")
+
 parser.add_argument("--cov_scale", type=float, default=1, help="Scaling prior covariance")
 
 parser.add_argument("--mean_path", type=str, required=True, default=None,
@@ -142,10 +143,10 @@ parser.add_argument("--covmat_path", type=str, default=None,
 #----------------------------------------------------------------
 
 ## bma or metrics -----------------------------------------------
-parser.add_argument("--val_mc_num", type=int, default=5, help="Number of models for Mc integration in validation phase")
+parser.add_argument("--val_mc_num", type=int, default=1, help="Number of models for Mc integration in validation phase")
 parser.add_argument("--eps", type=float, default=1e-8, help="small float to calculate nll")
 parser.add_argument("--bma_num_models", type=int, default=30, help="Number of models for bma in test phase")
-parser.add_argument("--num_bins", type=int, default=50, help="bin number for ece")
+parser.add_argument("--num_bins", type=int, default=15, help="bin number for ece")
 #----------------------------------------------------------------
 
 args = parser.parse_args()
@@ -200,15 +201,16 @@ print("-"*30)
 
 # Define Model------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
+checkpoint = torch.load(args.model_path)
+import pdb;pdb.set_trace()
 if args.src_bnn == 'swag':
-    model.load_state_dict(torch.load(args.model_path))
+    model.load_state_dict(checkpoint)
 elif args.src_bnn == "vi":
-    checkpoint = torch.load(args.model_path)
     bn_state_dict = {key: value for key, value in checkpoint["state_dict"].items() if 'bn' in key}
     model.load_state_dict(bn_state_dict, strict=False)
     
-# if args.linear_probe:
-utils.freeze_fe(model)
+if args.last_layer:
+    utils.freeze_fe(model)
 
 w_mean = torch.load(args.mean_path)
 w_var = torch.load(args.var_path)
@@ -227,11 +229,17 @@ sabtl_model = sabtl.SABTL(copy.deepcopy(model),
                         cov_scale=args.cov_scale,
                         last_layer=args.last_layer,
                         ).to(args.device)
-print(f"Load SABTL Model with prior made of {args.src_bnn}")
-print(f"# of trainable mean parameters : {sabtl_model.bnn_param.mean.numel()}")
-print(f"# of trainable variance parameters : {sabtl_model.bnn_param.log_std.numel()}")
+wandb.config.update({"low_rank" : sabtl_model.low_rank})
+
+# print(f"Load SABTL Model with prior made of {args.src_bnn}")
 if not args.diag_only:
-    print(f"# of trainable covariance parameters : {sabtl_model.bnn_param.cov_sqrt.numel()}")
+    tab_name = ["# of Mean Trainable Params", "# of Var Trainable Params", "# of Cov Trainable Params"]
+    tab_contents= [sabtl_model.bnn_param.mean.numel(), sabtl_model.bnn_param.log_std.numel(), sabtl_model.bnn_param.cov_sqrt.numel()]
+else:
+    tab_name = ["# of Mean Trainable Params", "# of Var Trainable Params"]
+    tab_contents= [sabtl_model.bnn_param.mean.numel(), sabtl_model.bnn_param.log_std.numel()]
+table = [tab_name, tab_contents]
+print(tabulate.tabulate(table, tablefmt="simple"))
 print("-"*30)
 #----------------------------------------------------------------
 
@@ -241,6 +249,15 @@ print("Set Criterion as Cross Entropy")
 print("-"*30)
 #-------------------------------------------------------------------
 
+
+
+params, _, _ = sabtl_model.sample(0.0)
+params = utils.format_weights(params, sabtl_model)
+
+te_res = sabtl_utils.eval_sabtl(te_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
+print(f"Accuracy : {te_res['accuracy']} / NLL : {te_res['nll']} / ECE : {te_res['ece']}")
+
+"""
 # Set Optimizer--------------------------------------
 ## Optimizer
 optimizer = sabtl_utils.get_optimizer(args, sabtl_model)
@@ -274,7 +291,7 @@ columns = ["epoch", "method", "lr",
         f"val_loss(MC{args.val_mc_num})", f"val_acc(MC{args.val_mc_num})", f"val_nll(MC{args.val_mc_num})", f"val_ece(MC{args.val_mc_num})",
         "time"]
 
-best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; duration=0
+best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; duration=0; cnt=0
 print("Start Training!!")
 for epoch in range(start_epoch, int(args.epochs)+1):
     time_ep = time.time()
@@ -285,7 +302,7 @@ for epoch in range(start_epoch, int(args.epochs)+1):
         swag_utils.adjust_learning_rate(optimizer, lr)
     else:
         lr = optimizer.param_groups[0]['lr']
-        
+
     ## train
     if args.optim == "sgd":
         tr_res = sabtl_utils.train_sabtl_sgd(tr_loader, sabtl_model, criterion, optimizer, args.device, scaler)
@@ -293,7 +310,7 @@ for epoch in range(start_epoch, int(args.epochs)+1):
         tr_res = sabtl_utils.train_sabtl_sam(tr_loader, sabtl_model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
     elif args.optim == "bsam":
         tr_res = sabtl_utils.train_sabtl_bsam(tr_loader, sabtl_model, criterion, optimizer, args.device, args.eta, first_step_scaler, second_step_scaler)
-    
+        
     # validation / test
     if args.val_mc_num ==1:
         params, _, _ = sabtl_model.sample(0.0)
@@ -307,11 +324,9 @@ for epoch in range(start_epoch, int(args.epochs)+1):
                             )
     
     time_ep = time.time() - time_ep
-
     values = [epoch, f"sabtl-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
         val_res["loss"], val_res["accuracy"], val_res["nll"], val_res["ece"],
         time_ep]
-
     table = tabulate.tabulate([values], columns, tablefmt="simple", floatfmt="8.4f")
     if epoch % args.print_epoch == 1:
         table = table.split("\n")
@@ -444,3 +459,4 @@ with open(f"{args.save_path}/unc_result/{args.method}-{args.optim}_uncertainty.p
 
 # Save Reliability Diagram 
 utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, False)
+"""

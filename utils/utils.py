@@ -13,6 +13,7 @@ from utils.sam import sam, sam_utils
 from utils.vi import vi_utils
 
 from utils.models import resnet_noBN
+from utils.temperature_scaling import _ECELoss
 import torchvision.models as torch_models
 import timm
 
@@ -44,10 +45,11 @@ def set_save_path(args):
         save_path_ = f"{args.save_path}/seed_{args.seed}/{args.dataset}/"
         
     ### method part    
-    if args.method == "sabtl":
-        method = f"{args.method}-{args.src_bnn}"
-    else:
-        method = args.method
+    # if args.method == "sabtl":
+    #     method = f"{args.method}-{args.src_bnn}"
+    # else:
+    #     method = args.method
+    method = args.method
 
     ### pre-trained / linear_probe / scratch
     if args.pre_trained:
@@ -87,10 +89,11 @@ def set_wandb_runname(args):
     '''
     Set wandb run name following the method / model / dataset / optimizer / hyperparameters
     '''
-    if args.method == "sabtl":
-        method = f"{args.method}-{args.src_bnn}"
-    else:
-        method = args.method
+    # if args.method == "sabtl":
+    #     method = f"{args.method}-{args.src_bnn}"
+    # else:
+    #     method = args.method
+    method = args.method
 
     ### pre-trained / linear_probe / scratch
     if args.pre_trained:
@@ -173,6 +176,10 @@ def get_backbone(model_name, num_classes, device, pre_trained=True):
         model_cfg = getattr(torch_models, model_name)
         model = model_cfg(pretrained=pre_trained)
         model.fc = nn.Linear(model.fc.in_features, num_classes)
+    
+    if model_name == 'resnet14':
+        from utils.models import resnet
+        model = resnet.resnet14(num_classes=num_classes)
     
     ## ResNet18-noBN
     elif model_name == "resnet18-noBN":
@@ -569,7 +576,7 @@ def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler
 
 
 # Test
-def eval(loader, model, criterion, device, num_bins=50, eps=1e-8):
+def eval(loader, model, criterion, device, num_bins=15, eps=1e-8):
     '''
     get loss, accuracy, nll and ece for every eval step
     '''

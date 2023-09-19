@@ -59,6 +59,7 @@ parser.add_argument("--load_path", type=str, default=None,
 parser.add_argument(
     "--last_swag",
     action='store_true',
+    default=False,
     help ="When model trained with last swag (Default : False)"
 )
 
@@ -71,12 +72,6 @@ parser.add_argument(
     "--last_layer",
     action='store_true',
     help ="Calculate the hessian of last layer only"
-)
-
-parser.add_argument(
-    "--full_swag",
-    action='store_true',
-    help="When model trained with fully stochastic swag (Default: False)"
 )
 #-------------------------------------------------------------------------
 
@@ -100,7 +95,7 @@ if args.model.split("-")[-1] == "noBN":
 else:
     args.batch_norm = True
     
-args.aug = False
+# args.aug = False
 
 utils.set_seed(args.seed)
 #---------------------------------------------------------------------------
@@ -114,9 +109,12 @@ if not args.last_layer:
                                                 batch_size=args.batch_size,
                                                 num_workers=args.num_workers,
                                                 seed=args.seed,
-                                                aug=args.aug,
+                                                aug=args.batch_norm,
                                                 )
-    print(f"Load Data : {args.dataset}")
+    if args.dat_per_cls >= 0:
+        print(f"Load Data : {args.dataset}-{args.dat_per_cls}shot")
+    else:
+        print(f"Load Data : {args.dataset}")
         
 else:
     raise ValueError("Add code that loads the Feature Extracted dataset")
@@ -125,6 +123,7 @@ else:
 
 ## Define Model--------------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
+last_layer_name = None
 if args.last_layer:
     # Get last layer name
     for name, mod in model.named_modules():
@@ -133,22 +132,28 @@ if args.last_layer:
 #----------------------------------------------------------------------------
 
 ## Load Model ---------------------------------------------------------------
-if args.last_swag or args.full_swag:
+if args.swag_load_path is not None:
+    """
     # Load SWAG weight 
     if args.load_path is not None:
         checkpoint = torch.load(args.load_path)
         model.load_state_dict(checkpoint)
+    """
     # Get bma weights list
     bma_load_paths = sorted(os.listdir(args.swag_load_path))
 else:
     checkpoint = torch.load(args.load_path)
-    model.load_state_dict(checkpoint["state_dict"], strict=False)
-
+    if hasattr(checkpoint, "temperature"):
+        # Load Temperature Scaled Model
+        model = checkpoint        
+    else:
+        model.load_state_dict(checkpoint["state_dict"], strict=args.batch_norm)
+        
 model.to(args.device)
 # ------------------------------------------------------------------------------
 
 ## Set save path ---------------------------------------------------------------
-if args.last_swag or args.full_swag:
+if args.swag_load_path is not None:
     save_path = f"{args.swag_load_path}/performance"
     os.makedirs(save_path, exist_ok=True)
 else:
@@ -165,7 +170,7 @@ model.eval()
 criterion = torch.nn.CrossEntropyLoss()
 
 ## Calculate Hessian ------------------------------------------------------------
-if args.last_swag or args.full_swag:
+if args.swag_load_path is not None:
     model_num_list = list(); acc_list = list(); ece_list = list(); nll_list = list()
     tr_cum_eigenval_list = list() ; tr_max_eigenval_list = list()
     for path in bma_load_paths:
@@ -174,14 +179,9 @@ if args.last_swag or args.full_swag:
         
         # get sampled model
         bma_sample = torch.load(f"{args.swag_load_path}/{path}")
-        bma_state_dict = utils.list_to_state_dict(model, bma_sample, last=args.last_swag, last_layer_name=last_layer_name)     ## If use full stochastic SWAG, you need to change argument last to False
-        model.load_state_dict(bma_state_dict, strict=False)
+        res = utils.eval(te_loader, bma_sample, criterion, args.device)
+        print(f"# {model_num} / Test Accuracy : {res['accuracy']:8.4f}% / ECE : {res['ece']} / NLL : {res['nll']}")
         
-        if args.batch_norm:
-          swag_utils.bn_update(tr_loader, model)
-        
-        res = utils.eval(te_loader, model, criterion, args.device)
-        print(f"Test Accuracy : {res['accuracy']:8.4f}% / ECE : {res['ece']} / NLL : {res['nll']}")
         model_num_list.append(model_num); acc_list.append(res['accuracy']); ece_list.append(res['ece']); nll_list.append(res['nll'])
         
         # get eigenvalue for train set

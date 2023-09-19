@@ -47,7 +47,6 @@ def train_sabtl_sgd(dataloader, sabtl_model, criterion, optimizer, device, scale
         
         # Change weight sample shape to input model
         params = utils.format_weights(params, sabtl_model)
-        # params = utils.list_to_state_dict(sabtl_model.backbone, params, last=(not sabtl_model.last_layer))
 
         if scaler is not None:
             with torch.cuda.amp.autocast():
@@ -172,8 +171,7 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
         params, z_1, z_2 = sabtl_model.sample(1.0)    # Sample weight
 
         fish_inv = sabtl_model.fish_inv(params, eta)             # compute Fisher inverse
-        # params = utils.format_weights(params, sabtl_model)       # Change weight sample shape to input model
-        params = utils.format_weights(params, sabtl_model)
+        params = utils.format_weights(params, sabtl_model)       # Change weight sample shape to input model
 
         if first_step_scaler is not None:
             ## first forward & backward
@@ -236,7 +234,7 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
     }
     
     
-def eval_sabtl(loader, sabtl_model, params, criterion, device, num_bins=50, eps=1e-8):
+def eval_sabtl(loader, sabtl_model, params, criterion, device, num_bins=15, eps=1e-8):
     '''
     get loss, accuracy, nll and ece for every eval step
     '''
@@ -279,7 +277,7 @@ def eval_sabtl(loader, sabtl_model, params, criterion, device, num_bins=50, eps=
     
 def bma_sabtl(te_loader, sabtl_model, bma_num_models,
             num_classes, criterion, device,
-            bma_save_path=None, eps=1e-8, num_bins=50,
+            bma_save_path=None, eps=1e-8, num_bins=15,
             validation=False,
             ):
     '''

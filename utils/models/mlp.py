@@ -1,7 +1,7 @@
 import torch.nn as nn
 
 class MLP(nn.Module):
-    def __init__(self, input_size=784, hidden_size=100, output_size=5):
+    def __init__(self, input_size=784, hidden_size=32, output_size=10):
         super(MLP, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size

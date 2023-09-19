@@ -184,7 +184,7 @@ def train_vi_sam(dataloader, model, criterion, optimizer, device, first_step_sca
 
 
 
-def eval_vi(val_loader, model, num_classes, criterion, val_mc_num, num_bins=50, eps=1e-8):
+def eval_vi(val_loader, model, num_classes, criterion, val_mc_num, num_bins=15, eps=1e-8):
     mc_predictions = np.zeros((len(val_loader.dataset), num_classes))
     model.eval()
     with torch.no_grad():
