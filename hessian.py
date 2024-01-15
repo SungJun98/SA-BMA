@@ -86,6 +86,31 @@ parser.add_argument("--max_possible_gpu_samples", type=int,
 args = parser.parse_args()
 #-------------------------------------------------------------------------
 
+
+def load_swag_model_to_base_model(model, bma_sample):
+    """
+    Load SWAG model in form of base model to calculate hessian
+    """
+    import collections
+    state_dict = collections.OrderedDict()        
+    for key in bma_sample.base.state_dict().keys():
+        if ("sq_mean" in key) or ("cov_mat_sqrt" in key):
+            pass
+        else:
+            if "-" in key:
+                key_ = key.split(".")[-1]
+            else:
+                key_ = key
+            new_key = key_.replace("-", ".")
+            
+            if (not "running" in new_key) and ("mean" in new_key):
+                new_key = new_key.split("_")[0]
+            
+            state_dict[new_key] = bma_sample.base.state_dict()[key]
+    model.load_state_dict(state_dict)      
+    return model
+
+
 # Set Device and Seed------------------------------------------------------
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device : {args.device}")
@@ -179,11 +204,12 @@ if args.swag_load_path is not None:
         
         # get sampled model
         bma_sample = torch.load(f"{args.swag_load_path}/{path}")
+        model = load_swag_model_to_base_model(model, bma_sample)
+
         res = utils.eval(te_loader, bma_sample, criterion, args.device)
         print(f"# {model_num} / Test Accuracy : {res['accuracy']:8.4f}% / ECE : {res['ece']} / NLL : {res['nll']}")
         
         model_num_list.append(model_num); acc_list.append(res['accuracy']); ece_list.append(res['ece']); nll_list.append(res['nll'])
-        
         # get eigenvalue for train set
         try:
             tr_eigenvals, _ = compute_hessian_eigenthings(

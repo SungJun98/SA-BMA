@@ -1,4 +1,5 @@
 import torch
+import utils.utils as utils
 
 class SAM(torch.optim.Optimizer):
     def __init__(self, params, base_optimizer, rho=0.05, adaptive=False, **kwargs):
@@ -87,23 +88,24 @@ class SAM(torch.optim.Optimizer):
         self.base_optimizer.param_groups = self.param_groups
 
 
-    def second_sample(self, z_1, z_2,  sabtl_model):
+    def second_sample(self, z_1, z_2, sabtl_model):
         '''
         Sample from perturbated bnn parameters with pre-selected z_1, z_2
         '''
-        if not sabtl_model.diag_only:
-            rand_sample = (torch.exp(self.param_groups[0]['params'][1]) + sabtl_model.var_clamp**0.5) * z_1
-            if sabtl_model.low_rank != 0:
-                rand_sample += (self.param_groups[0]['params'][2].t().matmul(z_2)) / (sabtl_model.low_rank - 1)**0.5
-                sample = self.param_groups[0]['params'][0] + 0.5**0.5 * rand_sample
-            else:
-                rand_sample += self.param_groups[0]['params'][2].matmul(z_1)
-                sample = self.param_groups[0]['params'][0] + rand_sample
-            
-        else:
-            rand_sample = torch.exp(self.param_groups[0]['params'][1]) * z_1
-            sample = self.param_groups[0]['params'][0] + rand_sample    
+        if sabtl_model.last_layer:
+            z_1 = z_1[-sabtl_model.ll_num_params:]
+
+        # diagonal variance
+        rand_sample = (torch.exp(self.param_groups[0]['params'][1])) * z_1
         
+        # covariance
+        if not sabtl_model.diag_only:
+            cov_sample = (self.param_groups[0]['params'][2].t().matmul(z_2)) / (sabtl_model.low_rank - 1)**0.5
+            rand_sample = 0.5**0.5 * (rand_sample + cov_sample)
+        sample = self.param_groups[0]['params'][0] + rand_sample
+        
+        # change sampled weight type list to dict 
+        sample = utils.format_weights(sample, sabtl_model, sabtl_model.last_layer)
         return sample
 
 

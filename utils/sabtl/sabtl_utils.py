@@ -117,8 +117,6 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
 
             ## second forward-backward pass
             params = optimizer.second_sample(z_1, z_2, sabtl_model)
-            params = utils.format_weights(params, sabtl_model)
-            
             with torch.cuda.amp.autocast():
                 pred = sabtl_model(params, X)
                 loss = criterion(pred, y)
@@ -170,7 +168,7 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
         X, y = X.to(device), y.to(device)
         params, z_1, z_2 = sabtl_model.sample(1.0)    # Sample weight
 
-        fish_inv = sabtl_model.fish_inv(params, eta)             # compute Fisher inverse
+        fish_inv = sabtl_model.fish_inv(params, approx='full', eta=eta)             # compute Fisher inverse
         params = utils.format_weights(params, sabtl_model)       # Change weight sample shape to input model
 
         if first_step_scaler is not None:
@@ -211,6 +209,7 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
             loss_sum += loss.data.item() * X.size(0)
             num_objects_current += X.size(0)
             
+            print(f"Batch : {batch} / Tr loss : {loss} / Pred NaN : {torch.sum(torch.isnan(pred))} ")
         else:
             ## first forward & backward
             pred = sabtl_model(params, X)

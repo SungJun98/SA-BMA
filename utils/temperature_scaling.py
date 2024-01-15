@@ -23,7 +23,7 @@ class ModelWithTemperature(nn.Module):
     def forward(self, input):
         if not self.ens:
             logits = self.model(input)
-        if self.ens:
+        else:
             logits = input
         return self.temperature_scale(logits)
 

@@ -6,6 +6,9 @@ import gpytorch
 from gpytorch.lazy import RootLazyTensor, DiagLazyTensor, AddedDiagLazyTensor
 from gpytorch.distributions import MultivariateNormal
 
+from backpack import backpack, extend
+from backpack.extensions import KFAC
+
 class SABTL(torch.nn.Module):
     def __init__(
         self,
@@ -78,15 +81,24 @@ class SABTL(torch.nn.Module):
                     if type(w_cov_sqrt) == list:
                         # cat covmat list as matrix
                         w_cov_sqrt = torch.cat(w_cov_sqrt, dim=1) 
+                    
+                    self.fe_low_rank = w_cov_sqrt.size(0)
                     if self.last_layer:
                         self.register_buffer('fe_cov_sqrt', w_cov_sqrt[:, :-self.ll_num_params])
-                        self.bnn_param.update({"cov_sqrt" : nn.Parameter(w_cov_sqrt[:,-self.ll_num_params:] * cov_scale)})
+                        if self.low_rank <= w_cov_sqrt.size(0):
+                            w_cov_sqrt =w_cov_sqrt[:self.low_rank,-self.ll_num_params:]
+                        else:
+                            raise NotImplementedError("SABTL set lower low-rank than Pre-trained BNNs")
+                        self.bnn_param.update({"cov_sqrt" : nn.Parameter(w_cov_sqrt * cov_scale)})                        
                     else:
+                        if self.low_rank <= w_cov_sqrt.size(0):
+                            w_cov_sqrt =w_cov_sqrt[:self.low_rank,:]
+                        else:
+                            raise NotImplementedError("SABTL set lower low-rank than Pre-trained BNNs")
                         self.bnn_param.update({"cov_sqrt" : nn.Parameter(w_cov_sqrt * cov_scale)})
-                    self.low_rank = w_cov_sqrt.size(0)
                 else:
+                    self.fe_low_rank = self.low_rank
                     self.bnn_param.update({"cov_sqrt" : nn.Parameter(torch.randn((self.low_rank, self.ll_num_params))*cov_scale)})
-
         # elif src_bnn == 'la':
         #     raise RuntimeError("Add Load for Laplace Approximation")
         
@@ -116,12 +128,12 @@ class SABTL(torch.nn.Module):
                 rand_sample_fe = torch.exp(self.bnn_param.log_std[:-self.ll_num_params]) * z_1_fe
                 
             if not self.diag_only:
-                z_2 = self.bnn_param.cov_sqrt.new_empty((self.bnn_param.cov_sqrt.size(0), ), requires_grad=False).normal_(z_scale)
+                z_2_fe = self.bnn_param.cov_sqrt.new_empty((self.fe_low_rank, ), requires_grad=False).normal_(z_scale)
                 if hasattr(self, "fe_cov_sqrt"):
-                    cov_sample_fe = self.fe_cov_sqrt.t().matmul(z_2)    
+                    cov_sample_fe = self.fe_cov_sqrt.t().matmul(z_2_fe)    
                 elif self.bnn_param.cov_sqrt.size(1) == self.total_num_params:
-                    cov_sample_fe = self.bnn_param.cov_sqrt[:,:-self.ll_num_params].t().matmul(z_2)
-                cov_sample_fe /= (self.bnn_param.cov_sqrt.size(0) - 1) ** 0.5
+                    cov_sample_fe = self.bnn_param.cov_sqrt[:,:-self.ll_num_params].t().matmul(z_2_fe)
+                cov_sample_fe /= (self.fe_low_rank - 1) ** 0.5
                 rand_sample_fe = 0.5**0.5 * (rand_sample_fe + cov_sample_fe)
             
             if self.last_layer:                
@@ -139,7 +151,7 @@ class SABTL(torch.nn.Module):
             rand_sample_ll = torch.exp(self.bnn_param.log_std[-self.ll_num_params:] * z_1_ll)
             
         if not self.diag_only:            
-            # z_2 = self.bnn_param.cov_sqrt.new_empty((self.bnn_param.cov_sqrt.size(0), ), requires_grad=False).normal_(z_scale)
+            z_2 = self.bnn_param.cov_sqrt.new_empty((self.bnn_param.cov_sqrt.size(0), ), requires_grad=False).normal_(z_scale)
             if self.last_layer:
                 cov_sample_ll = self.bnn_param.cov_sqrt.t().matmul(z_2)
             else:
@@ -169,7 +181,7 @@ class SABTL(torch.nn.Module):
         return sample, z_1, z_2
 
     
-    def fish_inv(self, params, eta=1.0):
+    def fish_inv(self, params, approx='full', eta=1.0):
         '''
         Compute gradient of log probability w.r.t bnn params
         '''
@@ -187,28 +199,69 @@ class SABTL(torch.nn.Module):
         qdist = MultivariateNormal(self.bnn_param['mean'], covar)
         with gpytorch.settings.num_trace_samples(1) and gpytorch.settings.max_cg_iterations(25):
             log_prob =  qdist.log_prob(params)
+            
+        log_prob.backward(retain_graph=True)
         
+        # mean
+        mean_fi = covar.inv_matmul((params - self.bnn_param['mean'])).to('cpu')   ## calculate derivative manually (gpytorch version)
+        mean_fi = mean_fi.unsqueeze(1).matmul(mean_fi.unsqueeze(1).T)
+        mean_fi = 1 / (1 + eta * mean_fi)
+        
+        # diagonal variance
+        std_fi = self.bnn_param['log_std'].grad.to('cpu')
+        std_fi = std_fi.unsqueeze(1).matmul(std_fi.unsqueeze(1).T)
+        std_fi = 1 / (1 + eta * std_fi)
+        
+        # off-diagonal covariance
+        cov_fi = self.bnn_param['cov_sqrt'].grad.to('cpu')
+        cov_fi = torch.flatten(cov_fi)
+        cov_fi = 1 / (1 + eta * cov_fi**2)
+        
+        return [mean_fi, std_fi, cov_fi]
+        """
         ## Fisher Inverse w.r.t. mean
         # \nabla_\mean p(w | \theta)  
         mean_fi = covar.inv_matmul((params - self.bnn_param['mean']))   ## calculate derivative manually (gpytorch version)
-        mean_fi = mean_fi**2
+        if approx == 'diag':
+            mean_fi = mean_fi**2
+        elif approx == 'full':
+            mean_fi = mean_fi.to('cpu')
+            mean_fi = mean_fi.unsqueeze(1).matmul(mean_fi.unsqueeze(1).T)
+        elif approx == 'kfac':
+            raise ValueError("Add code for kfac")
         mean_fi = 1 / (1 + eta * mean_fi)
+        # mean_fi = mean_fi.to('cuda')
 
         ## Fisher Inverse w.r.t. variance
         # \nabla_\var p(w | \theta)
         std_fi = torch.autograd.grad(log_prob, self.bnn_param['log_std'], retain_graph=True)
-        std_fi = std_fi[0]**2
+        if approx == 'diag':
+            std_fi = std_fi[0]**2
+        elif approx == 'full':
+            std_fi = std_fi[0].to('cpu')
+            std_fi = std_fi.unsqueeze(1).matmul(std_fi.unsqueeze(1).T)
+        elif approx == 'kfac':
+            raise ValueError("Add code for kfac")
         std_fi = 1 / (1 + eta * std_fi)
+        # std_fi = std_fi.to('cuda')
 
         ## Fisher Inverse w.r.t. covariance
         # \nabla_\cov p(w | \theta)
-        if not self.diag_only:
+        if not self.diag_only:            
             cov_fi = torch.autograd.grad(log_prob, self.bnn_param['cov_sqrt'], retain_graph=True)
-            cov_fi = cov_fi[0]**2
+            if approx == 'diag':
+                cov_fi = cov_fi[0]**2
+            elif approx in ['kfac', 'full']:
+                cov_fi = cov_fi[0].to('cpu')
+                # cov_fi = torch.flatten(cov_fi).outer(torch.flatten(cov_fi))
+            # elif approx == 'kfac':
+            #     raise ValueError("Add code for kfac")
             cov_fi = 1 / (1 + eta * cov_fi)
+            # cov_fi = cov_fi.to('cuda')
             return [mean_fi, std_fi, cov_fi]
         else:
             return [mean_fi, std_fi]
+        """
 
         
     def get_mean_vector(self, unflatten=False):
@@ -250,10 +303,13 @@ class SABTL(torch.nn.Module):
             return None
         else:
             if hasattr(self, "fe_cov_sqrt"):
-                cov_param = torch.cat((self.fe_cov_sqrt, self.bnn_param['cov_sqrt']), dim=1)
+                fe_cov_param = self.fe_cov_sqrt
+                cov_param = self.bnn_param['cov_sqrt']
+                return {"fe_cov_sqrt" : cov_param, "cov_sqrt" : cov_param}
             else:
                 cov_param = self.bnn_param['cov_sqrt']
-            return cov_param
+                return cov_param
+                   
     
     
     def load_state_dict(self, state_dict, strict=True):
@@ -291,11 +347,25 @@ class BSAM(torch.optim.Optimizer):
                         if p.grad is None: continue
                         self.state[p]["old_p"] = p.data.clone()
                         ## Calculate perturbation Delta_theta --------------------------------------
-                        Delta_p = group["rho"] * fish_inv[idx] * p.grad
-                        Delta_p = Delta_p / (torch.sqrt(p.grad * fish_inv[idx] * p.grad) + 1e-12) # add small value for numericaly stability
-                        # ---------------------------------------------------------------------------                        
+                        if idx == 2:
+                            # in case of low-rank Covariance
+                            nom = fish_inv[idx] * torch.flatten(p.grad.to('cpu'))
+                            denom = (torch.flatten(p.grad.to('cpu'))* fish_inv[idx]).matmul(torch.flatten(p.grad).to('cpu'))
+                        else:
+                            # in case of mean, diagonal variance
+                            nom = fish_inv[idx].matmul(p.grad.to('cpu'))
+                            denom = torch.matmul(p.grad.unsqueeze(0).to('cpu').matmul(fish_inv[idx]), p.grad.unsqueeze(1).to('cpu'))
+                        denom = torch.clamp(denom, 0.0)
+                        denom = (torch.sqrt(denom) + 1e-12).squeeze() # add small value for numericaly stability
+                        Delta_p = group["rho"] * nom / denom
+                        
+                        if idx == 2:
+                            Delta_p = Delta_p.reshape((-1, fish_inv[0].size(0)))
+                        # --------------------------------------------------------------------------- 
+                                               
                         ## theta + Delta_theta
-                        p.add_(Delta_p)  # climb to the local maximum "w + e(w)"
+                        import pdb;pdb.set_trace()
+                        p.add_(Delta_p.to('cuda'))  # climb to the local maximum "w + e(w)"
                         # ---------------------------------------------------------------------------
                 if zero_grad: self.zero_grad()
                 
@@ -305,8 +375,8 @@ class BSAM(torch.optim.Optimizer):
                     if p.grad is None: continue
                     self.state[p]["old_p"] = p.data.clone()
                     ## Calculate perturbation Delta_theta --------------------------------------
-                    Delta_p = group["rho"] * fish_inv[idx] * p.grad
-                    Delta_p = Delta_p / (torch.sqrt(p.grad * fish_inv[idx] * p.grad) + 1e-12) # add small value for numericaly stability
+                    # Delta_p = group["rho"] * fish_inv[idx].to('cuda') * p.grad
+                    # Delta_p = Delta_p / (torch.sqrt(p.grad * fish_inv[idx].to('cuda') * p.grad) + 1e-12) # add small value for numericaly stability
                     # ---------------------------------------------------------------------------                        
                     ## theta + Delta_theta
                     p.add_(Delta_p)  # climb to the local maximum "w + e(w)"
@@ -321,7 +391,10 @@ class BSAM(torch.optim.Optimizer):
         if sabtl_model.last_layer:
             z_1 = z_1[-sabtl_model.ll_num_params:]
 
+        # diagonal variance
         rand_sample = (torch.exp(self.param_groups[0]['params'][1])) * z_1
+        
+        # covariance
         if not sabtl_model.diag_only:
             cov_sample = (self.param_groups[0]['params'][2].t().matmul(z_2)) / (sabtl_model.low_rank - 1)**0.5
             rand_sample = 0.5**0.5 * (rand_sample + cov_sample)

@@ -163,7 +163,7 @@ parser.add_argument("--num_bins", type=int, default=15, help="bin number for ece
 ## calibration --------------------------------------------------
 parser.add_argument("--no_ts", action="store_true", default=False,
             help="Deactivate Temperature Scaling (Default: False)")
-parser.add_argument("--ts_opt", type=int, default=3,
+parser.add_argument("--ts_opt", type=int, default=1,
                 help="BNN calibration option 1) fit tau on MAP model, 2) fit tau on every sampled model, 3) fit tau on ensembled model (Default: 3)")
 #----------------------------------------------------------------
 
@@ -510,12 +510,12 @@ else:
     model.to(args.device)
 
 
-## MAP or DNN
-# 1) Unscaled Results
+#### MAP or DNN
+## Unscaled Results
 if args.method in ["swag", "last_swag"]:
     swag_model.sample(0)
-    if args.batch_norm:
-        swag_utils.bn_update(tr_loader, swag_model, verbose=False, subset=1.0)
+    # if args.batch_norm:
+    #     swag_utils.bn_update(tr_loader, swag_model, verbose=False, subset=1.0)
     res = utils.eval(te_loader, swag_model, criterion, args.device)
 else:
     res = utils.eval(te_loader, model, criterion, args.device)
@@ -524,9 +524,9 @@ table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece" ],
         [checkpoint['epoch'], format(res['accuracy'], '.2f'), format(res['nll'], '.4f'), format(res['ece'], '.4f')]]
 print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
 
-
-# 2) Scaled Results
+## Scaled Result
 if not args.no_ts:
+    # Temperature Scaled Results
     if args.method in ["swag", "last_swag"]:
         scaled_model = ts.ModelWithTemperature(swag_model)
     else:
@@ -535,51 +535,65 @@ if not args.no_ts:
     torch.save(scaled_model, f"{args.save_path}/{args.method}-{args.optim}_best_val_scaled_model.pt")
     res = utils.eval(te_loader, scaled_model, criterion, args.device)
 
-    print(f"2) Calibrated Results:")
+    print(f"2) Scaled Results:")
     table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
             [checkpoint['epoch'], format(res['accuracy'], '.2f'), format(res['nll'],'.4f'), format(res['ece'], '.4f'), format(scaled_model.temperature.item(), '.4f')]]
-    print(tabulate.tabulate(table, tablefmt="simple"))
+    print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
 
 wandb.run.summary['Best epoch'] = checkpoint["epoch"]
 wandb.run.summary['test accuracy'] = res['accuracy']
 wandb.run.summary['test nll'] = res['nll']
 wandb.run.summary["test ece"]  = res['ece']
-wandb.run.summary['temperature'] = scaled_model.temperature.item()
+if not args.no_ts:
+    wandb.run.summary['temperature'] = scaled_model.temperature.item()
 utils.save_reliability_diagram(args.method, args.optim, args.save_path, res['unc'], False)
 
 
-### BMA prediction
-if args.method in ["swag", "last_swag", "vi", "last_vi", "la", "last_la"]:
+
+
+#### BMA prediction
+if not args.no_ts:
+    if args.ts_opt == 3:
+        # get temperature tau in validation loader
+        utils.set_seed(args.seed)
+        if args.method in ["swag", "last_swag"]:
+            bma_res = swag_utils.bma_swag(tr_loader, val_loader, val_loader, swag_model, num_classes, None, args.bma_num_models, None, args.eps, batch_norm=True)
+        bma_targets = bma_res["targets"];bma_logits = bma_res["logits"]
+        scaled_model = ts.ModelWithTemperature(swag_model, ens=True)
+        scaled_model.set_temperature(val_loader, ens_logits=torch.tensor(bma_logits), ens_pred=torch.tensor(bma_targets))
+        bma_temperature = scaled_model.temperature.unsqueeze(1).expand(bma_logits.shape[0], bma_logits.shape[1])
+        bma_logits = torch.tensor(bma_logits) / bma_temperature.cpu()
+        bma_predictions = F.softmax(bma_logits, dim=1).detach().numpy()
+        bma_res["bma_accuracy"] = np.mean(np.argmax(bma_predictions, axis=1) == bma_targets)
+        bma_res["nll"] = -np.mean(np.log(bma_predictions[np.arange(bma_predictions.shape[0]), bma_targets] + args.eps))
+        
+        # load original model (to restore the batch norm statistics)
+        swag_model.load_state_dict(checkpoint["state_dict"])
+        swag_model.to(args.device)
+
+
+utils.set_seed(args.seed)
+if args.method in ["swag", "last_swag"]: # , "vi", "last_vi", "la", "last_la"]:
     bma_save_path = f"{args.save_path}/bma_models"
     os.makedirs(bma_save_path, exist_ok=True)
     
-    if args.ts_opt == 1:
-        bma_temperature = scaled_model.temperature
-    elif args.ts_opt == 2:
-        bma_temperature = 'local'
-    elif args.ts_opt == 3 or args.no_ts:
+    if not args.no_ts:
+        if args.ts_opt in [1, 3]:
+            bma_temperature = scaled_model.temperature
+        elif args.ts_opt == 2:
+            bma_temperature = 'local'
+    else:
         bma_temperature = None
-    
+
     if args.method in ["swag", "last_swag"]:
         bma_res = swag_utils.bma_swag(tr_loader, val_loader, te_loader, swag_model, num_classes, bma_temperature, args.bma_num_models, bma_save_path, args.eps, args.batch_norm)
     # elif args.method in ["vi", "last_vi"]:
     #     bma_res = vi_utils.bma_vi(te_loader, mean, variance, model, args.method, args.bma_num_models, num_classes, bma_save_path=bma_save_path, eps=args.eps)
     
-    bma_predictions = bma_res["predictions"]
-    bma_targets = bma_res["targets"]   
-    if args.ts_opt == 3:
-        bma_logits = torch.tensor(bma_res["logits"])
-        scaled_model = ts.ModelWithTemperature(swag_model, ens=True)
-        scaled_model.set_temperature(val_loader, ens_logits=bma_logits, ens_pred=torch.tensor(bma_targets))
-        bma_temperature = scaled_model.temperature.unsqueeze(1).expand(bma_logits.shape[0], bma_logits.shape[1])
-        bma_logits = bma_logits / bma_temperature.to('cpu')
-        bma_predictions = F.softmax(bma_logits, dim=1).detach().cpu().numpy()
-        bma_res["bma_accuracy"] = np.mean(np.argmax(bma_predictions, axis=1) == bma_targets)
-        bma_res["nll"] = -np.mean(np.log(bma_predictions[np.arange(bma_predictions.shape[0]), bma_targets] + args.eps))
-        bma_temperature = scaled_model.temperature
-    elif args.ts_opt == 2 or args.no_ts:
+    if args.no_ts or args.ts_opt==2:         
         bma_temperature = torch.tensor(-9999.)
         
+    bma_predictions = bma_res["predictions"];bma_targets = bma_res["targets"]
     bma_accuracy = bma_res["bma_accuracy"] * 100
     bma_nll = bma_res["nll"]
     unc = utils.calibration_curve(bma_predictions, bma_targets, args.num_bins)

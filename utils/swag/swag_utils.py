@@ -95,7 +95,7 @@ def save_best_swag_model(args, best_epoch, model, swag_model, optimizer, scaler,
 
 
 def predict(loader, model, temperature=None):
-    outputs = list()
+    logits = list()
     preds = list()
     targets = list()
 
@@ -111,12 +111,13 @@ def predict(loader, model, temperature=None):
             if temperature is not None:
                 temperature.unsqueeze(1).expand(output.size(0), output.size(1))
                 output = output / temperature           
-            outputs.append(output.cpu().numpy())
+            logits.append(output.cpu().numpy())
             preds.append(F.softmax(output, dim=1).cpu().numpy())
             targets.append(target.cpu().numpy())
             offset += batch_size
 
-    return {"outputs" : np.vstack(outputs), "predictions": np.vstack(preds), "targets": np.concatenate(targets)}
+    return {"logits" : np.vstack(logits), "predictions": np.vstack(preds), "targets": np.concatenate(targets)}
+    
 
 
 def moving_average(net1, net2, alpha=1):
@@ -240,8 +241,7 @@ def bma_swag(tr_loader, val_loader, te_loader, model, num_classes, temperature=N
     bma_logits = np.zeros((len(te_loader.dataset), num_classes))
     bma_predictions = np.zeros((len(te_loader.dataset), num_classes))
     with torch.no_grad():
-        for i in range(bma_num_models):
-            
+        for i in range(bma_num_models):          
             model.sample(1.0, cov=True, seed=seed)
             if batch_norm:
                 bn_update(tr_loader, model, verbose=False, subset=1.0)
@@ -261,7 +261,7 @@ def bma_swag(tr_loader, val_loader, te_loader, model, num_classes, temperature=N
                     torch.save(model, f'{bma_save_path}/bma_model-{i}.pt')
 
             res = predict(te_loader, model, temperature_)
-            logits = res["outputs"];predictions = res["predictions"];targets = res["targets"]
+            logits = res["logits"];predictions = res["predictions"];targets = res["targets"]
             
             accuracy = np.mean(np.argmax(predictions, axis=1) == targets)
             nll = -np.mean(np.log(predictions[np.arange(predictions.shape[0]), targets] + eps))
@@ -279,7 +279,7 @@ def bma_swag(tr_loader, val_loader, te_loader, model, num_classes, temperature=N
             )
             print(f"Ensemble {i+1}/{bma_num_models}. Accuracy: {ens_accuracy*100:.2f}% NLL: {ens_nll:.4f}")
 
-        bma_logits += logits
+        bma_logits /= bma_num_models
         bma_predictions /= bma_num_models
 
         bma_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
@@ -288,7 +288,7 @@ def bma_swag(tr_loader, val_loader, te_loader, model, num_classes, temperature=N
         )
     
     print(f"bma Accuracy using {bma_num_models} model : {bma_accuracy * 100:.2f}% / NLL : {bma_nll:.4f}")
-    return {"logits" : bma_logits, 
+    return {"logits" : bma_logits,
             "predictions" : bma_predictions,
             "targets" : targets,
             "bma_accuracy" : bma_accuracy,

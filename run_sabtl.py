@@ -1,15 +1,11 @@
-import argparse
-import os, sys
-import time, copy
-import tabulate
+import argparse, os, sys, time, copy, tabulate
 
 import torch
 import torch.nn.functional as F
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pickle
-import wandb
+import pickle, wandb
 
 import utils.utils as utils
 from utils.swag import swag, swag_utils
@@ -17,9 +13,6 @@ from utils.sabtl import sabtl, sabtl_utils
 
 import warnings
 warnings.filterwarnings('ignore')
-
-# wandb
-wandb.init(project="SA-BTL", entity='sungjun98')
 
 parser = argparse.ArgumentParser(description="Run SABTL")
 
@@ -36,11 +29,13 @@ parser.add_argument("--print_epoch", type=int, default=10, help="Printing epoch"
 parser.add_argument("--resume", type=str, default=None,
     help="path to load saved model to resume training (default: None)",)
 
-parser.add_argument("--last_layer", action="store_true", default=False,
-        help = "When we do Linear Probing (Default : False)")
+parser.add_argument("--last_layer", action="store_true", default=True,
+        help = "When we do Linear Probing (Default : True)")
 
 parser.add_argument("--tol", type=int, default=50,
         help="tolerance for early stopping (Default : 50)")
+
+parser.add_argument("--ignore_wandb", action="store_true", default=False, help="Deactivate wandb")
 
 ## Data ---------------------------------------------------------
 parser.add_argument(
@@ -176,8 +171,10 @@ print("-"*30)
 #------------------------------------------------------------------
 
 # wandb config---------------------------------------------------
-wandb.config.update(args)
-wandb.run.name = utils.set_wandb_runname(args)
+if not args.ignore_wandb:
+    wandb.init(project="SA-BTL", entity='sungjun98')
+    wandb.config.update(args)
+    wandb.run.name = utils.set_wandb_runname(args)
 #----------------------------------------------------------------
 
 # Load Data --------------------------------------------------------
@@ -202,7 +199,7 @@ print("-"*30)
 # Define Model------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
 checkpoint = torch.load(args.model_path)
-import pdb;pdb.set_trace()
+
 if args.src_bnn == 'swag':
     model.load_state_dict(checkpoint)
 elif args.src_bnn == "vi":
@@ -229,9 +226,10 @@ sabtl_model = sabtl.SABTL(copy.deepcopy(model),
                         cov_scale=args.cov_scale,
                         last_layer=args.last_layer,
                         ).to(args.device)
-wandb.config.update({"low_rank" : sabtl_model.low_rank})
+if not args.ignore_wandb:
+    wandb.config.update({"low_rank" : sabtl_model.low_rank})
 
-# print(f"Load SABTL Model with prior made of {args.src_bnn}")
+print(f"Load SABTL Model with prior made of {args.src_bnn} with rank {sabtl_model.low_rank}")
 if not args.diag_only:
     tab_name = ["# of Mean Trainable Params", "# of Var Trainable Params", "# of Cov Trainable Params"]
     tab_contents= [sabtl_model.bnn_param.mean.numel(), sabtl_model.bnn_param.log_std.numel(), sabtl_model.bnn_param.cov_sqrt.numel()]
@@ -251,13 +249,13 @@ print("-"*30)
 
 
 
-params, _, _ = sabtl_model.sample(0.0)
+"""params, _, _ = sabtl_model.sample(0.0)
 params = utils.format_weights(params, sabtl_model)
 
 te_res = sabtl_utils.eval_sabtl(te_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
-print(f"Accuracy : {te_res['accuracy']} / NLL : {te_res['nll']} / ECE : {te_res['ece']}")
+print(f"Accuracy : {te_res['accuracy']} / NLL : {te_res['nll']} / ECE : {te_res['ece']}")"""
 
-"""
+
 # Set Optimizer--------------------------------------
 ## Optimizer
 optimizer = sabtl_utils.get_optimizer(args, sabtl_model)
@@ -337,26 +335,27 @@ for epoch in range(start_epoch, int(args.epochs)+1):
 
 
     ## wandb
-    wandb.log({"Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
-        "Validation loss (MAP)" : val_res["loss"], "Validation Accuracy (MAP)" : val_res["accuracy"],
-        "Validation nll (MAP)" : val_res["nll"], "Validation ece (MAP)" : val_res["ece"],
-        "lr" : lr,
-        "max(mean)" : torch.max(sabtl_model.bnn_param['mean']),
-        "mean(mean)" : torch.mean(sabtl_model.bnn_param['mean']),
-        "std(mean)" : torch.std(sabtl_model.bnn_param['mean']),
-        "min(mean)" : torch.min(sabtl_model.bnn_param['mean']),
-        "max(std)" : torch.max(torch.exp(sabtl_model.bnn_param['log_std'])),
-        "mean(std)" : torch.mean(torch.exp(sabtl_model.bnn_param['log_std'])),
-        "std(std)" : torch.std(torch.exp(sabtl_model.bnn_param['log_std'])),
-        "min(std)" : torch.min(torch.exp(sabtl_model.bnn_param['log_std'])),
-        },
-        step=epoch)
-    if not args.diag_only:
-        wandb.log({"max(cov_sqrt)" : torch.max(sabtl_model.bnn_param['cov_sqrt']),
-            "mean(cov_sqrt)" : torch.mean(sabtl_model.bnn_param['cov_sqrt']),
-            "std(cov_sqrt)" : torch.std(sabtl_model.bnn_param['cov_sqrt']),
-            "min(cov_sqrt)" : torch.min(sabtl_model.bnn_param['cov_sqrt']),},
+    if not args.ignore_wandb:
+        wandb.log({"Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
+            "Validation loss (MAP)" : val_res["loss"], "Validation Accuracy (MAP)" : val_res["accuracy"],
+            "Validation nll (MAP)" : val_res["nll"], "Validation ece (MAP)" : val_res["ece"],
+            "lr" : lr,
+            "max(mean)" : torch.max(sabtl_model.bnn_param['mean']),
+            "mean(mean)" : torch.mean(sabtl_model.bnn_param['mean']),
+            "std(mean)" : torch.std(sabtl_model.bnn_param['mean']),
+            "min(mean)" : torch.min(sabtl_model.bnn_param['mean']),
+            "max(std)" : torch.max(torch.exp(sabtl_model.bnn_param['log_std'])),
+            "mean(std)" : torch.mean(torch.exp(sabtl_model.bnn_param['log_std'])),
+            "std(std)" : torch.std(torch.exp(sabtl_model.bnn_param['log_std'])),
+            "min(std)" : torch.min(torch.exp(sabtl_model.bnn_param['log_std'])),
+            },
             step=epoch)
+        if not args.diag_only:
+            wandb.log({"max(cov_sqrt)" : torch.max(sabtl_model.bnn_param['cov_sqrt']),
+                "mean(cov_sqrt)" : torch.mean(sabtl_model.bnn_param['cov_sqrt']),
+                "std(cov_sqrt)" : torch.std(sabtl_model.bnn_param['cov_sqrt']),
+                "min(cov_sqrt)" : torch.min(sabtl_model.bnn_param['cov_sqrt']),},
+                step=epoch)
 
     # Save best model (Early Stopping)
     if (val_res['loss'] < best_val_loss):
@@ -403,24 +402,23 @@ bma_res = sabtl_utils.bma_sabtl(te_loader, sabtl_model, args.bma_num_models,
 bma_predictions = bma_res["predictions"]
 bma_targets = bma_res["targets"]
 
-# Acc
 bma_accuracy = bma_res["accuracy"]
-wandb.run.summary['bma accuracy'] = bma_accuracy
-print(f"bma accuracy : {bma_accuracy:8.4f}")
-
-# nll
 bma_nll = bma_res["nll"]
-wandb.run.summary['bma nll'] = bma_nll
-print(f"bma nll : {bma_nll:8.4f}")       
-
-# ece
 unc = utils.calibration_curve(bma_predictions, bma_targets, args.num_bins)
-# bma_ece = unc["ece"]
 bma_ece = bma_res['ece']
-wandb.run.summary['bma ece'] = bma_ece
-print(f"bma ece : {bma_ece:8.4f}")
+if not args.ignore_wandb:
+    wandb.run.summary['bma accuracy'] = bma_accuracy
+    wandb.run.summary['bma nll'] = bma_nll
+    wandb.run.summary['bma ece'] = bma_ece
 
- # Save ece for reliability diagram
+print("[BMA Results]\n")
+tab_name = ["# of Models", "BMA Accuracy", "BMA NLL", "BMA ECE"]
+tab_contents= [args.bma_num_models, format(bma_accuracy, '.2f'), format(bma_nll, '.4f'), format(bma_ece, '.4f')]
+table = [tab_name, tab_contents]
+print(tabulate.tabulate(table, tablefmt="simple"))
+print("-"*30)
+
+# Save ece for reliability diagram
 os.makedirs(f'{args.save_path}/unc_result', exist_ok=True)
 with open(f"{args.save_path}/unc_result/{args.method}-{args.optim}_bma_uncertainty.pkl", 'wb') as f:
     pickle.dump(unc, f)
@@ -436,21 +434,25 @@ params, _, _ = sabtl_model.sample(0, last_only=False)
 params = utils.format_weights(params, sabtl_model, last_only=False)
 
 res = sabtl_utils.eval_sabtl(te_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
-
-wandb.run.summary['Best epoch'] = checkpoint["epoch"] + 1
-# Acc
-wandb.run.summary['test accuracy'] = res['accuracy']
-print(f"Best test accuracy : {res['accuracy']:8.4f}% on epoch {checkpoint['epoch'] + 1}")
-
-# nll
-wandb.run.summary['test nll'] = res['nll']
-print(f"test nll: {res['nll']:8.4f}")
-
-# ece
 unc = utils.calibration_curve(res['predictions'], res['targets'], args.num_bins)
 te_ece = unc["ece"]
-wandb.run.summary["test ece"]  = te_ece
-print(f"test ece : {te_ece:8.4f}")
+
+if not args.ignore_wandb:
+    wandb.run.summary['Best epoch'] = checkpoint["epoch"]
+    # Acc
+    wandb.run.summary['test accuracy'] = res['accuracy']
+    # nll
+    wandb.run.summary['test nll'] = res['nll']
+    wandb.run.summary["test ece"]  = te_ece
+
+print("[Best Test Results]\n")
+tab_name = ["Best Epoch", "BMA Accuracy", "BMA NLL", "BMA ECE"]
+tab_contents= [checkpoint['epoch'], format(res['accuracy'], '.2f'), format(res['nll'], '.4f'), format(te_ece, '.4f')]
+table = [tab_name, tab_contents]
+print(tabulate.tabulate(table, tablefmt="simple"))
+print("-"*30)
+
+
 
 # Save ece for reliability diagram
 os.makedirs(f'{args.save_path}/unc_result', exist_ok=True)
@@ -459,4 +461,3 @@ with open(f"{args.save_path}/unc_result/{args.method}-{args.optim}_uncertainty.p
 
 # Save Reliability Diagram 
 utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, False)
-"""
