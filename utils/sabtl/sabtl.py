@@ -24,6 +24,9 @@ class SABTL(torch.nn.Module):
         var_clamp = 1e-16,
         last_layer=True,
     ):
+        """
+        TODO : last layer random initialization 코드 추가 (argument 받아서)
+        """
         super(SABTL, self).__init__()
         
         self.var_clamp = var_clamp
@@ -206,20 +209,32 @@ class SABTL(torch.nn.Module):
         mean_fi = covar.inv_matmul((params - self.bnn_param['mean'])).to('cpu')   ## calculate derivative manually (gpytorch version)
         mean_fi = mean_fi.unsqueeze(1).matmul(mean_fi.unsqueeze(1).T)
         mean_fi = 1 / (1 + eta * mean_fi)
-        print("Compute Mean FI")
+        print("Calculate Mean FI")
         
         # diagonal variance
         std_fi = self.bnn_param['log_std'].grad.to('cpu')
         std_fi = std_fi.unsqueeze(1).matmul(std_fi.unsqueeze(1).T)
         std_fi = 1 / (1 + eta * std_fi)
-        print("Compute Std FI")
+        print("Calculate Diagonal Variance FI")
         
         # off-diagonal covariance
         cov_fi = self.bnn_param['cov_sqrt'].grad.to('cpu')
-        cov_fi = torch.flatten(cov_fi).unsqueeze(1)
-        cov_fi = cov_fi.matmul(cov_fi.T)
-        cov_fi = 1 / (1 + eta * cov_fi**2)
-        print("Compute Cov FI")
+        if approx == 'full':
+            cov_fi = torch.flatten(cov_fi).unsqueeze(1)
+            print("1")
+            cov_fi = cov_fi.matmul(cov_fi.T)
+            print("2")
+            torch.pow(cov_fi, 2, out=cov_fi)
+            print("3")
+            cov_fi = eta * cov_fi   # 여기서 터지는데...
+            print("4")
+            cov_fi = 1 + cov_fi
+            print("5")
+            cov_fi = 1 / cov_fi        
+            print("Calculate Off-diagnoal Covariance FI")
+        elif approx == 'diag':
+            torch.pow(torch.flatten(cov_fi), 2, out=cov_fi)
+            cov_fi = 1 / (1 + eta*cov_fi)
         
         return [mean_fi, std_fi, cov_fi]
         """
@@ -353,8 +368,9 @@ class BSAM(torch.optim.Optimizer):
                         ## Calculate perturbation Delta_theta --------------------------------------
                         if idx == 2:
                             # in case of low-rank Covariance
-                            nom = fish_inv[idx] * torch.flatten(p.grad.to('cpu'))
-                            denom = (torch.flatten(p.grad.to('cpu'))* fish_inv[idx]).matmul(torch.flatten(p.grad).to('cpu'))
+                            nom = fish_inv[idx].matmul(torch.flatten(p.grad.to('cpu')))
+                            denom = torch.flatten(p.grad.to('cpu')).matmul(fish_inv[idx])
+                            denom = denom.unsqueeze(0).matmul(torch.flatten(p.grad).to('cpu'))
                         else:
                             # in case of mean, diagonal variance
                             nom = fish_inv[idx].matmul(p.grad.to('cpu'))
@@ -368,8 +384,8 @@ class BSAM(torch.optim.Optimizer):
                         # --------------------------------------------------------------------------- 
                                                
                         ## theta + Delta_theta
-                        import pdb;pdb.set_trace()
                         p.add_(Delta_p.to('cuda'))  # climb to the local maximum "w + e(w)"
+                        print(f"Calculate Perturbation {idx + 1}/3")
                         # ---------------------------------------------------------------------------
                 if zero_grad: self.zero_grad()
                 
@@ -385,6 +401,7 @@ class BSAM(torch.optim.Optimizer):
                     ## theta + Delta_theta
                     p.add_(Delta_p)  # climb to the local maximum "w + e(w)"
                     # ---------------------------------------------------------------------------
+                    del Delta_p
             if zero_grad: self.zero_grad()
 
 
