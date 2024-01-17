@@ -206,16 +206,20 @@ class SABTL(torch.nn.Module):
         mean_fi = covar.inv_matmul((params - self.bnn_param['mean'])).to('cpu')   ## calculate derivative manually (gpytorch version)
         mean_fi = mean_fi.unsqueeze(1).matmul(mean_fi.unsqueeze(1).T)
         mean_fi = 1 / (1 + eta * mean_fi)
+        print("Compute Mean FI")
         
         # diagonal variance
         std_fi = self.bnn_param['log_std'].grad.to('cpu')
         std_fi = std_fi.unsqueeze(1).matmul(std_fi.unsqueeze(1).T)
         std_fi = 1 / (1 + eta * std_fi)
+        print("Compute Std FI")
         
         # off-diagonal covariance
         cov_fi = self.bnn_param['cov_sqrt'].grad.to('cpu')
-        cov_fi = torch.flatten(cov_fi)
+        cov_fi = torch.flatten(cov_fi).unsqueeze(1)
+        cov_fi = cov_fi.matmul(cov_fi.T)
         cov_fi = 1 / (1 + eta * cov_fi**2)
+        print("Compute Cov FI")
         
         return [mean_fi, std_fi, cov_fi]
         """
