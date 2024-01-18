@@ -222,15 +222,15 @@ class SABTL(torch.nn.Module):
         if approx == 'full':
             cov_fi = torch.flatten(cov_fi).unsqueeze(1)
             print("1")
-            cov_fi = cov_fi.matmul(cov_fi.T)
+            torch.matmul(cov_fi, cov_fi.T, out=cov_fi) # cov_fi = cov_fi.matmul(cov_fi.T)
             print("2")
             torch.pow(cov_fi, 2, out=cov_fi)
             print("3")
-            cov_fi = eta * cov_fi   # 여기서 터지는데...
+            torch.mul(eta, cov_fi, out=cov_fi) # cov_fi = eta * cov_fi   # 여기서 터지는데...
             print("4")
-            cov_fi = 1 + cov_fi
+            torch.add(cov_fi, 1, out=cov_fi) # cov_fi = cov_fi + 1
             print("5")
-            cov_fi = 1 / cov_fi        
+            torch.divide(1, cov_fi, out=cov_fi) # cov_fi = 1 / cov_fi
             print("Calculate Off-diagnoal Covariance FI")
         elif approx == 'diag':
             torch.pow(torch.flatten(cov_fi), 2, out=cov_fi)
