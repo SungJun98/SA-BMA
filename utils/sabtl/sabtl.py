@@ -152,18 +152,21 @@ class SABTL(torch.nn.Module):
         else:
             z_1_ll = torch.randn_like(self.bnn_param.log_std[-self.ll_num_params:], requires_grad=False)
             rand_sample_ll = torch.exp(self.bnn_param.log_std[-self.ll_num_params:] * z_1_ll)
-            
+                      
         if not self.diag_only:            
             z_2 = self.bnn_param.cov_sqrt.new_empty((self.bnn_param.cov_sqrt.size(0), ), requires_grad=False).normal_(z_scale)
             if self.last_layer:
                 cov_sample_ll = self.bnn_param.cov_sqrt.t().matmul(z_2)
             else:
                 cov_sample_ll = self.bnn_param.cov_sqrt[:,-self.ll_num_params:].t().matmul(z_2)
-            cov_sample_ll /= (self.low_rank - 1)**0.5
+            
+            if self.low_rank > 1:
+                cov_sample_ll /= (self.low_rank - 1)**0.5
+                
             rand_sample_ll = 0.5**0.5 * (rand_sample_ll + cov_sample_ll)
         else:
             z_2 = None
-        
+            
         if self.last_layer:
             sample_ll = self.bnn_param.mean + rand_sample_ll
         else:
@@ -198,7 +201,6 @@ class SABTL(torch.nn.Module):
             covar = AddedDiagLazyTensor(var_lt, cov_mat_lt).add_jitter(1e-6)
         else:
             covar = DiagLazyTensor(soft_std**2)
-
         qdist = MultivariateNormal(self.bnn_param['mean'], covar)
         with gpytorch.settings.num_trace_samples(1) and gpytorch.settings.max_cg_iterations(25):
             log_prob =  qdist.log_prob(params)
@@ -209,32 +211,30 @@ class SABTL(torch.nn.Module):
         mean_fi = covar.inv_matmul((params - self.bnn_param['mean'])).to('cpu')   ## calculate derivative manually (gpytorch version)
         mean_fi = mean_fi.unsqueeze(1).matmul(mean_fi.unsqueeze(1).T)
         mean_fi = 1 / (1 + eta * mean_fi)
-        print("Calculate Mean FI")
+        # print(f"Mean FI / nan : {torch.sum(torch.isnan(mean_fi))} / max {torch.max(mean_fi)}")
         
         # diagonal variance
         std_fi = self.bnn_param['log_std'].grad.to('cpu')
         std_fi = std_fi.unsqueeze(1).matmul(std_fi.unsqueeze(1).T)
         std_fi = 1 / (1 + eta * std_fi)
-        print("Calculate Diagonal Variance FI")
+        # print(f"log_std FI / nan : {torch.sum(torch.isnan(std_fi))} / max {torch.max(std_fi)}")
         
         # off-diagonal covariance
         cov_fi = self.bnn_param['cov_sqrt'].grad.to('cpu')
         if approx == 'full':
             cov_fi = torch.flatten(cov_fi).unsqueeze(1)
-            print("1")
-            torch.matmul(cov_fi, cov_fi.T, out=cov_fi) # cov_fi = cov_fi.matmul(cov_fi.T)
-            print("2")
-            torch.pow(cov_fi, 2, out=cov_fi)
-            print("3")
-            torch.mul(eta, cov_fi, out=cov_fi) # cov_fi = eta * cov_fi   # 여기서 터지는데...
-            print("4")
-            torch.add(cov_fi, 1, out=cov_fi) # cov_fi = cov_fi + 1
-            print("5")
-            torch.divide(1, cov_fi, out=cov_fi) # cov_fi = 1 / cov_fi
-            print("Calculate Off-diagnoal Covariance FI")
+            cov_fi = torch.matmul(cov_fi, cov_fi.T)
+            cov_fi = torch.mul(eta, cov_fi)
+            cov_fi = torch.add(cov_fi, 1)
+            cov_fi = torch.divide(1, cov_fi)
         elif approx == 'diag':
-            torch.pow(torch.flatten(cov_fi), 2, out=cov_fi)
+            cov_fi = torch.pow(torch.flatten(cov_fi), 2)
             cov_fi = 1 / (1 + eta*cov_fi)
+
+        inf_mask = (cov_fi == float('inf'))
+        cov_fi[inf_mask] = 1
+        
+        # print(f"Cov FI / nan : {torch.sum(torch.isnan(cov_fi))} / max {torch.max(cov_fi)}")
         
         return [mean_fi, std_fi, cov_fi]
         """
@@ -375,17 +375,24 @@ class BSAM(torch.optim.Optimizer):
                             # in case of mean, diagonal variance
                             nom = fish_inv[idx].matmul(p.grad.to('cpu'))
                             denom = torch.matmul(p.grad.unsqueeze(0).to('cpu').matmul(fish_inv[idx]), p.grad.unsqueeze(1).to('cpu'))
+                        print(f"Calculate Perturbation {idx + 1}/3")
+                        # print(f"nom of Delta_p / nan : {torch.sum(torch.isnan(nom))} / max : {torch.max(nom)}")
                         denom = torch.clamp(denom, 0.0)
                         denom = (torch.sqrt(denom) + 1e-12).squeeze() # add small value for numericaly stability
+                        # print(f"denom of Delta_p / nan : {torch.sum(torch.isnan(denom))} / max : {torch.max(denom)}")
+                        print(f"nom : {nom}")
+                        print(f"denom : {denom}")
                         Delta_p = group["rho"] * nom / denom
-                        
                         if idx == 2:
                             Delta_p = Delta_p.reshape((-1, fish_inv[0].size(0)))
                         # --------------------------------------------------------------------------- 
                                                
                         ## theta + Delta_theta
                         p.add_(Delta_p.to('cuda'))  # climb to the local maximum "w + e(w)"
-                        print(f"Calculate Perturbation {idx + 1}/3")
+                        # print(f"p / nan : {torch.sum(torch.isnan(p))} / max : {torch.max(p)}")
+                        # print(f"Delta_p / nan : {torch.sum(torch.isnan(Delta_p))} / max : {torch.max(Delta_p)}")
+                        # print(f"p : {p}")
+                        # print(f"Delta_p : {Delta_p}")
                         # ---------------------------------------------------------------------------
                 if zero_grad: self.zero_grad()
                 

@@ -209,7 +209,7 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
             loss_sum += loss.data.item() * X.size(0)
             num_objects_current += X.size(0)
             
-            print(f"Batch : {batch} / Tr loss : {loss} / Pred NaN : {torch.sum(torch.isnan(pred))} ")
+            print(f"Batch : {batch} / Tr loss : {loss} / Pred NaN : {torch.sum(torch.isnan(pred))/100} ")
         else:
             ## first forward & backward
             pred = sabtl_model(params, X)
