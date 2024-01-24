@@ -208,15 +208,21 @@ class SABTL(torch.nn.Module):
         log_prob.backward(retain_graph=True)
         
         # mean
-        mean_fi = covar.inv_matmul((params - self.bnn_param['mean'])).to('cpu')   ## calculate derivative manually (gpytorch version)
+        mean_fi = covar.inv_matmul((params - self.bnn_param['mean'])) # .to('cpu')   ## calculate derivative manually (gpytorch version)
         mean_fi = mean_fi.unsqueeze(1).matmul(mean_fi.unsqueeze(1).T)
-        mean_fi = 1 / (1 + eta * mean_fi)
+        """
+        mean_fi (i.e. fisher inverse w.r.t. mean)를 어떻게 구할 것인가...(gpu에서)
+        """
+        # mean_fi = 1 / (1 + eta * mean_fi)
         # print(f"Mean FI / nan : {torch.sum(torch.isnan(mean_fi))} / max {torch.max(mean_fi)}")
         
         # diagonal variance
         std_fi = self.bnn_param['log_std'].grad.to('cpu')
         std_fi = std_fi.unsqueeze(1).matmul(std_fi.unsqueeze(1).T)
-        std_fi = 1 / (1 + eta * std_fi)
+        """
+        std_fi (i.e. fisher inverse w.r.t. log_std)를 어떻게 구할 것인가...(gpu에서)
+        """
+        # std_fi = 1 / (1 + eta * std_fi)
         # print(f"log_std FI / nan : {torch.sum(torch.isnan(std_fi))} / max {torch.max(std_fi)}")
         
         # off-diagonal covariance
@@ -224,63 +230,23 @@ class SABTL(torch.nn.Module):
         if approx == 'full':
             cov_fi = torch.flatten(cov_fi).unsqueeze(1)
             cov_fi = torch.matmul(cov_fi, cov_fi.T)
-            cov_fi = torch.mul(eta, cov_fi)
-            cov_fi = torch.add(cov_fi, 1)
-            cov_fi = torch.divide(1, cov_fi)
+            """
+            cov_fi (i.e. fisher inverse w.r.t. cov_sqrt)를 어떻게 구할 것인가...(gpu에서)
+            """
+            # cov_fi = torch.mul(eta, cov_fi)
+            # cov_fi = torch.add(cov_fi, 1)
+            # cov_fi = torch.divide(1, cov_fi)
         elif approx == 'diag':
             cov_fi = torch.pow(torch.flatten(cov_fi), 2)
             cov_fi = 1 / (1 + eta*cov_fi)
 
-        inf_mask = (cov_fi == float('inf'))
-        cov_fi[inf_mask] = 1
+        # inf_mask = (cov_fi == float('inf'))
+        # cov_fi[inf_mask] = 1
         
         # print(f"Cov FI / nan : {torch.sum(torch.isnan(cov_fi))} / max {torch.max(cov_fi)}")
         
         return [mean_fi, std_fi, cov_fi]
-        """
-        ## Fisher Inverse w.r.t. mean
-        # \nabla_\mean p(w | \theta)  
-        mean_fi = covar.inv_matmul((params - self.bnn_param['mean']))   ## calculate derivative manually (gpytorch version)
-        if approx == 'diag':
-            mean_fi = mean_fi**2
-        elif approx == 'full':
-            mean_fi = mean_fi.to('cpu')
-            mean_fi = mean_fi.unsqueeze(1).matmul(mean_fi.unsqueeze(1).T)
-        elif approx == 'kfac':
-            raise ValueError("Add code for kfac")
-        mean_fi = 1 / (1 + eta * mean_fi)
-        # mean_fi = mean_fi.to('cuda')
-
-        ## Fisher Inverse w.r.t. variance
-        # \nabla_\var p(w | \theta)
-        std_fi = torch.autograd.grad(log_prob, self.bnn_param['log_std'], retain_graph=True)
-        if approx == 'diag':
-            std_fi = std_fi[0]**2
-        elif approx == 'full':
-            std_fi = std_fi[0].to('cpu')
-            std_fi = std_fi.unsqueeze(1).matmul(std_fi.unsqueeze(1).T)
-        elif approx == 'kfac':
-            raise ValueError("Add code for kfac")
-        std_fi = 1 / (1 + eta * std_fi)
-        # std_fi = std_fi.to('cuda')
-
-        ## Fisher Inverse w.r.t. covariance
-        # \nabla_\cov p(w | \theta)
-        if not self.diag_only:            
-            cov_fi = torch.autograd.grad(log_prob, self.bnn_param['cov_sqrt'], retain_graph=True)
-            if approx == 'diag':
-                cov_fi = cov_fi[0]**2
-            elif approx in ['kfac', 'full']:
-                cov_fi = cov_fi[0].to('cpu')
-                # cov_fi = torch.flatten(cov_fi).outer(torch.flatten(cov_fi))
-            # elif approx == 'kfac':
-            #     raise ValueError("Add code for kfac")
-            cov_fi = 1 / (1 + eta * cov_fi)
-            # cov_fi = cov_fi.to('cuda')
-            return [mean_fi, std_fi, cov_fi]
-        else:
-            return [mean_fi, std_fi]
-        """
+    
 
         
     def get_mean_vector(self, unflatten=False):
