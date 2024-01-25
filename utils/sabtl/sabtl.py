@@ -208,38 +208,29 @@ class SABTL(torch.nn.Module):
         log_prob.backward(retain_graph=True)
         
         # mean
-        mean_fi = covar.inv_matmul((params - self.bnn_param['mean'])) # .to('cpu')   ## calculate derivative manually (gpytorch version)
-        mean_fi = mean_fi.unsqueeze(1).matmul(mean_fi.unsqueeze(1).T)
-        """
-        mean_fi (i.e. fisher inverse w.r.t. mean)를 어떻게 구할 것인가...(gpu에서)
-        """
-        # mean_fi = 1 / (1 + eta * mean_fi)
+        mean_fi = covar.inv_matmul((params - self.bnn_param['mean'])).to('cpu')   ## calculate derivative manually (gpytorch version)
+        mean_fi = torch.outer(mean_fi, mean_fi) / torch.norm(mean_fi)**4
         # print(f"Mean FI / nan : {torch.sum(torch.isnan(mean_fi))} / max {torch.max(mean_fi)}")
         
         # diagonal variance
         std_fi = self.bnn_param['log_std'].grad.to('cpu')
-        std_fi = std_fi.unsqueeze(1).matmul(std_fi.unsqueeze(1).T)
-        """
-        std_fi (i.e. fisher inverse w.r.t. log_std)를 어떻게 구할 것인가...(gpu에서)
-        """
+        std_fi = torch.outer(std_fi, std_fi) / torch.norm(std_fi)**4
         # std_fi = 1 / (1 + eta * std_fi)
         # print(f"log_std FI / nan : {torch.sum(torch.isnan(std_fi))} / max {torch.max(std_fi)}")
         
         # off-diagonal covariance
         cov_fi = self.bnn_param['cov_sqrt'].grad.to('cpu')
         if approx == 'full':
-            cov_fi = torch.flatten(cov_fi).unsqueeze(1)
-            cov_fi = torch.matmul(cov_fi, cov_fi.T)
-            """
-            cov_fi (i.e. fisher inverse w.r.t. cov_sqrt)를 어떻게 구할 것인가...(gpu에서)
-            """
+            cov_fi = torch.flatten(cov_fi) # .unsqueeze(1)
+            cov_fi = torch.outer(cov_fi, cov_fi) / torch.norm(cov_fi)**4
+            # cov_fi = torch.matmul(cov_fi, cov_fi.T)
             # cov_fi = torch.mul(eta, cov_fi)
             # cov_fi = torch.add(cov_fi, 1)
             # cov_fi = torch.divide(1, cov_fi)
         elif approx == 'diag':
             cov_fi = torch.pow(torch.flatten(cov_fi), 2)
             cov_fi = 1 / (1 + eta*cov_fi)
-
+            
         # inf_mask = (cov_fi == float('inf'))
         # cov_fi[inf_mask] = 1
         
@@ -344,7 +335,7 @@ class BSAM(torch.optim.Optimizer):
                         print(f"Calculate Perturbation {idx + 1}/3")
                         # print(f"nom of Delta_p / nan : {torch.sum(torch.isnan(nom))} / max : {torch.max(nom)}")
                         denom = torch.clamp(denom, 0.0)
-                        denom = (torch.sqrt(denom) + 1e-12).squeeze() # add small value for numericaly stability
+                        denom = (torch.sqrt(denom) + 1e-16).squeeze() # add small value for numericaly stability
                         # print(f"denom of Delta_p / nan : {torch.sum(torch.isnan(denom))} / max : {torch.max(denom)}")
                         print(f"nom : {nom}")
                         print(f"denom : {denom}")
@@ -357,8 +348,8 @@ class BSAM(torch.optim.Optimizer):
                         p.add_(Delta_p.to('cuda'))  # climb to the local maximum "w + e(w)"
                         # print(f"p / nan : {torch.sum(torch.isnan(p))} / max : {torch.max(p)}")
                         # print(f"Delta_p / nan : {torch.sum(torch.isnan(Delta_p))} / max : {torch.max(Delta_p)}")
-                        # print(f"p : {p}")
-                        # print(f"Delta_p : {Delta_p}")
+                        print(f"p : {p}")
+                        print(f"Delta_p : {Delta_p}")
                         # ---------------------------------------------------------------------------
                 if zero_grad: self.zero_grad()
                 
@@ -390,7 +381,12 @@ class BSAM(torch.optim.Optimizer):
         
         # covariance
         if not sabtl_model.diag_only:
-            cov_sample = (self.param_groups[0]['params'][2].t().matmul(z_2)) / (sabtl_model.low_rank - 1)**0.5
+            if sabtl_model.low_rank > 1:
+                # In case of K >= 2
+                cov_sample = (self.param_groups[0]['params'][2].t().matmul(z_2)) / (sabtl_model.low_rank - 1)**0.5
+            else:
+                # In case of K=1
+                cov_sample = (self.param_groups[0]['params'][2].t().matmul(z_2))
             rand_sample = 0.5**0.5 * (rand_sample + cov_sample)
         sample = self.param_groups[0]['params'][0] + rand_sample
         
