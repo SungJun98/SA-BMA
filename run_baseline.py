@@ -19,9 +19,6 @@ from utils import temperature_scaling as ts
 import warnings
 warnings.filterwarnings('ignore')
 
-# wandb
-wandb.init(project="SA-BTL", entity='sungjun98')
-
 parser = argparse.ArgumentParser(description="training baselines")
 
 parser.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
@@ -33,6 +30,8 @@ parser.add_argument("--method", type=str, default="dnn",
 parser.add_argument("--no_amp", action="store_true", default=False, help="Deactivate AMP")
 
 parser.add_argument("--print_epoch", type=int, default=10, help="Printing epoch")
+
+parser.add_argument("--ignore_wandb", action="store_true", default=False, help="Deactivate wandb")
 
 parser.add_argument("--resume", type=str, default=None,
     help="path to load saved model to resume training (default: None)",)
@@ -100,8 +99,8 @@ parser.add_argument("--lr_init", type=float, default=0.01,
 parser.add_argument("--momentum", type=float, default=0.9,
                 help="momentum (Default : 0.9)")
 
-parser.add_argument("--epochs", type=int, default=300, metavar="N",
-    help="number epochs to train (default : 300)")
+parser.add_argument("--epochs", type=int, default=100, metavar="N",
+    help="number epochs to train (default : 100)")
 
 parser.add_argument("--wd", type=float, default=5e-4, help="weight decay (default: 5e-4)")
 
@@ -164,11 +163,14 @@ parser.add_argument("--num_bins", type=int, default=15, help="bin number for ece
 parser.add_argument("--no_ts", action="store_true", default=False,
             help="Deactivate Temperature Scaling (Default: False)")
 parser.add_argument("--ts_opt", type=int, default=1,
-                help="BNN calibration option 1) fit tau on MAP model, 2) fit tau on every sampled model, 3) fit tau on ensembled model (Default: 3)")
+                help="BNN calibration option 1) fit tau on MAP model, 2) fit tau on every sampled model, 3) fit tau on ensembled model (Default: 1)")
 #----------------------------------------------------------------
 
 args = parser.parse_args()
 #----------------------------------------------------------------
+
+if not args.ignore_wandb:
+    wandb.init(project="SA-BTL", entity='sungjun98')
 
 # Set Device and Seed--------------------------------------------
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -199,8 +201,9 @@ print("-"*30)
 #------------------------------------------------------------------
 
 # wandb config-----------------------------------------------------
-wandb.config.update(args)
-wandb.run.name = utils.set_wandb_runname(args)
+if not args.ignore_wandb:
+    wandb.config.update(args)
+    wandb.run.name = utils.set_wandb_runname(args)
 #------------------------------------------------------------------
 
 # Load Data --------------------------------------------------------
@@ -226,10 +229,6 @@ model = utils.get_backbone(args.model, num_classes, args.device, args.pre_traine
 if args.linear_probe or args.method in ["last_swag", "last_vi"]:
     utils.freeze_fe(model)
 
-
-"""
-아래 부분은 get_model로 만들어 놓기
-"""
 
 swag_model=None
 if args.method == "swag":
@@ -258,7 +257,7 @@ elif args.method == "vi":
     dnn_to_bnn(model, const_bnn_prior_parameters)
     model.to(args.device)
     print(f"Preparing Model for {args.vi_type} VI with MOPED ")
-    
+
 elif args.method == "last_vi":
     vi_utils.make_last_vi(args, model)
     print(f"Preparing Model for last-layer {args.vi_type} VI with MOPED ")
@@ -429,17 +428,18 @@ if args.method not in ["la", "last_la"]:
 
 
         ## wandb
-        if args.method in ["swag", "last_swag"]:
-            wandb.log({"Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
-                "Validation loss" : val_res["loss"], "Validation Accuracy" : val_res["accuracy"],
-                "SWAG Validation loss" : swag_res["loss"], "SWAG Validation Accuracy" : swag_res["accuracy"],
-                "SWAG Validation nll" : swag_res["nll"], "SWAG Validation ece" : swag_res["ece"],
-                "lr" : lr,})
-        else:
-            wandb.log({"Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
-                "Validation loss" : val_res["loss"], "Validation Accuracy" : val_res["accuracy"],
-                "Validation nll" : val_res["nll"], "Validation ece" : val_res["ece"],
-                "lr" : lr,})
+        if not args.ignore_wandb:
+            if args.method in ["swag", "last_swag"]:
+                wandb.log({"Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
+                    "Validation loss" : val_res["loss"], "Validation Accuracy" : val_res["accuracy"],
+                    "SWAG Validation loss" : swag_res["loss"], "SWAG Validation Accuracy" : swag_res["accuracy"],
+                    "SWAG Validation nll" : swag_res["nll"], "SWAG Validation ece" : swag_res["ece"],
+                    "lr" : lr,})
+            else:
+                wandb.log({"Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
+                    "Validation loss" : val_res["loss"], "Validation Accuracy" : val_res["accuracy"],
+                    "Validation nll" : val_res["nll"], "Validation ece" : val_res["ece"],
+                    "lr" : lr,})
 
 
         ## Save best model (Early Stopping)
@@ -494,118 +494,40 @@ else:
 ## Test ------------------------------------------------------------------------------------------------------
 ##### Get test nll, Entropy, ece, Reliability Diagram on best model
 ### Load Best Model
-print("Load Best Validation Model (Lowest Loss)")
-state_dict_path = f'{args.save_path}/{args.method}-{args.optim}_best_val.pt'
-checkpoint = torch.load(state_dict_path)
-if args.method in ["swag", "last_swag"]:
-    swag_model.load_state_dict(checkpoint["state_dict"])
-    swag_model.to(args.device)
-elif args.method in ["vi", "last_vi"]:
-    model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
-    if args.method == "last_vi":
-        vi_utils.make_last_vi(args, model)
-    vi_utils.load_vi(model, checkpoint)
-else:
-    model.load_state_dict(checkpoint["state_dict"])
-    model.to(args.device)
+model, mean, variance, best_epoch = utils.load_best_model(args, swag_model, num_classes)
 
-
-#### MAP or DNN
+#### MAP
 ## Unscaled Results
-if args.method in ["swag", "last_swag"]:
-    swag_model.sample(0)
-    # if args.batch_norm:
-    #     swag_utils.bn_update(tr_loader, swag_model, verbose=False, subset=1.0)
-    res = utils.eval(te_loader, swag_model, criterion, args.device)
-else:
-    res = utils.eval(te_loader, model, criterion, args.device)
+res = utils.no_ts_map_estimation(args, te_loader, num_classes, model, mean, variance, criterion)
 print(f"1) Unscaled Results:")
 table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece" ],
-        [checkpoint['epoch'], format(res['accuracy'], '.2f'), format(res['nll'], '.4f'), format(res['ece'], '.4f')]]
+        [best_epoch, format(res['accuracy'], '.2f'), format(res['nll'], '.4f'), format(res['ece'], '.4f')]]
 print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
 
-## Scaled Result
+## Temperature Scaled Results
 if not args.no_ts:
-    # Temperature Scaled Results
-    if args.method in ["swag", "last_swag"]:
-        scaled_model = ts.ModelWithTemperature(swag_model)
-    else:
-        scaled_model = ts.ModelWithTemperature(model)
-    scaled_model.set_temperature(val_loader)
-    torch.save(scaled_model, f"{args.save_path}/{args.method}-{args.optim}_best_val_scaled_model.pt")
-    res = utils.eval(te_loader, scaled_model, criterion, args.device)
-
+    res, temperature = utils.ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, variance, criterion)
     print(f"2) Scaled Results:")
     table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
-            [checkpoint['epoch'], format(res['accuracy'], '.2f'), format(res['nll'],'.4f'), format(res['ece'], '.4f'), format(scaled_model.temperature.item(), '.4f')]]
+            [best_epoch, format(res['accuracy'], '.2f'), format(res['nll'],'.4f'), format(res['ece'], '.4f'), format(temperature.item(), '.4f')]]
     print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
+else:
+    temperature = None
 
-wandb.run.summary['Best epoch'] = checkpoint["epoch"]
-wandb.run.summary['test accuracy'] = res['accuracy']
-wandb.run.summary['test nll'] = res['nll']
-wandb.run.summary["test ece"]  = res['ece']
-if not args.no_ts:
-    wandb.run.summary['temperature'] = scaled_model.temperature.item()
-utils.save_reliability_diagram(args.method, args.optim, args.save_path, res['unc'], False)
+if not args.ignore_wandb:
+    wandb.run.summary['test accuracy'] = res['accuracy']
+    wandb.run.summary['test nll'] = res['nll']
+    wandb.run.summary["test ece"]  = res['ece']
 
+    
 
-
-
-#### BMA prediction
-if not args.no_ts:
-    if args.ts_opt == 3:
-        # get temperature tau in validation loader
-        utils.set_seed(args.seed)
-        if args.method in ["swag", "last_swag"]:
-            bma_res = swag_utils.bma_swag(tr_loader, val_loader, val_loader, swag_model, num_classes, None, args.bma_num_models, None, args.eps, batch_norm=True)
-        bma_targets = bma_res["targets"];bma_logits = bma_res["logits"]
-        scaled_model = ts.ModelWithTemperature(swag_model, ens=True)
-        scaled_model.set_temperature(val_loader, ens_logits=torch.tensor(bma_logits), ens_pred=torch.tensor(bma_targets))
-        bma_temperature = scaled_model.temperature.unsqueeze(1).expand(bma_logits.shape[0], bma_logits.shape[1])
-        bma_logits = torch.tensor(bma_logits) / bma_temperature.cpu()
-        bma_predictions = F.softmax(bma_logits, dim=1).detach().numpy()
-        bma_res["bma_accuracy"] = np.mean(np.argmax(bma_predictions, axis=1) == bma_targets)
-        bma_res["nll"] = -np.mean(np.log(bma_predictions[np.arange(bma_predictions.shape[0]), bma_targets] + args.eps))
-        
-        # load original model (to restore the batch norm statistics)
-        swag_model.load_state_dict(checkpoint["state_dict"])
-        swag_model.to(args.device)
-
-
-utils.set_seed(args.seed)
-if args.method in ["swag", "last_swag"]: # , "vi", "last_vi", "la", "last_la"]:
+#### Bayesian Model Averaging
+if args.method in ["swag", "last_swag", "vi", "last_vi"]:
+    utils.set_seed(args.seed)
     bma_save_path = f"{args.save_path}/bma_models"
-    os.makedirs(bma_save_path, exist_ok=True)
-    
-    if not args.no_ts:
-        if args.ts_opt in [1, 3]:
-            bma_temperature = scaled_model.temperature
-        elif args.ts_opt == 2:
-            bma_temperature = 'local'
-    else:
-        bma_temperature = None
+    os.makedirs(bma_save_path, exist_ok=True) 
+    print(f"Start Bayesian Model Averaging with {args.bma_num_models} samples")
+    utils.bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature)
+else:
+    pass
 
-    if args.method in ["swag", "last_swag"]:
-        bma_res = swag_utils.bma_swag(tr_loader, val_loader, te_loader, swag_model, num_classes, bma_temperature, args.bma_num_models, bma_save_path, args.eps, args.batch_norm)
-    # elif args.method in ["vi", "last_vi"]:
-    #     bma_res = vi_utils.bma_vi(te_loader, mean, variance, model, args.method, args.bma_num_models, num_classes, bma_save_path=bma_save_path, eps=args.eps)
-    
-    if args.no_ts or args.ts_opt==2:         
-        bma_temperature = torch.tensor(-9999.)
-        
-    bma_predictions = bma_res["predictions"];bma_targets = bma_res["targets"]
-    bma_accuracy = bma_res["bma_accuracy"] * 100
-    bma_nll = bma_res["nll"]
-    unc = utils.calibration_curve(bma_predictions, bma_targets, args.num_bins)
-    bma_ece = unc["ece"]
-    
-    print(f"3) Calibrated BMA Results:")
-    table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
-            [checkpoint['epoch'], format(bma_accuracy, '.4f'), format(bma_nll, '.4f'), format(bma_ece, '.4f'), format(bma_temperature.item(), '.4f')]]
-    print(tabulate.tabulate(table, tablefmt="simple"))
-    
-    wandb.run.summary['bma accuracy'] = bma_accuracy
-    wandb.run.summary['bma nll'] = bma_nll
-    wandb.run.summary['bma ece'] = bma_ece
-    wandb.run.summary['bma temperature'] = bma_temperature.item()
-    utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, True)

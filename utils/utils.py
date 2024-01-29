@@ -1,21 +1,23 @@
 import numpy as np
-import pickle
+import pickle, wandb
 import os
 
 import matplotlib.pyplot as plt
-import collections
+import collections, tabulate
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from utils.sam import sam, sam_utils
+from utils.swag import swag_utils
 from utils.vi import vi_utils
+from utils import temperature_scaling as ts
 
 from utils.models import resnet_noBN
-from utils.temperature_scaling import _ECELoss
 import torchvision.models as torch_models
 import timm
+
 
 ## ------------------------------------------------------------------------------------
 ## Setting Configs --------------------------------------------------------------------
@@ -69,7 +71,7 @@ def set_save_path(args):
     if args.method in ["swag", "last_swag"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
     elif args.method in ["vi", "last_vi"]:
-        save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}"
+        save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}_{args.kl_beta}"
     elif args.method in ["sabtl"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.momentum}_{args.low_rank}"
     else:
@@ -191,7 +193,10 @@ def get_backbone(model_name, num_classes, device, pre_trained=True):
         model.head = torch.nn.Linear(768, num_classes)
     
     model.to(device)
-    print(f"Preparing model {model_name}")
+    if pre_trained:
+        print(f"Preparing Pre-trained model {model_name}")
+    else:
+        print(f"Preparing model {model_name}")
     return model
 
 
@@ -668,4 +673,137 @@ def save_reliability_diagram(method, optim, save_path, unc, bma=False):
     if bma:
         plt.savefig(f'{save_path}/unc_result/{method}_{optim}_bma_reliability_diagram.png')           
     else:
-        plt.savefig(f'{save_path}/unc_result/{method}_{optim}_reliability_diagram.png')    
+        plt.savefig(f'{save_path}/unc_result/{method}_{optim}_reliability_diagram.png') 
+        
+
+
+def load_best_model(args, swag_model, num_classes):
+    print("Load Best Validation Model (Lowest Loss)")
+    state_dict_path = f'{args.save_path}/{args.method}-{args.optim}_best_val.pt'
+    checkpoint = torch.load(state_dict_path)
+    if not args.ignore_wandb:
+        wandb.run.summary['Best epoch'] = checkpoint["epoch"]
+    mean = None; variance = None
+    if args.method in ["swag", "last_swag"]:
+        swag_model.load_state_dict(checkpoint["state_dict"])
+        model = swag_model
+        
+    elif args.method in ["vi", "last_vi"]:
+        model = get_backbone(args.model, num_classes, args.device, args.pre_trained)
+        if args.method == "last_vi":
+            vi_utils.make_last_vi(args, model)
+        vi_utils.load_vi(model, checkpoint)
+        # mean = vi_utils.get_vi_mean_vector(model)
+        # variance = vi_utils.get_vi_variance_vector(model)
+        mean = torch.load(f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
+        variance = torch.load(f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
+        
+    else:
+        model.load_state_dict(checkpoint["state_dict"])
+        
+    model.to(args.device)        
+    
+    return model, mean, variance, checkpoint["epoch"]
+ 
+
+def no_ts_map_estimation(args, te_loader, num_classes, model, mean, variance, criterion):
+    if args.method in ["swag", "last_swag"]:
+        model.sample(0)
+        res = eval(te_loader, model, criterion, args.device)
+    elif args.method in ["vi", "last_vi"]:
+        res = vi_utils.bma_vi(None, te_loader, mean, variance, model, args.method, criterion, num_classes, temperature=None, bma_num_models=1,  bma_save_path=None, num_bins=args.num_bins, eps=args.eps)  
+    else:
+        res = eval(te_loader, model, criterion, args.device)
+    return res
+
+
+def ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, variance, criterion):
+    # Temperature Scaled Results
+    scaled_model = None
+    if args.method in ["dnn", "swag", "last_swag"]:
+        scaled_model = ts.ModelWithTemperature(model)
+        scaled_model.set_temperature(val_loader)
+        temperature = scaled_model.temperature
+        torch.save(scaled_model, f"{args.save_path}/{args.method}-{args.optim}_best_val_scaled_model.pt")
+        if not args.ignore_wandb:
+            wandb.run.summary['temperature'] = scaled_model.temperature.item()
+        res = eval(te_loader, scaled_model, criterion, args.device)   
+        
+    elif args.method in ["vi", "last_vi"]:
+        res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, temperature='local', bma_num_models=1,  bma_save_path=None, num_bins=args.num_bins, eps=args.eps)
+        temperature = res["temperature"]
+    else:
+        raise NotImplementedError("Need Code for temperature scaling on this method")
+    
+    save_reliability_diagram(args.method, args.optim, args.save_path, res['unc'], False)
+    
+    return res, temperature
+
+
+
+def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature):
+    if args.no_ts:
+        bma_temperature = None; tmp_ = -9999.0
+        if args.method in ["swag", "last_swag"]:
+            bma_res = swag_utils.bma_swag(tr_loader, val_loader, te_loader, model, num_classes, criterion, bma_temperature, args.bma_num_models, bma_save_path, args.eps, args.batch_norm, num_bins=args.num_bins)
+        elif args.method in ["vi", "last_vi"]:
+            bma_res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
+        else:
+            raise NotImplementedError("Add code for Bayesian Model Averaging for this method")
+        
+    elif args.ts_opt == 1:
+        ## TS opt 1: using temperature scaled on MAP model
+        bma_temperature = temperature; tmp_ = bma_temperature.item()
+        if args.method in ["swag", "last_swag"]:
+            bma_res = swag_utils.bma_swag(tr_loader, val_loader, te_loader, model, num_classes, criterion, bma_temperature, args.bma_num_models, bma_save_path, args.eps, args.batch_norm, num_bins=args.num_bins)
+        elif args.method in ["vi", "last_vi"]:
+            bma_res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
+        else:
+            raise NotImplementedError("Add code for Bayesian Model Averaging with Temperature scaling for this method")
+
+        
+    elif args.ts_opt == 2:
+        ## TS opt 2: temperature scaling on each model components
+        bma_temperature = 'local'; tmp_ = -9999.0
+        if args.method in ["swag", "last_swag"]:
+            bma_res = swag_utils.bma_swag(tr_loader, val_loader, te_loader, model, num_classes, criterion, bma_temperature, args.bma_num_models, bma_save_path, args.eps, args.batch_norm, num_bins=args.num_bins)
+        elif args.method in ["vi", "last_vi"]:
+            bma_res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
+        else:
+            raise NotImplementedError("Add code for Bayesian Model Averaging with Temperature scaling for this method")
+
+        
+    elif args.ts_opt == 3:
+        ## TS opt 3: temperature scaling on ensembled output
+        # find temperature tau on validation loader first
+        bma_temperature = None; 
+        if args.method in ["swag", "last_swag"]:
+            bma_res = swag_utils.bma_swag(tr_loader, val_loader, val_loader, model, num_classes, criterion, bma_temperature, args.bma_num_models, None, args.eps, args.batch_norm, num_bins=args.num_bins)       
+        elif args.method in ["vi", "last_vi"]:
+            bma_res = vi_utils.bma_vi(val_loader, val_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models, None, args.num_bins, args.eps)
+        else:
+            raise NotImplementedError("Add code for Bayesian Model Averaging with Temperature scaling for this method")
+        bma_logits = bma_res["logits"]; bma_targets = bma_res["targets"]
+        
+        scaled_model = ts.ModelWithTemperature(model, ens=True)
+        scaled_model.set_temperature(val_loader, ens_logits=torch.tensor(bma_logits), ens_pred=torch.tensor(bma_targets))
+        bma_temperature = scaled_model.temperature.unsqueeze(1).expand(bma_logits.shape[0], bma_logits.shape[1])
+        bma_logits = torch.tensor(bma_logits) / bma_temperature.cpu()
+        bma_predictions = F.softmax(bma_logits, dim=1).detach().numpy()
+        bma_res["bma_accuracy"] = np.mean(np.argmax(bma_predictions, axis=1) == bma_targets)
+        bma_res["nll"] = -np.mean(np.log(bma_predictions[np.arange(bma_predictions.shape[0]), bma_targets] + args.eps))
+        bma_res['unc'] = calibration_curve(bma_predictions, bma_targets, args.num_bins)
+        bma_res['ece'] = bma_res['ece']['unc']
+        tmp_ = bma_temperature.item()
+        
+    print(f"3) Calibrated BMA Results:")
+    table = [["Num BMA models", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
+            [args.bma_num_models, format(bma_res['accuracy'], '.4f'), format(bma_res['nll'], '.4f'), format(bma_res['ece'], '.4f'), format(tmp_, '.4f')]]
+    print(tabulate.tabulate(table, tablefmt="simple"))
+    
+    if not args.ignore_wandb:
+        wandb.run.summary['bma accuracy'] = bma_res['accuracy']
+        wandb.run.summary['bma nll'] = bma_res['nll']
+        wandb.run.summary['bma ece'] = bma_res['ece']
+        wandb.run.summary['bma temperature'] = tmp_
+    save_reliability_diagram(args.method, args.optim, args.save_path, bma_res['unc'], True)

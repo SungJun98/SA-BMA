@@ -232,7 +232,7 @@ def schedule(epoch, lr_init, epochs, swa, swa_start=None, swa_lr=None):
 
 
 
-def bma_swag(tr_loader, val_loader, te_loader, model, num_classes, temperature=None, bma_num_models=30, bma_save_path=None, eps=1e-8, batch_norm=True, seed=None):
+def bma_swag(tr_loader, val_loader, te_loader, model, num_classes, criterion, temperature=None, bma_num_models=30, bma_save_path=None, eps=1e-8, batch_norm=True, seed=None, num_bins=15):
     '''
     run bayesian model averaging in test step
     '''
@@ -261,7 +261,7 @@ def bma_swag(tr_loader, val_loader, te_loader, model, num_classes, temperature=N
                     torch.save(model, f'{bma_save_path}/bma_model-{i}.pt')
 
             res = predict(te_loader, model, temperature_)
-            logits = res["logits"];predictions = res["predictions"];targets = res["targets"]
+            logits = res["logits"]; predictions = res["predictions"]; targets = res["targets"]
             
             accuracy = np.mean(np.argmax(predictions, axis=1) == targets)
             nll = -np.mean(np.log(predictions[np.arange(predictions.shape[0]), targets] + eps))
@@ -282,15 +282,19 @@ def bma_swag(tr_loader, val_loader, te_loader, model, num_classes, temperature=N
         bma_logits /= bma_num_models
         bma_predictions /= bma_num_models
 
+        bma_loss = criterion(torch.tensor(bma_predictions), torch.tensor(targets)).item()
         bma_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
         bma_nll = -np.mean(
             np.log(bma_predictions[np.arange(bma_predictions.shape[0]), targets] + eps)
         )
+        bma_unc = utils.calibration_curve(bma_predictions, targets, num_bins)
     
     print(f"bma Accuracy using {bma_num_models} model : {bma_accuracy * 100:.2f}% / NLL : {bma_nll:.4f}")
     return {"logits" : bma_logits,
             "predictions" : bma_predictions,
             "targets" : targets,
-            "bma_accuracy" : bma_accuracy,
-            "nll" : bma_nll
+            "accuracy" : bma_accuracy * 100,
+            "nll" : bma_nll,
+            "unc" : bma_unc, 
+            "ece" : bma_unc['ece']
     }

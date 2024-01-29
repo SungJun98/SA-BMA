@@ -4,7 +4,8 @@ from ..swag.swag_utils import predict, flatten
 import utils.sam.sam_utils as sam_utils
 import utils.utils as utils
 from bayesian_torch.models.dnn_to_bnn import get_kl_loss
-    
+from utils import temperature_scaling as ts
+
 def get_vi_mean_vector(model):
     """
     Get Mean parameters in Variational Inference model
@@ -12,20 +13,20 @@ def get_vi_mean_vector(model):
     mean_list = []
     for name, param in model.named_parameters():
         if "rho" not in name:
-            mean_list.append(param)
+            mean_list.append(param.cpu())
     return flatten(mean_list)
             
             
-def get_vi_variance_vector(model, delta=0.2):
+def get_vi_variance_vector(model):
     """
     Get (Diagonal) Variance Parameters in Variatioanl Inference model
     """
     var_list = []
     for name, param in model.named_parameters():
         if "rho" in name:            
-            var_list.append(torch.log(1+torch.exp(param)))  # rho to variance
+            var_list.append(torch.log(1+torch.exp(param.cpu())))  # rho to variance
         elif ("mu" not in name) and ("rho" not in name):
-            var_list.append(torch.zeros_like(param))
+            var_list.append(torch.zeros_like(param.cpu()))
     return flatten(var_list)
 
 
@@ -45,7 +46,7 @@ def make_last_vi(args, model):
     model.head = bayesian_last_layer.to(args.device)
 
 
-def load_vi(model, checkpoint):
+def load_vi(model, checkpoint):   
     import collections
     ## load only bn (non-dnn) params
     st_dict = collections.OrderedDict()
@@ -184,12 +185,12 @@ def train_vi_sam(dataloader, model, criterion, optimizer, device, first_step_sca
 
 
 
-def eval_vi(val_loader, model, num_classes, criterion, val_mc_num, num_bins=15, eps=1e-8):
+def eval_vi(val_loader, model, num_classes, criterion, val_mc_num, num_bins=15, eps=1e-8):    
     mc_predictions = np.zeros((len(val_loader.dataset), num_classes))
     model.eval()
     with torch.no_grad():
         if val_mc_num == 1:
-            res = predict(val_loader, model, verbose=False)
+            res = predict(val_loader, model)
             predictions = res["predictions"]; targets = res["targets"]
             loss = criterion(torch.tensor(predictions), torch.tensor(targets)).item()
             accuracy = np.mean(np.argmax(predictions, axis=1) == targets)
@@ -198,7 +199,7 @@ def eval_vi(val_loader, model, num_classes, criterion, val_mc_num, num_bins=15, 
             
         else:
             for i in range(val_mc_num):
-                res = predict(val_loader, model, verbose=False)
+                res = predict(val_loader, model)
                 mc_predictions += res["predictions"]
             mc_predictions /= val_mc_num
 
@@ -221,7 +222,7 @@ def eval_vi(val_loader, model, num_classes, criterion, val_mc_num, num_bins=15, 
     
     
     
-def bma_vi(te_loader, mean, variance, model, method, bma_num_models, num_classes, bma_save_path=None, eps=1e-8):
+def bma_vi(val_loader, te_loader, mean, variance, model, method, criterion, num_classes, temperature=None, bma_num_models=30,  bma_save_path=None, num_bins=15, eps=1e-8):
     '''
     run bayesian model averaging in test step
     '''
@@ -229,43 +230,54 @@ def bma_vi(te_loader, mean, variance, model, method, bma_num_models, num_classes
     model_shape = list()
     for p in model.parameters():
         model_shape.append(p.shape)
-    
     if "last" in method:
         last = True
         model_shape = model_shape[-2:]
     else:
         last = False
-        
     for name, _ in model.named_modules():
         last_layer_name = name
-    
+        
+        
+    bma_logits = np.zeros((len(te_loader.dataset), num_classes))
     bma_predictions = np.zeros((len(te_loader.dataset), num_classes))
     with torch.no_grad():
         for i in range(bma_num_models):
             if i == 0:
                sample = mean
             else:
-                # sampling z 
                 sample = mean + variance * torch.randn_like(variance, requires_grad=False)
-
             sample = utils.unflatten_like_size(sample, model_shape)
             sample = utils.list_to_state_dict(model, sample, last, last_layer_name)
             model.load_state_dict(sample, strict=False)
             
-            # save sampled weight for bma
-            if bma_save_path is not None:
-                torch.save(sample, f'{bma_save_path}/bma_model-{i}.pt')
+            if temperature == 'local':
+                scaled_model = ts.ModelWithTemperature(model)
+                scaled_model.set_temperature(val_loader)
+                temperature_ = scaled_model.temperature
+            else:
+                temperature_ = temperature
+            
+            if not bma_num_models == 1:
+                # save sampled weight for bma
+                if bma_save_path is not None:
+                    if temperature == 'local':
+                        torch.save(scaled_model, f'{bma_save_path}/bma_model-{i}.pt')
+                    else:
+                        torch.save(model, f'{bma_save_path}/bma_model-{i}.pt')
  
-            res = predict(te_loader, model, verbose=False)
-            predictions = res["predictions"];targets = res["targets"]
-
+            res = predict(te_loader, model, temperature_)
+            logits = res["logits"]; predictions = res["predictions"];targets = res["targets"]
+            
             accuracy = np.mean(np.argmax(predictions, axis=1) == targets)
             nll = -np.mean(np.log(predictions[np.arange(predictions.shape[0]), targets] + eps))
-            print(
-                "Sample %d/%d. Accuracy: %.2f%% NLL: %.4f"
-                % (i + 1, bma_num_models, accuracy * 100, nll)
-            )
+            if not bma_num_models == 1:
+                print(
+                    "Sample %d/%d. Accuracy: %.2f%% NLL: %.4f"
+                    % (i + 1, bma_num_models, accuracy * 100, nll)
+                )
 
+            bma_logits += logits
             bma_predictions += predictions
 
             ens_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
@@ -275,21 +287,32 @@ def bma_vi(te_loader, mean, variance, model, method, bma_num_models, num_classes
                     + eps
                 )
             )
-            print(
-                "Ensemble %d/%d. Accuracy: %.2f%% NLL: %.4f"
-                % (i + 1, bma_num_models, ens_accuracy * 100, ens_nll)
-            )
+            if not bma_num_models == 1:
+                print(
+                    "Ensemble %d/%d. Accuracy: %.2f%% NLL: %.4f"
+                    % (i + 1, bma_num_models, ens_accuracy * 100, ens_nll)
+                )
 
+        bma_logits /= bma_num_models
         bma_predictions /= bma_num_models
 
+        bma_loss = criterion(torch.tensor(bma_predictions), torch.tensor(targets)).item()
         bma_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
         bma_nll = -np.mean(
             np.log(bma_predictions[np.arange(bma_predictions.shape[0]), targets] + eps)
         )
+        
+        bma_unc = utils.calibration_curve(bma_predictions, targets, num_bins)
     
     print(f"bma Accuracy using {bma_num_models} model : {bma_accuracy * 100:.2f}% / NLL : {bma_nll:.4f}")
-    return {"predictions" : bma_predictions,
+
+    return {"logits" : bma_logits,
+            "predictions" : bma_predictions,
             "targets" : targets,
-            "bma_accuracy" : bma_accuracy,
-            "nll" : bma_nll
-    }
+            "loss" : bma_loss,
+            "accuracy" : bma_accuracy * 100,
+            "nll" : bma_nll,
+            "unc" : bma_unc,
+            "ece" : bma_unc['ece'],
+            "temperature" : temperature_
+    }    
