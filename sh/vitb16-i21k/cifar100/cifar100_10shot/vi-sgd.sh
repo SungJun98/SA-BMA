@@ -7,7 +7,7 @@ for wd in 1e-2 1e-3 1e-4
 do
 for vi_moped_delta in 0.1 0.2
 do
-CUDA_VISIBLE_DEVICES=3 python3 run_baseline.py --method=vi --dataset=cifar10 --data_path=/data1/lsj9862/data/cifar10 --use_validation --dat_per_cls=10 \
+CUDA_VISIBLE_DEVICES=3 python3 run_baseline.py --method=vi --dataset=cifar100 --data_path=/data1/lsj9862/data/cifar100 --use_validation --dat_per_cls=10 \
 --model=vitb16-i21k --pre_trained \
 --optim=sgd --epoch=100 --lr_init=${lr_init} --wd=${wd} \
 --scheduler='cos_decay' \

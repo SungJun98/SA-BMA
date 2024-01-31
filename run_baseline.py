@@ -24,7 +24,7 @@ parser = argparse.ArgumentParser(description="training baselines")
 parser.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
 
 parser.add_argument("--method", type=str, default="dnn",
-                    choices=["dnn", "swag", "last_swag", "vi", "last_vi", "la", "last_la"],
+                    choices=["dnn", "swag", "ll_swag", "vi", "ll_vi", "la", "ll_la"],
                     help="Learning Method")
 
 parser.add_argument("--no_amp", action="store_true", default=False, help="Deactivate AMP")
@@ -237,7 +237,7 @@ if args.method == "swag":
                         max_num_models=args.max_num_models,
                         last_layer=False).to(args.device)
     print("Preparing SWAG model")
-elif args.method == "last_swag":
+elif args.method == "ll_swag":
     swag_model = swag.SWAG(copy.deepcopy(model),
                         no_cov_mat=args.diag_only,
                         max_num_models=args.max_num_models,
@@ -258,7 +258,7 @@ elif args.method == "vi":
     model.to(args.device)
     print(f"Preparing Model for {args.vi_type} VI with MOPED ")
 
-elif args.method == "last_vi":
+elif args.method == "ll_vi":
     vi_utils.make_last_vi(args, model)
     print(f"Preparing Model for last-layer {args.vi_type} VI with MOPED ")
     
@@ -272,7 +272,7 @@ elif args.method == "la":
             backend=AsdlGGN)
     la.fit(tr_loader)
 
-elif args.method == "last_la":
+elif args.method == "ll_la":
     model.load_state_dict(args.la_pt_model)
     from laplace import Laplace
     la = Laplace(model, 'classification',
@@ -314,7 +314,7 @@ if not args.pre_trained and args.resume is not None:
     print(f"Resume training from {args.resume}")
     checkpoint = torch.load(args.resume)
     model.load_state_dict(checkpoint["state_dict"])
-    if args.method == 'last_swag':
+    if args.method == 'll_swag':
         swag_model.base.load_state_dict(checkpoint["state_dict"], strict=False)
     utils.freeze_fe(model)
         
@@ -345,12 +345,12 @@ print("-"*30)
 
 
 ## Training -------------------------------------------------------------------------
-if args.method not in ["la", "last_la"]:
+if args.method not in ["la", "ll_la"]:
     print(f"Start training {args.method} with {args.optim} optimizer from {start_epoch} epoch!")
 
     ## print setting
     columns = ["epoch", "method", "lr", "tr_loss", "tr_acc", "val_loss", "val_acc", "val_nll", "val_ece", "time"]
-    if args.method in ["swag", "last_swag"]:
+    if args.method in ["swag", "ll_swag"]:
         columns = columns[:-1] + ["swag_val_loss", "swag_val_acc", "swag_val_nll", "swag_val_ece"] + columns[-1:]
         swag_res = {"loss": None, "accuracy": None, "nll" : None, "ece" : None}
 
@@ -368,7 +368,7 @@ if args.method not in ["la", "last_la"]:
 
         ## lr scheduling
         if args.scheduler == "swag_lr":
-            if args.method in ["swag", "last_swag"]:
+            if args.method in ["swag", "ll_swag"]:
                 lr = swag_utils.schedule(epoch, args.lr_init, args.epochs, True, args.swa_start, args.swa_lr)
             else:
                 lr = swag_utils.schedule(epoch, args.lr_init, args.epochs, False, None, None)
@@ -377,7 +377,7 @@ if args.method not in ["la", "last_la"]:
             lr = optimizer.param_groups[0]['lr']
         
         ## train
-        if args.method in ["vi", "last_vi"]:
+        if args.method in ["vi", "ll_vi"]:
             if args.optim in ["sgd", "adam"]:
                 tr_res = vi_utils.train_vi_sgd(tr_loader, model, criterion, optimizer, args.device, scaler, args.batch_size, args.kl_beta)
             elif args.optim == "sam":
@@ -389,13 +389,13 @@ if args.method not in ["la", "last_la"]:
                 tr_res = utils.train_sam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
 
         ## valid
-        if args.method in ["vi", "last_vi"]:
+        if args.method in ["vi", "ll_vi"]:
             val_res = vi_utils.eval_vi(val_loader, model, num_classes, criterion, args.val_mc_num, args.num_bins, args.eps)
         else:
             val_res = utils.eval(val_loader, model, criterion, args.device, args.num_bins, args.eps)
 
         ## swag valid
-        if (args.method in ["swag", "last_swag"]) and ((epoch + 1) > args.swa_start) and ((epoch + 1 - args.swa_start) % args.swa_c_epochs == 0):
+        if (args.method in ["swag", "ll_swag"]) and ((epoch + 1) > args.swa_start) and ((epoch + 1 - args.swa_start) % args.swa_c_epochs == 0):
 
             swag_model.collect_model(model)
             swag_model.sample(0.0)
@@ -408,7 +408,7 @@ if args.method not in ["la", "last_la"]:
         time_ep = time.time() - time_ep
 
         ## print result
-        if args.method in ["swag", "last_swag"]:
+        if args.method in ["swag", "ll_swag"]:
             values = [epoch, f"{args.method}-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
                 val_res["loss"], val_res["accuracy"], val_res["nll"], val_res["ece"],
                 swag_res["loss"], swag_res["accuracy"], swag_res["nll"], swag_res["ece"],
@@ -429,7 +429,7 @@ if args.method not in ["la", "last_la"]:
 
         ## wandb
         if not args.ignore_wandb:
-            if args.method in ["swag", "last_swag"]:
+            if args.method in ["swag", "ll_swag"]:
                 wandb.log({"Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
                     "Validation loss" : val_res["loss"], "Validation Accuracy" : val_res["accuracy"],
                     "SWAG Validation loss" : swag_res["loss"], "SWAG Validation Accuracy" : swag_res["accuracy"],
@@ -443,7 +443,7 @@ if args.method not in ["la", "last_la"]:
 
 
         ## Save best model (Early Stopping)
-        if (args.method in ["swag", "last_swag"]) and (swag_res['loss'] is not None):
+        if (args.method in ["swag", "ll_swag"]) and (swag_res['loss'] is not None):
             if swag_res['loss'] < best_swag_val_loss:
                 swag_cnt = 0
                 best_val_loss = val_res["loss"]
@@ -467,7 +467,7 @@ if args.method not in ["la", "last_la"]:
 
                 # save state_dict
                 os.makedirs(args.save_path, exist_ok=True)
-                if args.method in ["vi", "last_vi"]:
+                if args.method in ["vi", "ll_vi"]:
                     mean, variance = vi_utils.save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
                 elif args.method == "dnn":
                     utils.save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
@@ -475,9 +475,9 @@ if args.method not in ["la", "last_la"]:
                 cnt +=1
         
         ## Early Stopping
-        if cnt == args.tol and args.method in ['dnn', "vi", "last_vi"]:
+        if cnt == args.tol and args.method in ['dnn', "vi", "ll_vi"]:
             break
-        elif swag_cnt == args.tol and args.method in ['swag', 'last_swag']:
+        elif swag_cnt == args.tol and args.method in ['swag', 'll_swag']:
             break
 
         if args.scheduler in ["cos_decay", "step_lr"]:
@@ -494,7 +494,7 @@ else:
 ## Test ------------------------------------------------------------------------------------------------------
 ##### Get test nll, Entropy, ece, Reliability Diagram on best model
 ### Load Best Model
-model, mean, variance, best_epoch = utils.load_best_model(args, swag_model, num_classes)
+model, mean, variance, best_epoch = utils.load_best_model(args, model, swag_model, num_classes)
 
 #### MAP
 ## Unscaled Results
@@ -522,7 +522,7 @@ if not args.ignore_wandb:
     
 
 #### Bayesian Model Averaging
-if args.method in ["swag", "last_swag", "vi", "last_vi"]:
+if args.method in ["swag", "ll_swag", "vi", "ll_vi"]:
     utils.set_seed(args.seed)
     bma_save_path = f"{args.save_path}/bma_models"
     os.makedirs(bma_save_path, exist_ok=True) 

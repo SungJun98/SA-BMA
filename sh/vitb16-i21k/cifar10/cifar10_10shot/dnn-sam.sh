@@ -1,24 +1,18 @@
 # ------------------------------------------------------
 ## Coarse
 # ------------------------------------------------------
-# for lr_init in 1e-2 1e-3 1e-4
-# do
-# for lr_min in 1e-8
-# do
-# for warmup_lr_init in 1e-7
-# do
-# for wd in 5e-4
-# do
-# for rho in 0.05 0.1 0.5
-# do
-# CUDA_VISIBLE_DEVICES=1 python3 run_baseline.py --method=dnn --optim=sam --rho=${rho} --dataset=cifar10 --data_path=/data1/lsj9862/data/cifar10 --use_validation --dat_per_cls=10 \
-# --model=vitb16-i21k --pre_trained --linear_probe --lr_init=${lr_init} --epochs=100 --wd=${wd} \
-# --scheduler=cos_decay --lr_min=${lr_min} --warmup_t=10 --warmup_lr_init=${warmup_lr_init}
-# done
-# done
-# done
-# done
-# done
+for lr_init in 1e-4 # 1e-3 1e-4
+do
+for wd in 1e-2 1e-3 1e-4
+do
+for rho in 0.01 0.05 0.1
+do
+CUDA_VISIBLE_DEVICES=4 python3 run_baseline.py --method=dnn --optim=sam --rho=${rho} --dataset=cifar10 --data_path=/data1/lsj9862/data/cifar10 --use_validation --dat_per_cls=10 \
+--model=vitb16-i21k --pre_trained  --lr_init=${lr_init} --epochs=100 --wd=${wd} \
+--scheduler=cos_decay 
+done
+done
+done
 # ------------------------------------------------------
 # ------------------------------------------------------
 

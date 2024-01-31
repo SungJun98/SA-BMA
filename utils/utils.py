@@ -46,11 +46,6 @@ def set_save_path(args):
     else:
         save_path_ = f"{args.save_path}/seed_{args.seed}/{args.dataset}/"
         
-    ### method part    
-    # if args.method == "sabtl":
-    #     method = f"{args.method}-{args.src_bnn}"
-    # else:
-    #     method = args.method
     method = args.method
 
     ### pre-trained / linear_probe / scratch
@@ -68,9 +63,9 @@ def set_save_path(args):
         save_path_ = f"{save_path_}/{am}_{args.model}/{method}-{args.optim}/{args.scheduler}"
     
     ## learning hyperparameter part
-    if args.method in ["swag", "last_swag"]:
+    if args.method in ["swag", "ll_swag"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
-    elif args.method in ["vi", "last_vi"]:
+    elif args.method in ["vi", "ll_vi"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}_{args.kl_beta}"
     elif args.method in ["sabtl"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.momentum}_{args.low_rank}"
@@ -91,10 +86,7 @@ def set_wandb_runname(args):
     '''
     Set wandb run name following the method / model / dataset / optimizer / hyperparameters
     '''
-    # if args.method == "sabtl":
-    #     method = f"{args.method}-{args.src_bnn}"
-    # else:
-    #     method = args.method
+
     method = args.method
 
     ### pre-trained / linear_probe / scratch
@@ -118,9 +110,9 @@ def set_wandb_runname(args):
         run_name_ = f"{run_name_}_{args.scheduler}"
     
     ## learning hyperparameter part
-    if args.method in ["swag", "last_swag"]:
+    if args.method in ["swag", "ll_swag"]:
         run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
-    elif args.method in ["vi", "last_vi"]:
+    elif args.method in ["vi", "ll_vi"]:
         run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}"
     elif args.method in ["sabtl"]:
         run_name_ = f"{run_name_}/{args.lr_init}_{args.wd}_{args.momentum}_{args.low_rank}"
@@ -189,7 +181,7 @@ def get_backbone(model_name, num_classes, device, pre_trained=True):
     
     ## ViT-B/16-ImageNet21K
     if model_name == "vitb16-i21k":
-        model = timm.create_model('vit_base_patch16_224_in21k', pretrained=True)
+        model = timm.create_model('vit_base_patch16_224_in21k', pretrained=pre_trained)
         model.head = torch.nn.Linear(768, num_classes)
     
     model.to(device)
@@ -629,21 +621,21 @@ def save_reliability_diagram(method, optim, save_path, unc, bma=False):
         
 
 
-def load_best_model(args, swag_model, num_classes):
+def load_best_model(args, model, swag_model, num_classes):
     print("Load Best Validation Model (Lowest Loss)")
     state_dict_path = f'{args.save_path}/{args.method}-{args.optim}_best_val.pt'
     checkpoint = torch.load(state_dict_path)
     if not args.ignore_wandb:
         wandb.run.summary['Best epoch'] = checkpoint["epoch"]
     mean = None; variance = None
-    if args.method in ["swag", "last_swag"]:
+    if args.method in ["swag", "ll_swag"]:
         swag_model.load_state_dict(checkpoint["state_dict"])
         model = swag_model
         
-    elif args.method in ["vi", "last_vi"]:
+    elif args.method in ["vi", "ll_vi"]:
         model = get_backbone(args.model, num_classes, args.device, args.pre_trained)
-        if args.method == "last_vi":
-            vi_utils.make_last_vi(args, model)
+        if args.method == "ll_vi":
+            vi_utils.make_ll_vi(args, model)
         vi_utils.load_vi(model, checkpoint)
         # mean = vi_utils.get_vi_mean_vector(model)
         # variance = vi_utils.get_vi_variance_vector(model)
@@ -659,10 +651,10 @@ def load_best_model(args, swag_model, num_classes):
  
 
 def no_ts_map_estimation(args, te_loader, num_classes, model, mean, variance, criterion):
-    if args.method in ["swag", "last_swag"]:
+    if args.method in ["swag", "ll_swag"]:
         model.sample(0)
         res = eval(te_loader, model, criterion, args.device)
-    elif args.method in ["vi", "last_vi"]:
+    elif args.method in ["vi", "ll_vi"]:
         res = vi_utils.bma_vi(None, te_loader, mean, variance, model, args.method, criterion, num_classes, temperature=None, bma_num_models=1,  bma_save_path=None, num_bins=args.num_bins, eps=args.eps)  
     else:
         res = eval(te_loader, model, criterion, args.device)
@@ -672,7 +664,7 @@ def no_ts_map_estimation(args, te_loader, num_classes, model, mean, variance, cr
 def ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, variance, criterion):
     # Temperature Scaled Results
     scaled_model = None
-    if args.method in ["dnn", "swag", "last_swag"]:
+    if args.method in ["dnn", "swag", "ll_swag"]:
         scaled_model = ts.ModelWithTemperature(model)
         scaled_model.set_temperature(val_loader)
         temperature = scaled_model.temperature
@@ -681,7 +673,7 @@ def ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, var
             wandb.run.summary['temperature'] = scaled_model.temperature.item()
         res = eval(te_loader, scaled_model, criterion, args.device)   
         
-    elif args.method in ["vi", "last_vi"]:
+    elif args.method in ["vi", "ll_vi"]:
         res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, temperature='local', bma_num_models=1,  bma_save_path=None, num_bins=args.num_bins, eps=args.eps)
         temperature = res["temperature"]
     else:
@@ -696,9 +688,9 @@ def ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, var
 def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature):
     if args.no_ts:
         bma_temperature = None; tmp_ = -9999.0
-        if args.method in ["swag", "last_swag"]:
+        if args.method in ["swag", "ll_swag"]:
             bma_res = swag_utils.bma_swag(tr_loader, val_loader, te_loader, model, num_classes, criterion, bma_temperature, args.bma_num_models, bma_save_path, args.eps, args.batch_norm, num_bins=args.num_bins)
-        elif args.method in ["vi", "last_vi"]:
+        elif args.method in ["vi", "ll_vi"]:
             bma_res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
         else:
             raise NotImplementedError("Add code for Bayesian Model Averaging for this method")
@@ -706,9 +698,9 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
     elif args.ts_opt == 1:
         ## TS opt 1: using temperature scaled on MAP model
         bma_temperature = temperature; tmp_ = bma_temperature.item()
-        if args.method in ["swag", "last_swag"]:
+        if args.method in ["swag", "ll_swag"]:
             bma_res = swag_utils.bma_swag(tr_loader, val_loader, te_loader, model, num_classes, criterion, bma_temperature, args.bma_num_models, bma_save_path, args.eps, args.batch_norm, num_bins=args.num_bins)
-        elif args.method in ["vi", "last_vi"]:
+        elif args.method in ["vi", "ll_vi"]:
             bma_res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
         else:
             raise NotImplementedError("Add code for Bayesian Model Averaging with Temperature scaling for this method")
@@ -717,9 +709,9 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
     elif args.ts_opt == 2:
         ## TS opt 2: temperature scaling on each model components
         bma_temperature = 'local'; tmp_ = -9999.0
-        if args.method in ["swag", "last_swag"]:
+        if args.method in ["swag", "ll_swag"]:
             bma_res = swag_utils.bma_swag(tr_loader, val_loader, te_loader, model, num_classes, criterion, bma_temperature, args.bma_num_models, bma_save_path, args.eps, args.batch_norm, num_bins=args.num_bins)
-        elif args.method in ["vi", "last_vi"]:
+        elif args.method in ["vi", "ll_vi"]:
             bma_res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
         else:
             raise NotImplementedError("Add code for Bayesian Model Averaging with Temperature scaling for this method")
@@ -729,9 +721,9 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
         ## TS opt 3: temperature scaling on ensembled output
         # find temperature tau on validation loader first
         bma_temperature = None; 
-        if args.method in ["swag", "last_swag"]:
+        if args.method in ["swag", "ll_swag"]:
             bma_res = swag_utils.bma_swag(tr_loader, val_loader, val_loader, model, num_classes, criterion, bma_temperature, args.bma_num_models, None, args.eps, args.batch_norm, num_bins=args.num_bins)       
-        elif args.method in ["vi", "last_vi"]:
+        elif args.method in ["vi", "ll_vi"]:
             bma_res = vi_utils.bma_vi(val_loader, val_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models, None, args.num_bins, args.eps)
         else:
             raise NotImplementedError("Add code for Bayesian Model Averaging with Temperature scaling for this method")

@@ -9,7 +9,7 @@ for swa_start in 51 76
 do
 for swa_c_epochs in 1
 do
-CUDA_VISIBLE_DEVICES=2 python3 run_baseline.py --method=swag --dataset=cifar10  --data_path=/data1/lsj9862/data/cifar10 --use_validation --dat_per_cls=10 \
+CUDA_VISIBLE_DEVICES=2 python3 run_baseline.py --method=swag --dataset=cifar100  --data_path=/data1/lsj9862/data/cifar100 --use_validation --dat_per_cls=10 \
 --model=vitb16-i21k --pre_trained  --optim=sgd --epochs=150  --lr_init=${lr_init} --wd=${wd} \
 --scheduler=cos_decay --swa_start=${swa_start} --swa_c_epochs=${swa_c_epochs} --max_num_models=5 --ignore_wandb
 done

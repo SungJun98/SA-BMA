@@ -30,7 +30,7 @@ def get_vi_variance_vector(model):
     return flatten(var_list)
 
 
-def make_last_vi(args, model):
+def make_ll_vi(args, model):
     from bayesian_torch.models.dnn_to_bnn import dnn_to_bnn
     bayesian_last_layer = torch.nn.Sequential(list(model.children())[-1])
     const_bnn_prior_parameters = {
@@ -241,6 +241,7 @@ def bma_vi(val_loader, te_loader, mean, variance, model, method, criterion, num_
         raise NotImplementedError("Add code for last block vi")
     else:
         tr_layer = "full_layer"
+        tr_layer_name = None
     
         
     bma_logits = np.zeros((len(te_loader.dataset), num_classes))
