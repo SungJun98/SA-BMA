@@ -158,7 +158,7 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
 
 
 
-def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta, first_step_scaler, second_step_scaler):
+def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta, first_step_scaler, second_step_scaler, tr_layer):
     loss_sum = 0.0
     correct = 0.0
     num_objects_current = 0
@@ -168,8 +168,8 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
         X, y = X.to(device), y.to(device)
         params, z_1, z_2 = sabtl_model.sample(1.0)    # Sample weight
 
-        log_grad = sabtl_model.log_grad(params, approx='full', eta=eta)             # compute Fisher inverse
-        params = utils.format_weights(params, sabtl_model)       # Change weight sample shape to input model
+        log_grad = sabtl_model.log_grad(params, approx='full', eta=eta)             # compute gradient of log probability w.r.t. model parameters
+        params = utils.format_weights(params, sabtl_model, tr_layer)       # Change weight sample shape to input model
 
         if first_step_scaler is not None:
             ## first forward & backward
@@ -277,7 +277,7 @@ def eval_sabtl(loader, sabtl_model, params, criterion, device, num_bins=15, eps=
 def bma_sabtl(te_loader, sabtl_model, bma_num_models,
             num_classes, criterion, device,
             bma_save_path=None, eps=1e-8, num_bins=15,
-            validation=False,
+            validation=False, tr_layer="last_layer"
             ):
     '''
     run bayesian model averaging in test step
@@ -287,16 +287,16 @@ def bma_sabtl(te_loader, sabtl_model, bma_num_models,
         for i in range(bma_num_models):
             
             if i == 0:
-                params, _, _ = sabtl_model.sample(z_scale=0, last_only=False)
+                params, _, _ = sabtl_model.sample(z_scale=0, tr_param_only=False)
             else:
-                params, _, _  = sabtl_model.sample(z_scale=1.0, last_only=False)
+                params, _, _  = sabtl_model.sample(z_scale=1.0, tr_param_only=False)
             
             # save sampled weight for bma
             if (bma_save_path is not None) and (not validation):
                 torch.save(params, f'{bma_save_path}/bma_model-{i}.pt')
             
             # params = utils.format_weights(params, sabtl_model)
-            params = utils.format_weights(params, sabtl_model, last_only=False)
+            params = utils.format_weights(params, sabtl_model, tr_layer)
             res = eval_sabtl(te_loader, sabtl_model, params, criterion, device, num_bins, eps)
 
             if not validation:
@@ -329,3 +329,49 @@ def bma_sabtl(te_loader, sabtl_model, bma_num_models,
             "nll" : sabtl_nll,
             "ece" : sabtl_ece
             }
+    
+    
+    
+def save_best_sabtl_model(args, best_epoch, sabtl_model, optimizer, scaler, first_step_scaler, second_step_scaler):
+    if args.optim == "sgd":
+        if not args.no_amp:
+            utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                            epoch = best_epoch,
+                            state_dict =sabtl_model.state_dict(),
+                            optimizer = optimizer.state_dict(),
+                            # scheduler = scheduler.state_dict(),
+                            scaler = scaler.state_dict(),
+                            )
+        else:
+            utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                            epoch = best_epoch,
+                            state_dict =sabtl_model.state_dict(),
+                            optimizer = optimizer.state_dict(),
+                            # scheduler = scheduler.state_dict(),
+                            )
+    elif args.optim in ["sam", "bsam"]:
+        if not args.no_amp:
+            utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                epoch = best_epoch,
+                                state_dict = sabtl_model.state_dict(),
+                                optimizer = optimizer.state_dict(),
+                                # scheduler = scheduler.state_dict(),
+                                first_step_scaler = first_step_scaler.state_dict(),
+                                second_step_scaler = second_step_scaler.state_dict()
+                                )
+        else:
+            utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
+                                epoch = best_epoch,
+                                state_dict = sabtl_model.state_dict(),
+                                optimizer = optimizer.state_dict(),
+                                # scheduler = scheduler.state_dict(),
+                                )
+    # Save Mean, variance, Covariance matrix
+    mean = sabtl_model.get_mean_vector()
+    torch.save(mean,f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
+    
+    variance = sabtl_model.get_variance_vector()
+    torch.save(variance, f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
+    
+    cov_mat_list = sabtl_model.get_covariance_matrix()
+    torch.save(cov_mat_list, f'{args.save_path}/{args.method}-{args.optim}_best_val_covmat.pt')    

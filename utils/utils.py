@@ -354,56 +354,6 @@ def save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_s
                             # scheduler = scheduler.state_dict(),
                             )
 
-
-
-
-
-"""
-나중에 sabtl_utils로 옮기기
-"""
-def save_best_sabtl_model(args, best_epoch, sabtl_model, optimizer, scaler, first_step_scaler, second_step_scaler):
-    if args.optim == "sgd":
-        if not args.no_amp:
-            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                            epoch = best_epoch,
-                            state_dict =sabtl_model.state_dict(),
-                            optimizer = optimizer.state_dict(),
-                            # scheduler = scheduler.state_dict(),
-                            scaler = scaler.state_dict(),
-                            )
-        else:
-            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                            epoch = best_epoch,
-                            state_dict =sabtl_model.state_dict(),
-                            optimizer = optimizer.state_dict(),
-                            # scheduler = scheduler.state_dict(),
-                            )
-    elif args.optim in ["sam", "bsam"]:
-        if not args.no_amp:
-            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                epoch = best_epoch,
-                                state_dict = sabtl_model.state_dict(),
-                                optimizer = optimizer.state_dict(),
-                                # scheduler = scheduler.state_dict(),
-                                first_step_scaler = first_step_scaler.state_dict(),
-                                second_step_scaler = second_step_scaler.state_dict()
-                                )
-        else:
-            save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
-                                epoch = best_epoch,
-                                state_dict = sabtl_model.state_dict(),
-                                optimizer = optimizer.state_dict(),
-                                # scheduler = scheduler.state_dict(),
-                                )
-    # Save Mean, variance, Covariance matrix
-    mean = sabtl_model.get_mean_vector()
-    torch.save(mean,f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
-    
-    variance = sabtl_model.get_variance_vector()
-    torch.save(variance, f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
-    
-    cov_mat_list = sabtl_model.get_covariance_matrix()
-    torch.save(cov_mat_list, f'{args.save_path}/{args.method}-{args.optim}_best_val_covmat.pt')    
     
 
 # parameter list to state_dict(ordered Dict)

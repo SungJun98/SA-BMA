@@ -316,18 +316,18 @@ for epoch in range(start_epoch, int(args.epochs)+1):
     elif args.optim == "sam":
         tr_res = sabtl_utils.train_sabtl_sam(tr_loader, sabtl_model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
     elif args.optim == "bsam":
-        tr_res = sabtl_utils.train_sabtl_bsam(tr_loader, sabtl_model, criterion, optimizer, args.device, args.eta, first_step_scaler, second_step_scaler)
+        tr_res = sabtl_utils.train_sabtl_bsam(tr_loader, sabtl_model, criterion, optimizer, args.device, args.eta, first_step_scaler, second_step_scaler, args.tr_layer)
         
     # validation / test
     if args.val_mc_num ==1:
         params, _, _ = sabtl_model.sample(0.0)
-        params = utils.format_weights(params, sabtl_model)
+        params = utils.format_weights(params, sabtl_model, args.tr_layer)
         val_res = sabtl_utils.eval_sabtl(val_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
     else:
         val_res = sabtl_utils.bma_sabtl(val_loader, sabtl_model, args.val_mc_num,
                             num_classes, criterion, args.device,
                             bma_save_path=None, eps=1e-8, num_bins=50,
-                            validation=True,
+                            validation=True, tr_layer=args.tr_layer
                             )
     
     time_ep = time.time() - time_ep
@@ -376,7 +376,7 @@ for epoch in range(start_epoch, int(args.epochs)+1):
         
         # save state_dict
         os.makedirs(args.save_path, exist_ok=True)
-        utils.save_best_sabtl_model(args, best_epoch, sabtl_model, optimizer, scaler, first_step_scaler, second_step_scaler)
+        sabtl_utils.save_best_sabtl_model(args, best_epoch, sabtl_model, optimizer, scaler, first_step_scaler, second_step_scaler)
     else:
         cnt += 1
 
@@ -395,8 +395,7 @@ for epoch in range(start_epoch, int(args.epochs)+1):
 # Load Best Model
 print("Load Best Validation Model (Lowest Loss)")
 state_dict_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt"
-checkpoint = torch.load(state_dict_path)
-
+checkpoint = torch.load(state_dict_path)   
 sabtl_model.load_state_dict(checkpoint["state_dict"])
 sabtl_model.to(args.device)
 
@@ -406,7 +405,8 @@ os.makedirs(bma_save_path, exist_ok=True)
 
 bma_res = sabtl_utils.bma_sabtl(te_loader, sabtl_model, args.bma_num_models,
                     num_classes, criterion, args.device,
-                    bma_save_path=bma_save_path, eps=args.eps, num_bins=args.num_bins)
+                    bma_save_path=bma_save_path, eps=args.eps, num_bins=args.num_bins,
+                    validation=False, tr_layer=args.tr_layer)
 
 bma_predictions = bma_res["predictions"]
 bma_targets = bma_res["targets"]
@@ -439,8 +439,8 @@ utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, Tru
 
 
 ### MAP Prediction
-params, _, _ = sabtl_model.sample(0, last_only=False)
-params = utils.format_weights(params, sabtl_model, last_only=False)
+params, _, _ = sabtl_model.sample(0, tr_param_only=False)
+params = utils.format_weights(params, sabtl_model, tr_layer=args.tr_layer)
 
 res = sabtl_utils.eval_sabtl(te_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
 unc = utils.calibration_curve(res['predictions'], res['targets'], args.num_bins)
@@ -460,7 +460,6 @@ tab_contents= [checkpoint['epoch'], format(res['accuracy'], '.2f'), format(res['
 table = [tab_name, tab_contents]
 print(tabulate.tabulate(table, tablefmt="simple"))
 print("-"*30)
-
 
 
 # Save ece for reliability diagram

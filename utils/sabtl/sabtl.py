@@ -51,6 +51,7 @@ class SABTL(torch.nn.Module):
             raise NotImplementedError("Need code for last block SA-BMA")
         elif tr_layer == "full_layer":
             self.tr_layer_shape = self.full_model_shape
+            self.tr_layer_name = None
         
         if w_mean is None:
             raise NotImplementedError("We need Pre-trained weight to define model")
@@ -131,6 +132,7 @@ class SABTL(torch.nn.Module):
         return nn.utils.stateless.functional_call(self.backbone, params, input)
     
     
+    
     def sample(self, z_scale=1.0, tr_param_only=False):
         '''
         Sample weight from bnn params
@@ -181,7 +183,7 @@ class SABTL(torch.nn.Module):
         else:
             # sampling only trainig params
             z_1 = torch.randn_like(self.bnn_param['mean'], requires_grad=False)
-            rand_sample = torch.exp(self.bn_param['log_std']) * z_1
+            rand_sample = torch.exp(self.bnn_param['log_std']) * z_1
             
             if not self.diag_only:
                 z_2 = self.bnn_param['cov_sqrt'].new_empty((self.low_rank, ), requires_grad=False).normal_(z_scale)
@@ -223,6 +225,7 @@ class SABTL(torch.nn.Module):
         # print(f"Mean FI / nan : {torch.sum(torch.isnan(mean_fi))} / max {torch.max(mean_fi)}")
         
         # diagonal variance
+        # import pdb;pdb.set_trace()
         std_log_grad = torch.autograd.grad(log_prob, self.bnn_param['log_std'], retain_graph=True)[0]
         # print(f"log_std FI / nan : {torch.sum(torch.isnan(std_fi))} / max {torch.max(std_fi)}")
         
