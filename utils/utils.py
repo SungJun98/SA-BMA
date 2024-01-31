@@ -407,14 +407,16 @@ def save_best_sabtl_model(args, best_epoch, sabtl_model, optimizer, scaler, firs
     
 
 # parameter list to state_dict(ordered Dict)
-def list_to_state_dict(model, sample_list, last=False, last_layer_name="fc"):
+def list_to_state_dict(model, sample_list, tr_layer="last_layer", last_layer_name="fc"):
     '''
     Change sample list to state dict
     '''
     ordDict = collections.OrderedDict()
-    if last:
+    if tr_layer == "last_layer":
         ordDict[f"{last_layer_name}.weight"] = sample_list[0]
         ordDict[f"{last_layer_name}.bias"] = sample_list[1]   
+    elif tr_layer == "last_block":
+        raise NotImplementedError("Need code for last block SA-BMA")
     else:        
         for sample, (name, param) in zip(sample_list, model.named_parameters()):
             ordDict[name] = sample
@@ -438,16 +440,16 @@ def unflatten_like_size(vector, likeTensorSize):
     return outList
 
 
-def format_weights(sample, sabtl_model, last_only=False):
+def format_weights(sample, sabtl_model, tr_layer="last_layer"):
     '''
     Format sampled vector to state dict
     '''  
-    if last_only:
-        model_shape = sabtl_model.last_layer_shape
+    if tr_layer in ["last_layer", "last_block"]:
+        model_shape = sabtl_model.tr_layer_shape
     else:
         model_shape = sabtl_model.full_model_shape
     sample = unflatten_like_size(sample, model_shape)
-    state_dict = list_to_state_dict(sabtl_model.backbone, sample, last=last_only, last_layer_name=sabtl_model.last_layer_name)
+    state_dict = list_to_state_dict(sabtl_model.backbone, sample, tr_layer, sabtl_model.tr_layer_name)
     return state_dict
 
     

@@ -126,9 +126,17 @@ model = utils.get_backbone(args.model, num_classes, args.device, args.pre_traine
 print("-"*30)
 
 if args.method == "swag":
-    args.last = False
+    args.tr_layer = "full_layer"
 elif args.method == "last_swag":
-    args.last = True
+    args.tr_layer = "last_layer"
+    
+if args.tr_layer == "last_layer":
+    for name, _ in model.named_modules():
+        tr_layer_name = name
+elif args.tr_layer == "last_block":
+    raise NotImplementedError("need code for last block")
+else:
+    tr_layer_name = None
 #-------------------------------------------------------------------
 
 
@@ -172,7 +180,7 @@ for type_, bma_paths in enumerate([flat_bma_paths, rand_bma_paths, sharp_bma_pat
             for j, bma_model in enumerate(bma_models):
                 # get sampled model
                 bma_sample = torch.load(f"{args.bma_load_path}/{bma_model}")
-                bma_state_dict = utils.list_to_state_dict(model, bma_sample, last=args.last)
+                bma_state_dict = utils.list_to_state_dict(model, bma_sample, args.tr_layer, tr_layer_name)
                 model.load_state_dict(bma_state_dict, strict=False)
 
                 if args.batch_norm:

@@ -29,8 +29,10 @@ parser.add_argument("--print_epoch", type=int, default=10, help="Printing epoch"
 parser.add_argument("--resume", type=str, default=None,
     help="path to load saved model to resume training (default: None)",)
 
-parser.add_argument("--last_layer", action="store_true", default=True,
-        help = "When we do Linear Probing (Default : True)")
+# parser.add_argument("--last_layer", action="store_true", default=True,
+        # help = "When we do Linear Probing (Default : True)")
+parser.add_argument("--tr_layer", type=str, default="last_layer", choices=["last_layer", "full_layer", "last_block"],
+            help="Choose layer which would be trained with our method")
 
 parser.add_argument("--tol", type=int, default=50,
         help="tolerance for early stopping (Default : 50)")
@@ -206,8 +208,15 @@ elif args.src_bnn == "vi":
     bn_state_dict = {key: value for key, value in checkpoint["state_dict"].items() if 'bn' in key}
     model.load_state_dict(bn_state_dict, strict=False)
     
-if args.last_layer:
+# if args.last_layer:
+#     utils.freeze_fe(model)
+if args.tr_layer == "last_layer":
     utils.freeze_fe(model)
+elif args.tr_layer =="last_block":
+    raise NotImplementedError("No code for last block training")
+elif args.tr_layer == "full_layer":
+    pass
+
 
 w_mean = torch.load(args.mean_path)
 w_var = torch.load(args.var_path)
@@ -224,7 +233,7 @@ sabtl_model = sabtl.SABTL(copy.deepcopy(model),
                         low_rank=args.low_rank,
                         w_cov_sqrt=w_covmat,
                         cov_scale=args.cov_scale,
-                        last_layer=args.last_layer,
+                        tr_layer=args.tr_layer,
                         ).to(args.device)
 if not args.ignore_wandb:
     wandb.config.update({"low_rank" : sabtl_model.low_rank})

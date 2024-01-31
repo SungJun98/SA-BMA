@@ -168,7 +168,7 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
         X, y = X.to(device), y.to(device)
         params, z_1, z_2 = sabtl_model.sample(1.0)    # Sample weight
 
-        fish_inv = sabtl_model.fish_inv(params, approx='full', eta=eta)             # compute Fisher inverse
+        log_grad = sabtl_model.log_grad(params, approx='full', eta=eta)             # compute Fisher inverse
         params = utils.format_weights(params, sabtl_model)       # Change weight sample shape to input model
 
         if first_step_scaler is not None:
@@ -185,7 +185,7 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
             inf_grad_cnt = sum(v.item() for v in optimizer_state["found_inf_per_device"].values())      # Check if any gradients are inf/nan
             if inf_grad_cnt == 0:
                 # if valid graident, apply sam_first_step
-                optimizer.first_step(fish_inv, zero_grad=True)
+                optimizer.first_step(log_grad, zero_grad=True)
                 sam_first_step_applied = True
             else:
                 # if invalid graident, skip sam and revert to single optimization step
@@ -215,7 +215,7 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
             pred = sabtl_model(params, X)
             loss = criterion(pred, y)        
             loss.backward()
-            optimizer.first_step(fish_inv, zero_grad=True, amp=False)
+            optimizer.first_step(log_grad, zero_grad=True, amp=False)
                       
             ## second forward-backward pass
             params = optimizer.second_sample(z_1, z_2, sabtl_model)

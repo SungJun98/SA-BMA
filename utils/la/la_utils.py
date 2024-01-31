@@ -55,16 +55,23 @@ def sample_la(mean, var, seed=None):
     return sample
     
 
-def bma_la(te_loader, mean, var, model, la, last=False, bma_num_models=30, num_classes=10, bma_save_path=None, eps=1e-8):
+def bma_la(te_loader, mean, var, model, la, tr_layer="last_layer", bma_num_models=30, num_classes=10, bma_save_path=None, eps=1e-8):
     model_shape = list()
     for p in model.parameters():
         model_shape.append(p.shape)
     
-    if last:
+    if tr_layer == "last_layer":
         model_shape = model_shape[-2:]
-        
+
+    elif tr_layer == "last_block":
+        raise NotImplementedError("Need code for last block LA")
+    else:
+        pass
+    
+    ## in case of last layer LA (Need to fix for last block LA)
     for name, _ in model.named_modules():
-        last_layer_name = name
+        tr_layer_name = name
+    
     
     bma_predictions = np.zeros((len(te_loader.dataset), num_classes))
     with torch.no_grad():
@@ -76,7 +83,7 @@ def bma_la(te_loader, mean, var, model, la, last=False, bma_num_models=30, num_c
                 sample = la.sample(n_samples=1)
 
             sample = utils.unflatten_like_size(sample, model_shape)
-            sample = utils.list_to_state_dict(model, sample, last, last_layer_name)
+            sample = utils.list_to_state_dict(model, sample, tr_layer, tr_layer_name)
             model.load_state_dict(sample, strict=False)
 
             # save sampled weight for bma

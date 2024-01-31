@@ -230,14 +230,18 @@ def bma_vi(val_loader, te_loader, mean, variance, model, method, criterion, num_
     model_shape = list()
     for p in model.parameters():
         model_shape.append(p.shape)
-    if "last" in method:
-        last = True
-        model_shape = model_shape[-2:]
-    else:
-        last = False
-    for name, _ in model.named_modules():
-        last_layer_name = name
         
+    if "last_layer" in method:
+        tr_layer = "last_layer"
+        model_shape = model_shape[-2:]
+        for name, _ in model.named_modules():
+            tr_layer_name = name
+    elif "last_block" in method:
+        tr_layer = "last_block"
+        raise NotImplementedError("Add code for last block vi")
+    else:
+        tr_layer = "full_layer"
+    
         
     bma_logits = np.zeros((len(te_loader.dataset), num_classes))
     bma_predictions = np.zeros((len(te_loader.dataset), num_classes))
@@ -248,7 +252,7 @@ def bma_vi(val_loader, te_loader, mean, variance, model, method, criterion, num_
             else:
                 sample = mean + variance * torch.randn_like(variance, requires_grad=False)
             sample = utils.unflatten_like_size(sample, model_shape)
-            sample = utils.list_to_state_dict(model, sample, last, last_layer_name)
+            sample = utils.list_to_state_dict(model, sample, tr_layer, tr_layer_name)
             model.load_state_dict(sample, strict=False)
             
             if temperature == 'local':
