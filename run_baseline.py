@@ -44,7 +44,7 @@ parser.add_argument("--tol", type=int, default=30,
 
 ## Data ---------------------------------------------------------
 parser.add_argument(
-    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100"],
+    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "imagenet"],
                     help="dataset name")
 
 parser.add_argument(

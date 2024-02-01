@@ -141,7 +141,7 @@ def get_dataset(dataset='cifar10',
     import utils.data.data as data
     
     ## Define Transform
-    transform_train, transform_test = data.create_transform_v2(aug=aug)
+    transform_train, transform_test = data.create_transform_v2(data_name=dataset, aug=aug)
     
     ## Load Data
     tr_data, val_data, te_data, num_classes = data.create_dataset(data_name=dataset, data_path=data_path,
@@ -151,7 +151,8 @@ def get_dataset(dataset='cifar10',
                                         )
     
     ## Create loader
-    tr_loader, val_loader, te_loader = data.create_loader(tr_data=tr_data, val_data=val_data, te_data=te_data,
+    tr_loader, val_loader, te_loader = data.create_loader(data_name=dataset,
+                                            tr_data=tr_data, val_data=val_data, te_data=te_data,
                                             use_validation=use_validation,
                                             batch_size=batch_size, num_workers=num_workers, dat_per_cls=dat_per_cls,
                                             )

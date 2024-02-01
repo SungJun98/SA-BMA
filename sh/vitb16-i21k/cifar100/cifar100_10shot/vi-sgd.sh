@@ -1,11 +1,11 @@
 ##------------------------------------------------------------------
 ## Coarse
 ##------------------------------------------------------------------
-for lr_init in 1e-3 1e-4
+for lr_init in 1e-3
 do
 for wd in 1e-2 1e-3 1e-4
 do
-for vi_moped_delta in 0.1 0.2
+for vi_moped_delta in 0.05 0.1
 do
 CUDA_VISIBLE_DEVICES=3 python3 run_baseline.py --method=vi --dataset=cifar100 --data_path=/data1/lsj9862/data/cifar100 --use_validation --dat_per_cls=10 \
 --model=vitb16-i21k --pre_trained \
