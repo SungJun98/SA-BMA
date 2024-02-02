@@ -47,7 +47,7 @@ parser.add_argument(
 parser.add_argument(
     "--data_path",
     type=str,
-    default='/data1/lsj9862/data/cifar10',
+    default='/data1/lsj9862/data',
     help="path to datasets location",)
 
 parser.add_argument("--batch_size", type=int, default=256,
@@ -180,6 +180,7 @@ if not args.ignore_wandb:
 #----------------------------------------------------------------
 
 # Load Data --------------------------------------------------------
+args.data_path = os.path.join(args.data_path, args.dataset)
 tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
                                                         data_path=args.data_path,
                                                         dat_per_cls=args.dat_per_cls,

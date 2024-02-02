@@ -129,7 +129,7 @@ def set_wandb_runname(args):
 
 
 def get_dataset(dataset='cifar10',
-                data_path='/data2/lsj9862/data/cifar10',
+                data_path='/mlainas/lsj9862/data/cifar10',
                 dat_per_cls=-1,
                 use_validation=True, 
                 batch_size=256,
@@ -687,6 +687,9 @@ def ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, var
 
 
 def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature):
+    if args.no_save_bma:
+        bma_save_path = None
+        
     if args.no_ts:
         bma_temperature = None; tmp_ = -9999.0
         if args.method in ["swag", "ll_swag"]:

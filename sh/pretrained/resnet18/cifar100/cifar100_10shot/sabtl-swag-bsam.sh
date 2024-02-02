@@ -10,7 +10,7 @@
 # do
 # for eta in 1 0.5 0.1
 # do
-# CUDA_VISIBLE_DEVICES=5 python3 run_sabtl.py --dataset=cifar100 --data_path=/data1/lsj9862/data/cifar100 --use_validation --dat_per_cls=10 \
+# CUDA_VISIBLE_DEVICES=5 python3 run_sabtl.py --dataset=cifar100 --use_validation --dat_per_cls=10 \
 # --model=resnet18 --pre_trained --last_layer --optim=bsam --rho=${rho} --lr_init=${lr_init} --wd=${wd} --epochs=200 \
 # --eta=${eta} --low_rank=3 --var_scale=1 --cov_scale=1 \
 # --model_path="/mlainas/lsj9862/exp_result/fine_tuning/seed_0/cifar100/10shot/resnet18/swag-sgd/swag-sgd_best_val_model.pt" \

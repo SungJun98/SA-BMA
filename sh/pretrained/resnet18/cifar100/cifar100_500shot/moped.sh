@@ -8,7 +8,7 @@
 # do
 # for kl_beta in 0.1 1
 # do
-# CUDA_VISIBLE_DEVICES=6 python3 run_baseline.py --dataset=cifar100 --data_path=/data1/lsj9862/data/cifar100 --use_validation \
+# CUDA_VISIBLE_DEVICES=6 python3 run_baseline.py --dataset=cifar100 --use_validation \
 # --method=vi --model=resnet18 --pre_trained \
 # --optim=sgd --lr_init=${lr_init} --wd=${wd} --epoch=100 --scheduler="cos_decay" \
 # --vi_prior_mu=0.0 --vi_prior_sigma=1.0 \
@@ -24,7 +24,7 @@
 
 for seed in 1 2 # 0 1 2 
 do
-CUDA_VISIBLE_DEVICES=7 python3 run_baseline.py --dataset=cifar100 --data_path=/data1/lsj9862/data/cifar100 --use_validation \
+CUDA_VISIBLE_DEVICES=7 python3 run_baseline.py --dataset=cifar100 --use_validation \
 --method=vi --model=resnet18 --pre_trained \
 --optim=sgd --lr_init=1e-2 --wd=1e-4 --epoch=100 --scheduler="cos_decay" \
 --vi_prior_mu=0.0 --vi_prior_sigma=1.0 \

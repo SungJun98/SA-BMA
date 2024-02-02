@@ -50,7 +50,7 @@ parser.add_argument(
 parser.add_argument(
     "--data_path",
     type=str,
-    default='/data1/lsj9862/data/cifar10',
+    default='/mlainas/lsj9862/data',
     help="path to datasets location",)
 
 parser.add_argument("--batch_size", type=int, default=256,
@@ -157,13 +157,15 @@ parser.add_argument("--val_mc_num", type=int, default=1, help="number of MC samp
 parser.add_argument("--eps", type=float, default=1e-8, help="small float to calculate nll")
 parser.add_argument("--bma_num_models", type=int, default=30, help="Number of models for bma")
 parser.add_argument("--num_bins", type=int, default=15, help="bin number for ece")
+parser.add_argument("--no_save_bma", action='store_true', default=False,
+            help="Deactivate saving model samples in BMA")
 #----------------------------------------------------------------
 
 ## calibration --------------------------------------------------
 parser.add_argument("--no_ts", action="store_true", default=False,
             help="Deactivate Temperature Scaling (Default: False)")
 parser.add_argument("--ts_opt", type=int, default=1,
-                help="BNN calibration option 1) fit tau on MAP model, 2) fit tau on every sampled model, 3) fit tau on ensembled model (Default: 1)")
+            help="BNN calibration option 1) fit tau on MAP model, 2) fit tau on every sampled model, 3) fit tau on ensembled model (Default: 1)")
 #----------------------------------------------------------------
 
 args = parser.parse_args()
@@ -207,6 +209,7 @@ if not args.ignore_wandb:
 #------------------------------------------------------------------
 
 # Load Data --------------------------------------------------------
+args.data_path = os.path.join(args.data_path, args.dataset)
 tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
                                                         data_path=args.data_path,
                                                         dat_per_cls=args.dat_per_cls,
