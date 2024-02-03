@@ -76,7 +76,8 @@ def set_save_path(args):
         save_path_ = f"{save_path_}_{args.rho}"
         
     if args.optim in ["bsam"]:
-        save_path_ = f"{save_path_}_{args.eta}"
+        # save_path_ = f"{save_path_}_{args.eta}"
+        save_path_ = f"{save_path_}"
     
     return save_path_
     
@@ -123,7 +124,8 @@ def set_wandb_runname(args):
         run_name_ = f"{run_name_}_{args.rho}"
     
     if args.optim in ["bsam"]:
-        run_name_ = f"{run_name_}_{args.eta}"
+        # run_name_ = f"{run_name_}_{args.eta}"
+        run_name_ = f"{run_name_}"
     
     return run_name_
 
@@ -171,10 +173,6 @@ def get_backbone(model_name, num_classes, device, pre_trained=True):
         model_cfg = getattr(torch_models, model_name)
         model = model_cfg(pretrained=pre_trained)
         model.fc = nn.Linear(model.fc.in_features, num_classes)
-    
-    if model_name == 'resnet14':
-        from utils.models import resnet
-        model = resnet.resnet14(num_classes=num_classes)
     
     ## ResNet18-noBN
     elif model_name == "resnet18-noBN":
@@ -296,9 +294,15 @@ def freeze_fe(model):
         if name.split('.')[0] in last_layer_name:
             continue
         param.requires_grad = False
-    
-    print("Freeze Feature Extractor for Linear Probing")
 
+
+
+def unfreeze_norm_layer(model):
+    import torch.nn as nn
+    for module in model.modules():
+        if (isinstance(module, nn.LayerNorm)) or (isinstance(module, nn.BatchNorm2d)):
+            for param in module.parameters():
+                param.requires_grad = True
 
 
 def save_checkpoint(file_path, epoch, **kwargs):
@@ -382,18 +386,6 @@ def unflatten_like_size(vector, likeTensorSize):
 
     return outList
 
-
-def format_weights(sample, sabtl_model, tr_layer="last_layer"):
-    '''
-    Format sampled vector to state dict
-    '''  
-    if tr_layer in ["last_layer", "last_block"]:
-        model_shape = sabtl_model.tr_layer_shape
-    else:
-        model_shape = sabtl_model.full_model_shape
-    sample = unflatten_like_size(sample, model_shape)
-    state_dict = list_to_state_dict(sabtl_model.backbone, sample, tr_layer, sabtl_model.tr_layer_name)
-    return state_dict
 
     
 # NLL

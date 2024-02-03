@@ -73,9 +73,9 @@ parser.add_argument("--no_aug", action="store_true", default=False,
 parser.add_argument(
     "--model",
     type=str, default='resnet18', required=True,
-    choices=['resnet14', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
-            'resnet18-noBN',
-            "vitb16-i21k"],
+    choices=['resnet18', 'resnet50', 'resnet101',
+             'resnet50-clip', 'resnet101-clip', 'vitb16-clip'
+            'resnet18-noBN', "vitb16-i21k"],
     help="model name (default : resnet18)")
 
 parser.add_argument(

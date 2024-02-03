@@ -9,17 +9,17 @@ import pickle, wandb
 
 import utils.utils as utils
 from utils.swag import swag, swag_utils
-from utils.sabtl import sabtl, sabtl_utils
+from utils.sabma import sabma, sabma_utils
 
 import warnings
 warnings.filterwarnings('ignore')
 
-parser = argparse.ArgumentParser(description="Run SABTL")
+parser = argparse.ArgumentParser(description="Run sabma")
 
 parser.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
 
-parser.add_argument("--method", type=str, default="sabtl",
-                    choices=["sabtl"],
+parser.add_argument("--method", type=str, default="sabma",
+                    choices=["sabma"],
                     help="Learning Method")
 
 parser.add_argument("--no_amp", action="store_true", default=False, help="Deactivate AMP")
@@ -29,19 +29,18 @@ parser.add_argument("--print_epoch", type=int, default=10, help="Printing epoch"
 parser.add_argument("--resume", type=str, default=None,
     help="path to load saved model to resume training (default: None)",)
 
-# parser.add_argument("--last_layer", action="store_true", default=True,
-        # help = "When we do Linear Probing (Default : True)")
-parser.add_argument("--tr_layer", type=str, default="last_layer", choices=["last_layer", "full_layer", "last_block"],
-            help="Choose layer which would be trained with our method")
 
-parser.add_argument("--tol", type=int, default=50,
-        help="tolerance for early stopping (Default : 50)")
+parser.add_argument("--tr_layer", type=str, default="nl_ll", choices=["last_layer", "full_layer", "last_block", "nl_ll"],
+            help="Choose layer which would be trained with our method (Default : nl_ll)")
+
+parser.add_argument("--tol", type=int, default=30,
+        help="tolerance for early stopping (Default : 30)")
 
 parser.add_argument("--ignore_wandb", action="store_true", default=False, help="Deactivate wandb")
 
 ## Data ---------------------------------------------------------
 parser.add_argument(
-    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100"],
+    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", 'imagenet'],
                     help="dataset name")
 
 parser.add_argument(
@@ -67,9 +66,9 @@ parser.add_argument("--dat_per_cls", type=int, default=-1,
 parser.add_argument(
     "--model",
     type=str, default='resnet18', required=True,
-    choices=['resnet14', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
-            'resnet18-noBN',
-            "vitb16-i21k"],
+    choices=['resnet18', 'resnet50', 'resnet101',
+             'resnet50-clip', 'resnet101-clip', 'vitb16-clip'
+            'resnet18-noBN', "vitb16-i21k"],
     help="model name (default : resnet18)")
 
 parser.add_argument(
@@ -97,14 +96,14 @@ parser.add_argument("--lr_init", type=float, default=0.01,
 parser.add_argument("--momentum", type=float, default=0.9,
                 help="momentum (Default : 0.9)")
 
-parser.add_argument("--epochs", type=int, default=300, metavar="N",
-    help="number epochs to train (default : 300)")
+parser.add_argument("--epochs", type=int, default=100, metavar="N",
+    help="number epochs to train (default : 100)")
 
 parser.add_argument("--wd", type=float, default=5e-4, help="weight decay (default: 5e-4)")
 
 parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation ball for SAM / BSAM")
 
-parser.add_argument("--eta", type=float, default=1.0, help="Eta to calculate Inverse of Fisher Information Matrix")
+# parser.add_argument("--eta", type=float, default=1.0, help="Eta to calculate Inverse of Fisher Information Matrix (In case of diagonal)")
 
 parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
 
@@ -119,7 +118,7 @@ parser.add_argument("--warmup_lr_init", type=float, default=1e-7,
 #----------------------------------------------------------------
 
 
-## SABTL ---------------------------------------------------------
+## sabma ---------------------------------------------------------
 parser.add_argument("--src_bnn", type=str, default="swag", choices=["swag", "la", "vi"],
         help="Type of pre-trained BNN model")
 
@@ -144,6 +143,8 @@ parser.add_argument("--val_mc_num", type=int, default=1, help="Number of models 
 parser.add_argument("--eps", type=float, default=1e-8, help="small float to calculate nll")
 parser.add_argument("--bma_num_models", type=int, default=30, help="Number of models for bma in test phase")
 parser.add_argument("--num_bins", type=int, default=15, help="bin number for ece")
+parser.add_argument("--no_save_bma", action='store_true', default=False,
+            help="Deactivate saving model samples in BMA")
 #----------------------------------------------------------------
 
 args = parser.parse_args()
@@ -202,21 +203,12 @@ print("-"*30)
 # Define Model------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
 checkpoint = torch.load(args.model_path)
-
 if args.src_bnn == 'swag':
     model.load_state_dict(checkpoint)
 elif args.src_bnn == "vi":
     bn_state_dict = {key: value for key, value in checkpoint["state_dict"].items() if 'bn' in key}
     model.load_state_dict(bn_state_dict, strict=False)
-    
-# if args.last_layer:
-#     utils.freeze_fe(model)
-if args.tr_layer == "last_layer":
-    utils.freeze_fe(model)
-elif args.tr_layer =="last_block":
-    raise NotImplementedError("No code for last block training")
-elif args.tr_layer == "full_layer":
-    pass
+
 
 
 w_mean = torch.load(args.mean_path)
@@ -225,7 +217,7 @@ if args.covmat_path is not None:
     w_covmat = torch.load(args.covmat_path)
 else:
     w_covmat=None
-sabtl_model = sabtl.SABTL(copy.deepcopy(model),
+sabma_model = sabma.SABMA(copy.deepcopy(model),
                         src_bnn=args.src_bnn,
                         w_mean = w_mean,
                         diag_only=args.diag_only,
@@ -237,15 +229,15 @@ sabtl_model = sabtl.SABTL(copy.deepcopy(model),
                         tr_layer=args.tr_layer,
                         ).to(args.device)
 if not args.ignore_wandb:
-    wandb.config.update({"low_rank" : sabtl_model.low_rank})
+    wandb.config.update({"low_rank" : sabma_model.low_rank})
 
-print(f"Load SABTL Model with prior made of {args.src_bnn} with rank {sabtl_model.low_rank}")
+print(f"Load sabma Model with prior made of {args.src_bnn} with rank {sabma_model.low_rank}")
 if not args.diag_only:
     tab_name = ["# of Mean Trainable Params", "# of Var Trainable Params", "# of Cov Trainable Params"]
-    tab_contents= [sabtl_model.bnn_param.mean.numel(), sabtl_model.bnn_param.log_std.numel(), sabtl_model.bnn_param.cov_sqrt.numel()]
+    tab_contents= [sabma_model.bnn_param.mean.numel(), sabma_model.bnn_param.log_std.numel(), sabma_model.bnn_param.cov_sqrt.numel()]
 else:
     tab_name = ["# of Mean Trainable Params", "# of Var Trainable Params"]
-    tab_contents= [sabtl_model.bnn_param.mean.numel(), sabtl_model.bnn_param.log_std.numel()]
+    tab_contents= [sabma_model.bnn_param.mean.numel(), sabma_model.bnn_param.log_std.numel()]
 table = [tab_name, tab_contents]
 print(tabulate.tabulate(table, tablefmt="simple"))
 print("-"*30)
@@ -259,16 +251,9 @@ print("-"*30)
 
 
 
-"""params, _, _ = sabtl_model.sample(0.0)
-params = utils.format_weights(params, sabtl_model)
-
-te_res = sabtl_utils.eval_sabtl(te_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
-print(f"Accuracy : {te_res['accuracy']} / NLL : {te_res['nll']} / ECE : {te_res['ece']}")"""
-
-
 # Set Optimizer--------------------------------------
 ## Optimizer
-optimizer = sabtl_utils.get_optimizer(args, sabtl_model)
+optimizer = sabma_utils.get_optimizer(args, sabma_model)
 print(f"Set {args.optim} optimizer with lr_init {args.lr_init} / wd {args.wd} / momentum {args.momentum}")
 print("-"*30)
 #----------------------------------------------------------------
@@ -290,7 +275,7 @@ print("-"*30)
 #------------------------------------------------------------------------------------
 
 ## Training -------------------------------------------------------------------------
-print(f"Start training SABTL with {args.optim} optimizer from {start_epoch} epoch!")
+print(f"Start training sabma with {args.optim} optimizer from {start_epoch} epoch!")
 
 
 ## print setting
@@ -313,26 +298,27 @@ for epoch in range(start_epoch, int(args.epochs)+1):
 
     ## train
     if args.optim == "sgd":
-        tr_res = sabtl_utils.train_sabtl_sgd(tr_loader, sabtl_model, criterion, optimizer, args.device, scaler)
+        tr_res = sabma_utils.train_sabma_sgd(tr_loader, sabma_model, criterion, optimizer, args.device, scaler)
     elif args.optim == "sam":
-        tr_res = sabtl_utils.train_sabtl_sam(tr_loader, sabtl_model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
+        tr_res = sabma_utils.train_sabma_sam(tr_loader, sabma_model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
     elif args.optim == "bsam":
-        tr_res = sabtl_utils.train_sabtl_bsam(tr_loader, sabtl_model, criterion, optimizer, args.device, args.eta, first_step_scaler, second_step_scaler, args.tr_layer)
-        
+        tr_res = sabma_utils.train_sabma_bsam(tr_loader, sabma_model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler, args.tr_layer)
+
     # validation / test
     if args.val_mc_num ==1:
-        params, _, _ = sabtl_model.sample(0.0)
-        params = utils.format_weights(params, sabtl_model, args.tr_layer)
-        val_res = sabtl_utils.eval_sabtl(val_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
+        tr_params, _, _ = sabma_model.sample(z_scale=0.0, sample_param='tr')
+        frz_params, _, _ = sabma_model.sample(z_scale=0.0, sample_param='frz')
+        params = sabma_utils.format_weights(tr_params, frz_params, sabma_model)
+        val_res = sabma_utils.eval_sabma(val_loader, sabma_model, params, criterion, args.device, args.num_bins, args.eps)
     else:
-        val_res = sabtl_utils.bma_sabtl(val_loader, sabtl_model, args.val_mc_num,
+        val_res = sabma_utils.bma_sabma(val_loader, sabma_model, args.val_mc_num,
                             num_classes, criterion, args.device,
                             bma_save_path=None, eps=1e-8, num_bins=50,
                             validation=True, tr_layer=args.tr_layer
                             )
-    
+
     time_ep = time.time() - time_ep
-    values = [epoch, f"sabtl-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
+    values = [epoch, f"sabma-{args.optim}", lr, tr_res["loss"], tr_res["accuracy"],
         val_res["loss"], val_res["accuracy"], val_res["nll"], val_res["ece"],
         time_ep]
     table = tabulate.tabulate([values], columns, tablefmt="simple", floatfmt="8.4f")
@@ -346,30 +332,31 @@ for epoch in range(start_epoch, int(args.epochs)+1):
 
     ## wandb
     if not args.ignore_wandb:
-        wandb.log({"Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
+        wandb.log({
+            "Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
             "Validation loss (MAP)" : val_res["loss"], "Validation Accuracy (MAP)" : val_res["accuracy"],
             "Validation nll (MAP)" : val_res["nll"], "Validation ece (MAP)" : val_res["ece"],
             "lr" : lr,
-            "max(mean)" : torch.max(sabtl_model.bnn_param['mean']),
-            "mean(mean)" : torch.mean(sabtl_model.bnn_param['mean']),
-            "std(mean)" : torch.std(sabtl_model.bnn_param['mean']),
-            "min(mean)" : torch.min(sabtl_model.bnn_param['mean']),
-            "max(std)" : torch.max(torch.exp(sabtl_model.bnn_param['log_std'])),
-            "mean(std)" : torch.mean(torch.exp(sabtl_model.bnn_param['log_std'])),
-            "std(std)" : torch.std(torch.exp(sabtl_model.bnn_param['log_std'])),
-            "min(std)" : torch.min(torch.exp(sabtl_model.bnn_param['log_std'])),
+            "max(mean)" : torch.max(sabma_model.bnn_param['mean']),
+            "mean(mean)" : torch.mean(sabma_model.bnn_param['mean']),
+            "std(mean)" : torch.std(sabma_model.bnn_param['mean']),
+            "min(mean)" : torch.min(sabma_model.bnn_param['mean']),
+            "max(std)" : torch.max(torch.exp(sabma_model.bnn_param['log_std'])),
+            "mean(std)" : torch.mean(torch.exp(sabma_model.bnn_param['log_std'])),
+            "std(std)" : torch.std(torch.exp(sabma_model.bnn_param['log_std'])),
+            "min(std)" : torch.min(torch.exp(sabma_model.bnn_param['log_std'])),
             },
             step=epoch)
         if not args.diag_only:
-            wandb.log({"max(cov_sqrt)" : torch.max(sabtl_model.bnn_param['cov_sqrt']),
-                "mean(cov_sqrt)" : torch.mean(sabtl_model.bnn_param['cov_sqrt']),
-                "std(cov_sqrt)" : torch.std(sabtl_model.bnn_param['cov_sqrt']),
-                "min(cov_sqrt)" : torch.min(sabtl_model.bnn_param['cov_sqrt']),},
+            wandb.log({
+                "max(cov_sqrt)" : torch.max(sabma_model.bnn_param['cov_sqrt']),
+                "mean(cov_sqrt)" : torch.mean(sabma_model.bnn_param['cov_sqrt']),
+                "std(cov_sqrt)" : torch.std(sabma_model.bnn_param['cov_sqrt']),
+                "min(cov_sqrt)" : torch.min(sabma_model.bnn_param['cov_sqrt']),},
                 step=epoch)
 
     # Save best model (Early Stopping)
     if (val_res['loss'] < best_val_loss):
-    # if (val_res['accuracy'] > best_val_acc) or (val_res['loss'] < best_val_loss):
         cnt = 0
         best_val_loss = val_res['loss']
         best_val_acc = val_res['accuracy']
@@ -377,7 +364,7 @@ for epoch in range(start_epoch, int(args.epochs)+1):
         
         # save state_dict
         os.makedirs(args.save_path, exist_ok=True)
-        sabtl_utils.save_best_sabtl_model(args, best_epoch, sabtl_model, optimizer, scaler, first_step_scaler, second_step_scaler)
+        sabma_utils.save_best_sabma_model(args, best_epoch, sabma_model, optimizer, scaler, first_step_scaler, second_step_scaler)
     else:
         cnt += 1
 
@@ -397,14 +384,17 @@ for epoch in range(start_epoch, int(args.epochs)+1):
 print("Load Best Validation Model (Lowest Loss)")
 state_dict_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt"
 checkpoint = torch.load(state_dict_path)   
-sabtl_model.load_state_dict(checkpoint["state_dict"])
-sabtl_model.to(args.device)
+sabma_model.load_state_dict(checkpoint["state_dict"])
+sabma_model.to(args.device)
 
 ### BMA prediction
-bma_save_path = f"{args.save_path}/bma_models"
-os.makedirs(bma_save_path, exist_ok=True)
+if args.no_save_bma:
+    bma_save_path  = None
+else:
+    bma_save_path = f"{args.save_path}/bma_models"
+    os.makedirs(bma_save_path, exist_ok=True)
 
-bma_res = sabtl_utils.bma_sabtl(te_loader, sabtl_model, args.bma_num_models,
+bma_res = sabma_utils.bma_sabma(te_loader, sabma_model, args.bma_num_models,
                     num_classes, criterion, args.device,
                     bma_save_path=bma_save_path, eps=args.eps, num_bins=args.num_bins,
                     validation=False, tr_layer=args.tr_layer)
@@ -440,10 +430,11 @@ utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, Tru
 
 
 ### MAP Prediction
-params, _, _ = sabtl_model.sample(0, tr_param_only=False)
-params = utils.format_weights(params, sabtl_model, tr_layer=args.tr_layer)
+tr_params, _, _ = sabma_model.sample(0, sample_param='tr')
+frz_params, _, _ = sabma_model.sample(0, sample_param='frz')
+params = sabma_utils.format_weights(tr_params, frz_params, sabma_model)
 
-res = sabtl_utils.eval_sabtl(te_loader, sabtl_model, params, criterion, args.device, args.num_bins, args.eps)
+res = sabma_utils.eval_sabma(te_loader, sabma_model, params, criterion, args.device, args.num_bins, args.eps)
 unc = utils.calibration_curve(res['predictions'], res['targets'], args.num_bins)
 te_ece = unc["ece"]
 

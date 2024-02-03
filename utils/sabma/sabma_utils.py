@@ -1,68 +1,94 @@
 import numpy as np
-import pickle
-import os
+import pickle, os, collections
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from utils.sam import sam, sam_utils
-import utils.sabtl.sabtl as sabtl
+import utils.sabma.sabma as sabma
 import utils.utils as utils
 
-def get_optimizer(args, sabtl_model):
+def get_optimizer(args, sabma_model):
     '''
     Define optimizer
     '''
     if args.optim == "sgd":
-        optimizer = torch.optim.SGD(sabtl_model.bnn_param.values(),
+        optimizer = torch.optim.SGD(sabma_model.bnn_param.values(),
                         lr=args.lr_init, weight_decay=args.wd,
                         momentum=args.momentum)
     
     elif args.optim == "sam":
         base_optimizer = torch.optim.SGD
-        optimizer = sam.SAM(sabtl_model.bnn_param.values(), base_optimizer, rho=args.rho, lr=args.lr_init, momentum=args.momentum,
+        optimizer = sam.SAM(sabma_model.bnn_param.values(), base_optimizer, rho=args.rho, lr=args.lr_init, momentum=args.momentum,
                         weight_decay=args.wd)
         
     elif args.optim == "bsam":
         base_optimizer = torch.optim.SGD
-        optimizer = sabtl.BSAM(sabtl_model.bnn_param.values(), base_optimizer, rho=args.rho, lr=args.lr_init, momentum=args.momentum,
+        optimizer = sabma.BSAM(sabma_model.bnn_param.values(), base_optimizer, rho=args.rho, lr=args.lr_init, momentum=args.momentum,
                         weight_decay=args.wd)
     
     return optimizer
 
+def list_to_state_dict(sabma_model, tr_sample, frz_sample):
+    '''
+    Change sample list to state dict
+    '''
+    ordDict = collections.OrderedDict()
+    tr_idx = 0; frz_idx = 0
+    for name in sabma_model.full_param_shape.keys():
+        if name in sabma_model.tr_param_shape.keys():
+            ordDict[name] = tr_sample[tr_idx]
+            tr_idx += 1
+        elif name in sabma_model.frz_param_shape.keys():
+            ordDict[name] = frz_sample[frz_idx]
+            frz_idx += 1
+    assert tr_idx == len(sabma_model.tr_param_shape.keys()), "Check the process to convert trainable parameter sample to state dict"
+    assert frz_idx == len(sabma_model.frz_param_shape.keys()), "Check the process to convert freezed parameter sample to state dict"
+
+    return ordDict
 
 
-def train_sabtl_sgd(dataloader, sabtl_model, criterion, optimizer, device, scaler):
+def format_weights(tr_sample, frz_sample, sabma_model):
+    '''
+    Format sampled vector to state dict
+    '''  
+    tr_sample = utils.unflatten_like_size(tr_sample, sabma_model.tr_param_shape.values())
+    frz_sample = utils.unflatten_like_size(frz_sample, sabma_model.frz_param_shape.values())
+    state_dict = list_to_state_dict(sabma_model, tr_sample, frz_sample)
+    return state_dict
+
+
+def train_sabma_sgd(dataloader, sabma_model, criterion, optimizer, device, scaler):
     loss_sum = 0.0
     correct = 0.0
     num_objects_current = 0
-    
-    sabtl_model.backbone.train()
+    raise NotImplementedError("Needed to update code")
+    sabma_model.backbone.train()
     for batch, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
            
         # Sample weight
-        params, _, _ = sabtl_model.sample(1.0)
+        params, _, _ = sabma_model.sample(1.0)
         
         # Change weight sample shape to input model
-        params = utils.format_weights(params, sabtl_model)
+        params = utils.format_weights(params, sabma_model)
 
         if scaler is not None:
             with torch.cuda.amp.autocast():
-                pred = sabtl_model(params, X)
+                pred = sabma_model(params, X)
                 loss = criterion(pred, y)
             scaler.scale(loss).backward()
             
             # # gradient clipping (useless....)
             # scaler.unscale_(optimizer)
-            # torch.nn.utils.clip_grad_norm_(sabtl_model.bnn_param.log_std, 0.05) # max_norm=0.1
+            # torch.nn.utils.clip_grad_norm_(sabma_model.bnn_param.log_std, 0.05) # max_norm=0.1
 
             scaler.step(optimizer)  # optimizer.step()
             scaler.update()
             optimizer.zero_grad()
         else:
-            pred = sabtl_model(params, X)
+            pred = sabma_model(params, X)
             loss = criterion(pred, y)
             optimizer.zero_grad()
             loss.backward()
@@ -80,24 +106,24 @@ def train_sabtl_sgd(dataloader, sabtl_model, criterion, optimizer, device, scale
 
 
 
-def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first_step_scaler, second_step_scaler):
+def train_sabma_sam(dataloader, sabma_model, criterion, optimizer, device, first_step_scaler, second_step_scaler):
     loss_sum = 0.0
     correct = 0.0
     num_objects_current = 0
-    
-    sabtl_model.backbone.train()
+    raise NotImplementedError("Needed to update code")
+    sabma_model.backbone.train()
     for batch, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
            
         # Sample weight
-        params, z_1, z_2 = sabtl_model.sample(1.0)        
+        params, z_1, z_2 = sabma_model.sample(1.0)        
         # Change weight sample shape to input model
-        params = utils.format_weights(params, sabtl_model)
+        params = utils.format_weights(params, sabma_model)
 
         if first_step_scaler is not None:
             ## first forward & backward
             with torch.cuda.amp.autocast():
-                pred = sabtl_model(params, X)
+                pred = sabma_model(params, X)
                 loss = criterion(pred, y)        
             first_step_scaler.scale(loss).backward()
             first_step_scaler.unscale_(optimizer)
@@ -116,9 +142,9 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
             first_step_scaler.update()
 
             ## second forward-backward pass
-            params = optimizer.second_sample(z_1, z_2, sabtl_model)
+            params = optimizer.second_sample(z_1, z_2, sabma_model)
             with torch.cuda.amp.autocast():
-                pred = sabtl_model(params, X)
+                pred = sabma_model(params, X)
                 loss = criterion(pred, y)
             second_step_scaler.scale(loss).backward()
             
@@ -133,16 +159,16 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
             
         else:
             ## first forward & backward
-            pred = sabtl_model(params, X)
+            pred = sabma_model(params, X)
             loss = criterion(pred, y)        
             loss.backward()
             optimizer.first_step(zero_grad=True, amp=False)
                       
             ## second forward-backward pass
-            params = optimizer.second_sample(z_1, z_2, sabtl_model)
-            params = utils.format_weights(params, sabtl_model)
+            params = optimizer.second_sample(z_1, z_2, sabma_model)
+            params = utils.format_weights(params, sabma_model)
             
-            pred = sabtl_model(params, X)
+            pred = sabma_model(params, X)
             loss = criterion(pred, y)
             loss.backward()
             optimizer.second_step(zero_grad=True, amp=False)  
@@ -158,23 +184,30 @@ def train_sabtl_sam(dataloader, sabtl_model, criterion, optimizer, device, first
 
 
 
-def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta, first_step_scaler, second_step_scaler, tr_layer):
+def train_sabma_bsam(dataloader, sabma_model, criterion, optimizer, device, first_step_scaler, second_step_scaler, tr_layer):
     loss_sum = 0.0
     correct = 0.0
     num_objects_current = 0
     
-    sabtl_model.backbone.train()
+    sabma_model.train()
+    sabma_model.backbone.train()
     for batch, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
-        params, z_1, z_2 = sabtl_model.sample(1.0)    # Sample weight
-
-        log_grad = sabtl_model.log_grad(params, approx='full', eta=eta)             # compute gradient of log probability w.r.t. model parameters
-        params = utils.format_weights(params, sabtl_model, tr_layer)       # Change weight sample shape to input model
-
+        
+        # Sample weight
+        tr_params, z_1, z_2 = sabma_model.sample(z_scale = 1.0, sample_param='tr')    
+        frz_params, _, _ = sabma_model.sample(z_scale = 1.0, sample_param='frz')
+        
+        # compute gradient of log probability w.r.t. model parameters
+        log_grad = sabma_model.log_grad(tr_params) # , frz_params)             
+        
+        # Change weight sample shape to input model
+        params = format_weights(tr_params, frz_params, sabma_model)
+        
         if first_step_scaler is not None:
             ## first forward & backward
             with torch.cuda.amp.autocast():
-                pred = sabtl_model(params, X)
+                pred = sabma_model(params, X)
                 loss = criterion(pred, y)
 
             first_step_scaler.scale(loss).backward()
@@ -194,9 +227,11 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
             first_step_scaler.update()
             
             ## second forward-backward pass
-            params = optimizer.second_sample(z_1, z_2, sabtl_model)
+            tr_params = optimizer.second_sample(z_1, z_2, sabma_model)
+            params = format_weights(tr_params, frz_params, sabma_model)
+            
             with torch.cuda.amp.autocast():
-                pred = sabtl_model(params, X)
+                pred = sabma_model(params, X)
                 loss = criterion(pred, y)
 
             second_step_scaler.scale(loss).backward()
@@ -212,14 +247,16 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
             print(f"Batch : {batch} / Tr loss : {loss} / Pred NaN : {torch.sum(torch.isnan(pred))/100} ")
         else:
             ## first forward & backward
-            pred = sabtl_model(params, X)
+            pred = sabma_model(params, X)
             loss = criterion(pred, y)        
             loss.backward()
             optimizer.first_step(log_grad, zero_grad=True, amp=False)
                       
             ## second forward-backward pass
-            params = optimizer.second_sample(z_1, z_2, sabtl_model)
-            pred = sabtl_model(params, X)
+            tr_params = optimizer.second_sample(z_1, z_2, sabma_model)
+            params = format_weights(tr_params, frz_params, sabma_model)
+            
+            pred = sabma_model(params, X)
             loss = criterion(pred, y)
             loss.backward()
             optimizer.second_step(zero_grad=True, amp=False)  
@@ -233,7 +270,7 @@ def train_sabtl_bsam(dataloader, sabtl_model, criterion, optimizer, device, eta,
     }
     
     
-def eval_sabtl(loader, sabtl_model, params, criterion, device, num_bins=15, eps=1e-8):
+def eval_sabma(loader, sabma_model, params, criterion, device, num_bins=15, eps=1e-8):
     '''
     get loss, accuracy, nll and ece for every eval step
     '''
@@ -244,12 +281,13 @@ def eval_sabtl(loader, sabtl_model, params, criterion, device, num_bins=15, eps=
     preds = list()
     targets = list()
 
-    sabtl_model.backbone.eval()
+    sabma_model.eval()
+    sabma_model.backbone.eval()
     offset = 0
     with torch.no_grad():
         for _, (input, target) in enumerate(loader):
             input, target = input.to(device), target.to(device)
-            pred = sabtl_model(params, input)
+            pred = sabma_model(params, input)
             loss = criterion(pred, target)
             loss_sum += loss.item() * input.size(0)
             
@@ -274,70 +312,71 @@ def eval_sabtl(loader, sabtl_model, params, criterion, device, num_bins=15, eps=
     }
     
     
-def bma_sabtl(te_loader, sabtl_model, bma_num_models,
+def bma_sabma(te_loader, sabma_model, bma_num_models,
             num_classes, criterion, device,
             bma_save_path=None, eps=1e-8, num_bins=15,
-            validation=False, tr_layer="last_layer"
+            validation=False, tr_layer="nl_ll"
             ):
     '''
     run bayesian model averaging in test step
     '''
-    sabtl_predictions = np.zeros((len(te_loader.dataset), num_classes))
+    sabma_predictions = np.zeros((len(te_loader.dataset), num_classes))
     with torch.no_grad():
         for i in range(bma_num_models):
             
             if i == 0:
-                params, _, _ = sabtl_model.sample(z_scale=0, tr_param_only=False)
+                tr_params, _, _ = sabma_model.sample(z_scale=0, sample_param='tr')
+                frz_params, _, _ = sabma_model.sample(z_scale=0, sample_param='frz')
             else:
-                params, _, _  = sabtl_model.sample(z_scale=1.0, tr_param_only=False)
-            
+                tr_params, _, _  = sabma_model.sample(z_scale=1.0, sample_param='tr')
+                frz_params, _, _  = sabma_model.sample(z_scale=1.0, sample_param='frz')
+            params = format_weights(tr_params, frz_params, sabma_model)
+                
             # save sampled weight for bma
             if (bma_save_path is not None) and (not validation):
                 torch.save(params, f'{bma_save_path}/bma_model-{i}.pt')
             
-            # params = utils.format_weights(params, sabtl_model)
-            params = utils.format_weights(params, sabtl_model, tr_layer)
-            res = eval_sabtl(te_loader, sabtl_model, params, criterion, device, num_bins, eps)
+            res = eval_sabma(te_loader, sabma_model, params, criterion, device, num_bins, eps)
 
             if not validation:
-                print(f"SABTL Sample {i+1}/{bma_num_models}. Accuracy: {res['accuracy']:.2f}%  NLL: {res['nll']:.4f}")
+                print(f"SA-BMA Sample {i+1}/{bma_num_models}. Accuracy: {res['accuracy']:.2f}%  NLL: {res['nll']:.4f}")
 
-            sabtl_predictions += res["predictions"]
+            sabma_predictions += res["predictions"]
 
-            ens_accuracy = np.mean(np.argmax(sabtl_predictions, axis=1) == res["targets"]) * 100
-            ens_nll = -np.mean(np.log(sabtl_predictions[np.arange(sabtl_predictions.shape[0]), res["targets"]] / (i + 1) + eps))
+            ens_accuracy = np.mean(np.argmax(sabma_predictions, axis=1) == res["targets"]) * 100
+            ens_nll = -np.mean(np.log(sabma_predictions[np.arange(sabma_predictions.shape[0]), res["targets"]] / (i + 1) + eps))
             
             if not validation:
                 print(f"Ensemble {i+1}/{bma_num_models}. Accuracy: {ens_accuracy:.2f}% NLL: {ens_nll:.4f}")
 
-        sabtl_predictions /= bma_num_models
+        sabma_predictions /= bma_num_models
 
-        sabtl_loss = criterion(torch.tensor(sabtl_predictions), torch.tensor(res['targets'])).item()
-        sabtl_accuracy = np.mean(np.argmax(sabtl_predictions, axis=1) == res["targets"]) * 100
-        sabtl_nll = -np.mean(np.log(sabtl_predictions[np.arange(sabtl_predictions.shape[0]), res["targets"]] + eps))
+        sabma_loss = criterion(torch.tensor(sabma_predictions), torch.tensor(res['targets'])).item()
+        sabma_accuracy = np.mean(np.argmax(sabma_predictions, axis=1) == res["targets"]) * 100
+        sabma_nll = -np.mean(np.log(sabma_predictions[np.arange(sabma_predictions.shape[0]), res["targets"]] + eps))
         
-        unc = utils.calibration_curve(sabtl_predictions, res["targets"], num_bins)
-        sabtl_ece = unc['ece']
+        unc = utils.calibration_curve(sabma_predictions, res["targets"], num_bins)
+        sabma_ece = unc['ece']
         
     if not validation:
-        print(f"bma Accuracy using {bma_num_models} model : {sabtl_accuracy:.2f}% / NLL : {sabtl_nll:.4f}")
+        print(f"bma Accuracy using {bma_num_models} model : {sabma_accuracy:.2f}% / NLL : {sabma_nll:.4f}")
     
-    return {"predictions" : sabtl_predictions,
+    return {"predictions" : sabma_predictions,
             "targets" : res["targets"],
-            "loss" : sabtl_loss,
-            "accuracy" : sabtl_accuracy,
-            "nll" : sabtl_nll,
-            "ece" : sabtl_ece
+            "loss" : sabma_loss,
+            "accuracy" : sabma_accuracy,
+            "nll" : sabma_nll,
+            "ece" : sabma_ece
             }
     
     
     
-def save_best_sabtl_model(args, best_epoch, sabtl_model, optimizer, scaler, first_step_scaler, second_step_scaler):
+def save_best_sabma_model(args, best_epoch, sabma_model, optimizer, scaler, first_step_scaler, second_step_scaler):
     if args.optim == "sgd":
         if not args.no_amp:
             utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
                             epoch = best_epoch,
-                            state_dict =sabtl_model.state_dict(),
+                            state_dict =sabma_model.state_dict(),
                             optimizer = optimizer.state_dict(),
                             # scheduler = scheduler.state_dict(),
                             scaler = scaler.state_dict(),
@@ -345,7 +384,7 @@ def save_best_sabtl_model(args, best_epoch, sabtl_model, optimizer, scaler, firs
         else:
             utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
                             epoch = best_epoch,
-                            state_dict =sabtl_model.state_dict(),
+                            state_dict =sabma_model.state_dict(),
                             optimizer = optimizer.state_dict(),
                             # scheduler = scheduler.state_dict(),
                             )
@@ -353,7 +392,7 @@ def save_best_sabtl_model(args, best_epoch, sabtl_model, optimizer, scaler, firs
         if not args.no_amp:
             utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
                                 epoch = best_epoch,
-                                state_dict = sabtl_model.state_dict(),
+                                state_dict = sabma_model.state_dict(),
                                 optimizer = optimizer.state_dict(),
                                 # scheduler = scheduler.state_dict(),
                                 first_step_scaler = first_step_scaler.state_dict(),
@@ -362,16 +401,16 @@ def save_best_sabtl_model(args, best_epoch, sabtl_model, optimizer, scaler, firs
         else:
             utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
                                 epoch = best_epoch,
-                                state_dict = sabtl_model.state_dict(),
+                                state_dict = sabma_model.state_dict(),
                                 optimizer = optimizer.state_dict(),
                                 # scheduler = scheduler.state_dict(),
                                 )
     # Save Mean, variance, Covariance matrix
-    mean = sabtl_model.get_mean_vector()
+    mean = sabma_model.get_mean_vector()
     torch.save(mean,f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
     
-    variance = sabtl_model.get_variance_vector()
+    variance = sabma_model.get_variance_vector()
     torch.save(variance, f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
     
-    cov_mat_list = sabtl_model.get_covariance_matrix()
+    cov_mat_list = sabma_model.get_covariance_matrix()
     torch.save(cov_mat_list, f'{args.save_path}/{args.method}-{args.optim}_best_val_covmat.pt')    

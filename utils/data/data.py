@@ -109,9 +109,13 @@ def create_dataset(data_name='cifar10', data_path='/data1/lsj9862/data/cifar10',
         
         
     elif data_name == 'imagenet':
-        tr_data = torch.load(f'{data_path}/{dat_per_cls}shot/tr_loader_seed{seed}.pth')
-        val_data = torch.load(f'{data_path}/{dat_per_cls}shot/val_loader_seed{seed}.pth')
-        te_data = torch.load(f'{data_path}/{dat_per_cls}shot/te_loader_seed{seed}.pth')
+        import pickle
+        with open(f'{data_path}/{dat_per_cls}shot/tr_loader_seed{seed}.pth', 'rb') as f:
+            tr_data = pickle.load(f)
+        with open(f'{data_path}/{dat_per_cls}shot/val_loader_seed{seed}.pth', 'rb') as f:
+            val_data = pickle.load(f)
+        with open(f'{data_path}/{dat_per_cls}shot/te_loader_seed{seed}.pth', 'rb') as f:
+            te_data = pickle.load(f)
         num_classes = max(te_data.targets) + 1
 
     return tr_data, val_data, te_data, num_classes

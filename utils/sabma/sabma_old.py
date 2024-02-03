@@ -7,7 +7,7 @@ from gpytorch.lazy import RootLazyTensor, DiagLazyTensor, AddedDiagLazyTensor
 from gpytorch.distributions import MultivariateNormal
 
 
-class SABTL(torch.nn.Module):
+class SABMA(torch.nn.Module):
     def __init__(
         self,
         backbone,
@@ -25,7 +25,7 @@ class SABTL(torch.nn.Module):
         """
         TODO : last layer random initialization 코드 추가 (argument 받아서)
         """
-        super(SABTL, self).__init__()
+        super(SABMA, self).__init__()
         
         self.var_clamp = var_clamp
         self.diag_only = diag_only
@@ -52,6 +52,8 @@ class SABTL(torch.nn.Module):
         elif tr_layer == "full_layer":
             self.tr_layer_shape = self.full_model_shape
             self.tr_layer_name = None
+        elif tr_layer == "nl_ll":
+            raise NotImplementedError("Need code for Normalization and last layer SA-BMA")
         
         if w_mean is None:
             raise NotImplementedError("We need Pre-trained weight to define model")
@@ -103,7 +105,7 @@ class SABTL(torch.nn.Module):
                         if self.low_rank <= w_cov_sqrt.size(0):
                             w_cov_sqrt =w_cov_sqrt[:self.low_rank,-self.tr_num_params:]
                         else:
-                            raise NotImplementedError("SABTL set lower low-rank than Pre-trained BNNs")
+                            raise NotImplementedError("SABMA set lower low-rank than Pre-trained BNNs")
                         self.bnn_param.update({"cov_sqrt" : nn.Parameter(w_cov_sqrt * cov_scale)})                        
                     elif self.tr_layer == "last_block":
                         raise NotImplementedError("Need code for last block SA-BMA")
@@ -111,7 +113,7 @@ class SABTL(torch.nn.Module):
                         if self.low_rank <= w_cov_sqrt.size(0):
                             w_cov_sqrt =w_cov_sqrt[:self.low_rank,:]
                         else:
-                            raise NotImplementedError("SABTL set lower low-rank than Pre-trained BNNs")
+                            raise NotImplementedError("SABMA set lower low-rank than Pre-trained BNNs")
                         self.bnn_param.update({"cov_sqrt" : nn.Parameter(w_cov_sqrt * cov_scale)})
                 else:
                     # Random Initialization Covariance
@@ -298,7 +300,7 @@ class SABTL(torch.nn.Module):
         '''
         load하는거 만들어놓기
         '''
-        super(SABTL, self).load_state_dict(state_dict, strict)
+        super(SABMA, self).load_state_dict(state_dict, strict)
 
 #####################################################################################################################
 
@@ -365,26 +367,26 @@ class BSAM(torch.optim.Optimizer):
             """
 
 
-    def second_sample(self, z_1, z_2, sabtl_model):
+    def second_sample(self, z_1, z_2, sabma_model):
         '''
         Sample from perturbated bnn parameters with pre-selected z_1, z_2
         '''
-        if sabtl_model.tr_layer in ["last_layer", "last_block"]:
-            z_1 = z_1[-sabtl_model.tr_num_params:]
+        if sabma_model.tr_layer in ["last_layer", "last_block"]:
+            z_1 = z_1[-sabma_model.tr_num_params:]
 
         # diagonal variance
         rand_sample = (torch.exp(self.param_groups[0]['params'][1])) * z_1
         
         # covariance
-        if not sabtl_model.diag_only:
-            cov_sample = (self.param_groups[0]['params'][2].t().matmul(z_2[:sabtl_model.low_rank]))
-            if sabtl_model.low_rank > 1:
-                cov_sample /= (sabtl_model.low_rank - 1)**0.5
+        if not sabma_model.diag_only:
+            cov_sample = (self.param_groups[0]['params'][2].t().matmul(z_2[:sabma_model.low_rank]))
+            if sabma_model.low_rank > 1:
+                cov_sample /= (sabma_model.low_rank - 1)**0.5
             rand_sample = 0.5**0.5 * (rand_sample + cov_sample)
         sample = self.param_groups[0]['params'][0] + rand_sample
         
         # change sampled weight type list to dict 
-        sample = utils.format_weights(sample, sabtl_model, sabtl_model.tr_layer)
+        sample = utils.format_weights(sample, sabma_model, sabma_model.tr_layer)
         return sample
 
 

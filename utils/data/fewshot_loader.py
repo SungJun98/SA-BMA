@@ -3,20 +3,20 @@ import sys, os
 import torch
 import numpy as np
 from torch.utils.data import random_split
-from torchvision.datasets import CIFAR10, CIFAR100, ImageNet
+from torchvision.datasets import CIFAR10, CIFAR100, ImageFolder
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 from timm.data.transforms_factory import create_transform
 
 # %%
 DATASET='imagenet'
-DATA_PATH=f'/data1/lsj9862/data/{DATASET}'
+DATA_PATH=f'/data1/changdae/data/imagenet/'
 BATCH_SIZE=256
 USE_VALIDATION=True
 AUG=False
 VAL_RATIO=0.1
 DAT_PER_CLS=16
-SEED=1
+SEED=2
 
 
 # %%
@@ -58,12 +58,11 @@ elif DATASET == 'cifar100':
     num_classes = max(te_data.targets) + 1
 
 elif DATASET == 'imagenet':
-    tr_data = ImageNet(DATA_PATH, split='train')
-    te_data = ImageNet(DATA_PATH, split='val')
+    tr_data = ImageFolder(os.path.join(DATA_PATH, "train"), transform_train)
+    te_data = ImageFolder(os.path.join(DATA_PATH, "val"), transform_test)
     num_classes = max(te_data.targets) + 1
 
 print(f"Number of classes : {num_classes} :: Data point per class : {DAT_PER_CLS}")
-
 
 
 
@@ -79,6 +78,9 @@ tr_data, val_data = random_split(tr_data, [tr_len, val_len])
 class_indices = [[] for _ in range(num_classes)]
 for idx, (_, target) in enumerate(tr_data):
     class_indices[target].append(idx)
+    if idx % 50000 == 0:
+        print(f"{idx // 50000}/{len(tr_data) // 50000}")
+print("finish get indices of each class data")
 
 few_shot_indices = []
 for indices in class_indices:
@@ -107,9 +109,15 @@ if DATASET in ['imagenet']:
 
 
 # %%
-os.makedirs(f'/mlainas/lsj9862/data/{DATASET}/{DAT_PER_CLS}shot', exist_ok=True)
-torch.save(tr_loader, f'/mlainas/lsj9862/data/{DATASET}/{DAT_PER_CLS}shot/tr_loader_seed{SEED}.pth')
+# os.makedirs(f'/mlainas/lsj9862/data/{DATASET}/{DAT_PER_CLS}shot', exist_ok=True)
+# torch.save(tr_loader, f'/mlainas/lsj9862/data/{DATASET}/{DAT_PER_CLS}shot/tr_loader_seed{SEED}.pth')
 if DATASET in ['imagenet']:
-    torch.save(val_loader, f'/mlainas/lsj9862/data/{DATASET}/{DAT_PER_CLS}shot/val_loader_seed{SEED}.pth')
-    torch.save(te_loader, f'/mlainas/lsj9862/data/{DATASET}/{DAT_PER_CLS}shot/te_loader_seed{SEED}.pth')
+    import pickle
+    os.makedirs(f'/data1/lsj9862/data/{DATASET}/{DAT_PER_CLS}shot', exist_ok=True)
+    with open(f"/data1/lsj9862/data/{DATASET}/{DAT_PER_CLS}shot/tr_loader_seed{SEED}.pkl", "wb") as f:
+        pickle.dump(tr_loader, f)
+    with open(f"/data1/lsj9862/data/{DATASET}/{DAT_PER_CLS}shot/val_loader_seed{SEED}.pkl", "wb") as f:
+        pickle.dump(val_loader, f)
+    with open(f"/data1/lsj9862/data/{DATASET}/{DAT_PER_CLS}shot/te_loader_seed{SEED}.pkl", "wb") as f:
+        pickle.dump(te_loader, f)
 # %%
