@@ -84,8 +84,8 @@ parser.add_argument(
     )
 
 parser.add_argument("--save_path",
-            type=str, default="/data2/lsj9862/exp_result/",
-            # type=str, default="/data1/mulan98/exp_result",
+            # type=str, default="/data2/lsj9862/exp_result/",
+            type=str, default="/data/mulan98/exp_result",
             help="Path to save best model dict")
 #----------------------------------------------------------------
 
@@ -179,8 +179,8 @@ args = parser.parse_args()
 #----------------------------------------------------------------
 
 if not args.ignore_wandb:
-    wandb.init(project="SA-BTL", entity='sungjun98')
-    # wandb.init(project="SA-BTL", entity='mulan98')
+    # wandb.init(project="SA-BTL", entity='sungjun98')
+    wandb.init(project="SA-BTL", entity='mulan98')
 
 # Set Device and Seed--------------------------------------------
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -301,7 +301,7 @@ print("-"*30)
 #-------------------------------------------------------------------
 
 # Set Optimizer--------------------------------------
-optimizer = utils.get_optimizer(args, model)
+optimizer = utils.get_optimizer(args, model, num_classes=num_classes)
 print(f"Set {args.optim} optimizer with lr_init {args.lr_init} / wd {args.wd} / momentum {args.momentum} / rho {args.rho} / noise_scale {args.noise_scale}")
 print("-"*30)
 #----------------------------------------------------------------
