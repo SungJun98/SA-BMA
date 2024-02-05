@@ -8,6 +8,7 @@ import numpy as np
 import pickle, wandb
 
 import utils.utils as utils
+from utils import temperature_scaling as ts
 from utils.swag import swag, swag_utils
 from utils.sabma import sabma, sabma_utils
 
@@ -147,6 +148,9 @@ parser.add_argument("--bma_num_models", type=int, default=30, help="Number of mo
 parser.add_argument("--num_bins", type=int, default=15, help="bin number for ece")
 parser.add_argument("--no_save_bma", action='store_true', default=False,
             help="Deactivate saving model samples in BMA")
+
+parser.add_argument("--ts", action='store_true', default=False,
+            help="Activate temperature scaling")
 #----------------------------------------------------------------
 
 args = parser.parse_args()
@@ -402,22 +406,42 @@ bma_res = sabma_utils.bma_sabma(te_loader, sabma_model, args.bma_num_models,
                     num_classes, criterion, args.device,
                     bma_save_path=bma_save_path, eps=args.eps, num_bins=args.num_bins,
                     validation=False, tr_layer=args.tr_layer)
-
+bma_logits = bma_res["logits"]
 bma_predictions = bma_res["predictions"]
 bma_targets = bma_res["targets"]
 
-bma_accuracy = bma_res["accuracy"]
-bma_nll = bma_res["nll"]
-unc = utils.calibration_curve(bma_predictions, bma_targets, args.num_bins)
-bma_ece = bma_res['ece']
+# Temperature Scale
+if args.ts:
+    scaled_model = ts.ModelWithTemperature(sabma_model, ens=True)
+    scaled_model.set_temperature(val_loader, ens_logits=torch.tensor(bma_logits), ens_pred=torch.tensor(bma_targets))
+    bma_temperature = scaled_model.temperature.unsqueeze(1).expand(bma_logits.shape[0], bma_logits.shape[1])
+    bma_logits = torch.tensor(bma_logits) / bma_temperature.cpu()
+    bma_predictions = F.softmax(bma_logits, dim=1).detach().numpy()
+    bma_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == bma_targets)
+    bma_nll = -np.mean(np.log(bma_predictions[np.arange(bma_predictions.shape[0]), bma_targets] + args.eps))
+    bma_unc = utils.calibration_curve(bma_predictions, bma_targets, args.num_bins)
+    bma_ece = bma_unc['unc']
+    tmp_ = bma_temperature.item()
+else:
+    bma_accuracy = bma_res["accuracy"]
+    bma_nll = bma_res["nll"]
+    unc = utils.calibration_curve(bma_predictions, bma_targets, args.num_bins)
+    bma_ece = bma_res['ece']
+    
 if not args.ignore_wandb:
     wandb.run.summary['bma accuracy'] = bma_accuracy
     wandb.run.summary['bma nll'] = bma_nll
     wandb.run.summary['bma ece'] = bma_ece
+    if args.ts:
+        wandb.run.summary['bma temperature'] = tmp_
 
 print("[BMA Results]\n")
 tab_name = ["# of Models", "BMA Accuracy", "BMA NLL", "BMA ECE"]
-tab_contents= [args.bma_num_models, format(bma_accuracy, '.2f'), format(bma_nll, '.4f'), format(bma_ece, '.4f')]
+if args.ts:
+    tab_name.append("BMA Temperature")
+tab_contents = [args.bma_num_models, format(bma_accuracy, '.2f'), format(bma_nll, '.4f'), format(bma_ece, '.4f')]
+if args.ts:
+    tab_contents.append(format(tmp_, '.4f'))
 table = [tab_name, tab_contents]
 print(tabulate.tabulate(table, tablefmt="simple"))
 print("-"*30)

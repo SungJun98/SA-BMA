@@ -282,6 +282,7 @@ def eval_sabma(loader, sabma_model, params, criterion, device, num_bins=15, eps=
     loss_sum = 0.0
     num_objects_total = len(loader.dataset)
 
+    logits = list()
     preds = list()
     targets = list()
 
@@ -295,10 +296,12 @@ def eval_sabma(loader, sabma_model, params, criterion, device, num_bins=15, eps=
             loss = criterion(pred, target)
             loss_sum += loss.item() * input.size(0)
             
+            logits.append(pred.cpu().numpy())    
             preds.append(F.softmax(pred, dim=1).cpu().numpy())
             targets.append(target.cpu().numpy())
             offset += input.size(0)
     
+    logits = np.vstack((logits))
     preds = np.vstack(preds)
     targets = np.concatenate(targets)
 
@@ -307,6 +310,7 @@ def eval_sabma(loader, sabma_model, params, criterion, device, num_bins=15, eps=
     ece = utils.calibration_curve(preds, targets, num_bins)['ece']
     
     return {
+        "logits" : logits,
         "predictions" : preds,
         "targets" : targets,
         "loss" : loss_sum / num_objects_total,
@@ -324,16 +328,16 @@ def bma_sabma(te_loader, sabma_model, bma_num_models,
     '''
     run bayesian model averaging in test step
     '''
+    sabma_logits = np.zeros((len(te_loader.dataset), num_classes))
     sabma_predictions = np.zeros((len(te_loader.dataset), num_classes))
     with torch.no_grad():
         for i in range(bma_num_models):
-            
-            if i == 0:
-                tr_params, _, _ = sabma_model.sample(z_scale=1.0, sample_param='tr')
-                frz_params, _, _ = sabma_model.sample(z_scale=1.0, sample_param='frz')
-            else:
-                tr_params, _, _  = sabma_model.sample(z_scale=1.0, sample_param='tr')
-                frz_params, _, _  = sabma_model.sample(z_scale=1.0, sample_param='frz')
+            # if i == 0:
+            #     tr_params, _, _ = sabma_model.sample(z_scale=1.0, sample_param='tr')
+            #     frz_params, _, _ = sabma_model.sample(z_scale=1.0, sample_param='frz')
+            # else:
+            tr_params, _, _  = sabma_model.sample(z_scale=1.0, sample_param='tr')
+            frz_params, _, _  = sabma_model.sample(z_scale=1.0, sample_param='frz')
             params = format_weights(tr_params, frz_params, sabma_model)
                 
             # save sampled weight for bma
@@ -345,6 +349,7 @@ def bma_sabma(te_loader, sabma_model, bma_num_models,
             if not validation:
                 print(f"SA-BMA Sample {i+1}/{bma_num_models}. Accuracy: {res['accuracy']:.2f}%  NLL: {res['nll']:.4f}")
 
+            sabma_logits += res["logits"]
             sabma_predictions += res["predictions"]
 
             ens_accuracy = np.mean(np.argmax(sabma_predictions, axis=1) == res["targets"]) * 100
@@ -353,6 +358,7 @@ def bma_sabma(te_loader, sabma_model, bma_num_models,
             if not validation:
                 print(f"Ensemble {i+1}/{bma_num_models}. Accuracy: {ens_accuracy:.2f}% NLL: {ens_nll:.4f}")
 
+        sabma_logits /= bma_num_models
         sabma_predictions /= bma_num_models
 
         sabma_loss = criterion(torch.tensor(sabma_predictions), torch.tensor(res['targets'])).item()
@@ -365,7 +371,8 @@ def bma_sabma(te_loader, sabma_model, bma_num_models,
     if not validation:
         print(f"bma Accuracy using {bma_num_models} model : {sabma_accuracy:.2f}% / NLL : {sabma_nll:.4f}")
     
-    return {"predictions" : sabma_predictions,
+    return {"logits" : sabma_logits,
+            "predictions" : sabma_predictions,
             "targets" : res["targets"],
             "loss" : sabma_loss,
             "accuracy" : sabma_accuracy,
