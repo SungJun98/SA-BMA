@@ -338,8 +338,8 @@ for epoch in range(start_epoch, int(args.epochs)+1):
     if not args.ignore_wandb:
         wandb.log({
             "Train Loss ": tr_res["loss"], "Train Accuracy" : tr_res["accuracy"],
-            "Validation loss (MAP)" : val_res["loss"], "Validation Accuracy (MAP)" : val_res["accuracy"],
-            "Validation nll (MAP)" : val_res["nll"], "Validation ece (MAP)" : val_res["ece"],
+            f"Validation loss (MC{args.val_mc_num})" : val_res["loss"], f"Validation Accuracy (MC{args.val_mc_num})" : val_res["accuracy"],
+            f"Validation nll (MC{args.val_mc_num})" : val_res["nll"], f"Validation ece (MC{args.val_mc_num})" : val_res["ece"],
             "lr" : lr,
             "max(mean)" : torch.max(sabma_model.bnn_param['mean']),
             "mean(mean)" : torch.mean(sabma_model.bnn_param['mean']),
