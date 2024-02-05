@@ -232,7 +232,7 @@ def schedule(epoch, lr_init, epochs, swa, swa_start=None, swa_lr=None):
 
 
 
-def bma_swag(tr_loader, val_loader, te_loader, model, num_classes, criterion, temperature=None, bma_num_models=30, bma_save_path=None, eps=1e-8, batch_norm=True, seed=None, num_bins=15):
+def bma_swag(tr_loader, val_loader, te_loader, model, num_classes, criterion, bma_num_models=30, bma_save_path=None, eps=1e-8, batch_norm=True, seed=None, num_bins=15):
     '''
     run bayesian model averaging in test step
     '''
@@ -245,22 +245,12 @@ def bma_swag(tr_loader, val_loader, te_loader, model, num_classes, criterion, te
             model.sample(1.0, cov=True, seed=seed)
             if batch_norm:
                 bn_update(tr_loader, model, verbose=False, subset=1.0)
-
-            if temperature == 'local':
-                scaled_model = ts.ModelWithTemperature(model)
-                scaled_model.set_temperature(val_loader)
-                temperature_ = scaled_model.temperature
-            else:
-                temperature_ = temperature
                             
             # save sampled weight for bma
             if bma_save_path is not None:
-                if temperature == 'local':
-                    torch.save(scaled_model, f'{bma_save_path}/bma_model-{i}.pt')
-                else:
-                    torch.save(model, f'{bma_save_path}/bma_model-{i}.pt')
+                torch.save(model, f'{bma_save_path}/bma_model-{i}.pt')
 
-            res = predict(te_loader, model, temperature_)
+            res = predict(te_loader, model)
             logits = res["logits"]; predictions = res["predictions"]; targets = res["targets"]
             
             accuracy = np.mean(np.argmax(predictions, axis=1) == targets)

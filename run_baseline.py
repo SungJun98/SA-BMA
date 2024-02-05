@@ -161,13 +161,6 @@ parser.add_argument("--no_save_bma", action='store_true', default=False,
             help="Deactivate saving model samples in BMA")
 #----------------------------------------------------------------
 
-## calibration --------------------------------------------------
-parser.add_argument("--no_ts", action="store_true", default=False,
-            help="Deactivate Temperature Scaling (Default: False)")
-parser.add_argument("--ts_opt", type=int, default=1,
-            help="BNN calibration option 1) fit tau on MAP model, 2) fit tau on every sampled model, 3) fit tau on ensembled model (Default: 1)")
-#----------------------------------------------------------------
-
 args = parser.parse_args()
 #----------------------------------------------------------------
 
@@ -508,19 +501,21 @@ table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece" ],
 print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
 
 ## Temperature Scaled Results
-if not args.no_ts:
-    res, temperature = utils.ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, variance, criterion)
-    print(f"2) Scaled Results:")
-    table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
-            [best_epoch, format(res['accuracy'], '.2f'), format(res['nll'],'.4f'), format(res['ece'], '.4f'), format(temperature.item(), '.4f')]]
-    print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
-else:
-    temperature = None
+res_ts, temperature = utils.ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, variance, criterion)
+print(f"2) Scaled Results:")
+table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
+        [best_epoch, format(res_ts['accuracy'], '.2f'), format(res_ts['nll'],'.4f'), format(res_ts['ece'], '.4f'), format(temperature.item(), '.4f')]]
+print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
+
 
 if not args.ignore_wandb:
     wandb.run.summary['test accuracy'] = res['accuracy']
     wandb.run.summary['test nll'] = res['nll']
     wandb.run.summary["test ece"]  = res['ece']
+    
+    wandb.run.summary['test accuracy w/ ts'] = res_ts['accuracy']
+    wandb.run.summary['test nll w/ ts'] = res_ts['nll']
+    wandb.run.summary["test ece w/ ts"]  = res_ts['ece']
 
     
 
@@ -530,7 +525,7 @@ if args.method in ["swag", "ll_swag", "vi", "ll_vi"]:
     bma_save_path = f"{args.save_path}/bma_models"
     os.makedirs(bma_save_path, exist_ok=True) 
     print(f"Start Bayesian Model Averaging with {args.bma_num_models} samples")
-    utils.bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature)
+    utils.bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, variance, criterion, bma_save_path)
 else:
     pass
 

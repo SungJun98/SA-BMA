@@ -676,72 +676,55 @@ def ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, var
 
 
 
-def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature):
+def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, variance, criterion, bma_save_path):
     if args.no_save_bma:
         bma_save_path = None
         
-    if args.no_ts:
-        bma_temperature = None; tmp_ = -9999.0
-        if args.method in ["swag", "ll_swag"]:
-            bma_res = swag_utils.bma_swag(tr_loader, val_loader, te_loader, model, num_classes, criterion, bma_temperature, args.bma_num_models, bma_save_path, args.eps, args.batch_norm, num_bins=args.num_bins)
-        elif args.method in ["vi", "ll_vi"]:
-            bma_res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
-        else:
-            raise NotImplementedError("Add code for Bayesian Model Averaging for this method")
-        
-    elif args.ts_opt == 1:
-        ## TS opt 1: using temperature scaled on MAP model
-        bma_temperature = temperature; tmp_ = bma_temperature.item()
-        if args.method in ["swag", "ll_swag"]:
-            bma_res = swag_utils.bma_swag(tr_loader, val_loader, te_loader, model, num_classes, criterion, bma_temperature, args.bma_num_models, bma_save_path, args.eps, args.batch_norm, num_bins=args.num_bins)
-        elif args.method in ["vi", "ll_vi"]:
-            bma_res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
-        else:
-            raise NotImplementedError("Add code for Bayesian Model Averaging with Temperature scaling for this method")
+       
+    ## TS : temperature scaling on ensembled output
+    # find temperature tau on validation loader first
+    if args.method in ["swag", "ll_swag"]:
+        bma_res = swag_utils.bma_swag(tr_loader, val_loader, val_loader, model, num_classes, criterion, args.bma_num_models, None, args.eps, args.batch_norm, num_bins=args.num_bins)       
+    elif args.method in ["vi", "ll_vi"]:
+        bma_res = vi_utils.bma_vi(val_loader, val_loader, mean, variance, model, args.method, criterion, num_classes, None, args.bma_num_models, None, args.num_bins, args.eps)
+    else:
+        raise NotImplementedError("Add code for Bayesian Model Averaging with Temperature scaling for this method")
+    bma_logits = bma_res["logits"]; bma_targets = bma_res["targets"]
 
-        
-    elif args.ts_opt == 2:
-        ## TS opt 2: temperature scaling on each model components
-        bma_temperature = 'local'; tmp_ = -9999.0
-        if args.method in ["swag", "ll_swag"]:
-            bma_res = swag_utils.bma_swag(tr_loader, val_loader, te_loader, model, num_classes, criterion, bma_temperature, args.bma_num_models, bma_save_path, args.eps, args.batch_norm, num_bins=args.num_bins)
-        elif args.method in ["vi", "ll_vi"]:
-            bma_res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
-        else:
-            raise NotImplementedError("Add code for Bayesian Model Averaging with Temperature scaling for this method")
-
-        
-    elif args.ts_opt == 3:
-        ## TS opt 3: temperature scaling on ensembled output
-        # find temperature tau on validation loader first
-        bma_temperature = None; 
-        if args.method in ["swag", "ll_swag"]:
-            bma_res = swag_utils.bma_swag(tr_loader, val_loader, val_loader, model, num_classes, criterion, bma_temperature, args.bma_num_models, None, args.eps, args.batch_norm, num_bins=args.num_bins)       
-        elif args.method in ["vi", "ll_vi"]:
-            bma_res = vi_utils.bma_vi(val_loader, val_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models, None, args.num_bins, args.eps)
-        else:
-            raise NotImplementedError("Add code for Bayesian Model Averaging with Temperature scaling for this method")
-        bma_logits = bma_res["logits"]; bma_targets = bma_res["targets"]
-        
-        scaled_model = ts.ModelWithTemperature(model, ens=True)
-        scaled_model.set_temperature(val_loader, ens_logits=torch.tensor(bma_logits), ens_pred=torch.tensor(bma_targets))
-        bma_temperature = scaled_model.temperature.unsqueeze(1).expand(bma_logits.shape[0], bma_logits.shape[1])
-        bma_logits = torch.tensor(bma_logits) / bma_temperature.cpu()
-        bma_predictions = F.softmax(bma_logits, dim=1).detach().numpy()
-        bma_res["bma_accuracy"] = np.mean(np.argmax(bma_predictions, axis=1) == bma_targets)
-        bma_res["nll"] = -np.mean(np.log(bma_predictions[np.arange(bma_predictions.shape[0]), bma_targets] + args.eps))
-        bma_res['unc'] = calibration_curve(bma_predictions, bma_targets, args.num_bins)
-        bma_res['ece'] = bma_res['ece']['unc']
-        tmp_ = bma_temperature.item()
-        
-    print(f"3) Calibrated BMA Results:")
+    bma_accuracy = bma_res['accuracy']
+    bma_nll = bma_res['nll']
+    bma_ece = bma_res['ece']
+    
+    print(f"3) Uncalibrated BMA Results:")
+    table = [["Num BMA models", "Test Accuracy", "Test NLL", "Test Ece"],
+            [args.bma_num_models, format(bma_accuracy, '.4f'), format(bma_nll, '.4f'), format(bma_ece, '.4f')]]
+    print(tabulate.tabulate(table, tablefmt="simple"))
+    
+    scaled_model = ts.ModelWithTemperature(model, ens=True)
+    scaled_model.set_temperature(val_loader, ens_logits=torch.tensor(bma_logits), ens_pred=torch.tensor(bma_targets))
+    bma_temperature = scaled_model.temperature
+    bma_logits_ts = torch.tensor(bma_logits) / bma_temperature.cpu()
+    bma_predictions_ts = F.softmax(bma_logits_ts, dim=1).detach().numpy()
+    
+    bma_accuracy_ts = np.mean(np.argmax(bma_predictions_ts, axis=1) == bma_targets) * 100
+    bma_nll_ts = -np.mean(np.log(bma_predictions_ts[np.arange(bma_predictions_ts.shape[0]), bma_targets] + args.eps))
+    bma_unc_ts = calibration_curve(bma_predictions_ts, bma_targets, args.num_bins)
+    bma_ece_ts = bma_unc_ts['ece']
+    tmp_ = bma_temperature.item()
+    
+    print(f"4) Calibrated BMA Results:")
     table = [["Num BMA models", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
-            [args.bma_num_models, format(bma_res['accuracy'], '.4f'), format(bma_res['nll'], '.4f'), format(bma_res['ece'], '.4f'), format(tmp_, '.4f')]]
+            [args.bma_num_models, format(bma_accuracy_ts, '.4f'), format(bma_nll_ts, '.4f'), format(bma_ece_ts, '.4f'), format(tmp_, '.4f')]]
     print(tabulate.tabulate(table, tablefmt="simple"))
     
     if not args.ignore_wandb:
-        wandb.run.summary['bma accuracy'] = bma_res['accuracy']
-        wandb.run.summary['bma nll'] = bma_res['nll']
-        wandb.run.summary['bma ece'] = bma_res['ece']
+        wandb.run.summary['bma accuracy'] = bma_accuracy
+        wandb.run.summary['bma nll'] = bma_nll
+        wandb.run.summary['bma ece'] = bma_ece
+    
+        wandb.run.summary['bma accuracy w/ ts'] = bma_accuracy_ts
+        wandb.run.summary['bma nll w/ ts'] = bma_nll_ts
+        wandb.run.summary['bma ece w/ ts'] = bma_ece_ts
         wandb.run.summary['bma temperature'] = tmp_
+
     save_reliability_diagram(args.method, args.optim, args.save_path, bma_res['unc'], True)

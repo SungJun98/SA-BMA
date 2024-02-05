@@ -266,10 +266,7 @@ def bma_vi(val_loader, te_loader, mean, variance, model, method, criterion, num_
             if not bma_num_models == 1:
                 # save sampled weight for bma
                 if bma_save_path is not None:
-                    if temperature == 'local':
-                        torch.save(scaled_model, f'{bma_save_path}/bma_model-{i}.pt')
-                    else:
-                        torch.save(model, f'{bma_save_path}/bma_model-{i}.pt')
+                    torch.save(model, f'{bma_save_path}/bma_model-{i}.pt')
  
             res = predict(te_loader, model, temperature_)
             logits = res["logits"]; predictions = res["predictions"];targets = res["targets"]
