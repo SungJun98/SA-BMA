@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from utils.sam import sam, sam_utils
+from utils.bsam import bsam
 from utils.swag import swag_utils
 from utils.vi import vi_utils
 from utils import temperature_scaling as ts
@@ -44,7 +45,7 @@ def set_save_path(args):
     if args.dat_per_cls >= 0:
         save_path_ = f"{args.save_path}/seed_{args.seed}/{args.dataset}/{args.dat_per_cls}shot"
     else:
-        save_path_ = f"{args.save_path}/seed_{args.seed}/{args.dataset}/"
+        save_path_ = f"{args.save_path}/seed_{args.seed}/{args.dataset}"
         
     method = args.method
 
@@ -76,7 +77,8 @@ def set_save_path(args):
         save_path_ = f"{save_path_}_{args.rho}"
         
     if args.optim in ["bsam"]:
-        save_path_ = f"{save_path_}_{args.kl_eta}_{args.alpha}"
+        # save_path_ = f"{save_path_}_{args.kl_eta}_{args.alpha}"
+        save_path_ = f"{save_path_}_{args.noise_scale}"
     
     return save_path_
     
@@ -123,7 +125,8 @@ def set_wandb_runname(args):
         run_name_ = f"{run_name_}_{args.rho}"
     
     if args.optim in ["bsam"]:
-        run_name_ = f"{run_name_}_{args.kl_eta}_{args.alpha}"
+        # run_name_ = f"{run_name_}_{args.kl_eta}_{args.alpha}"
+        run_name_ = f"{run_name_}_{args.noise_scale}"
     
     return run_name_
 
@@ -189,7 +192,7 @@ def get_backbone(model_name, num_classes, device, pre_trained=True):
     return model
 
 
-def get_optimizer(args, model):
+def get_optimizer(args, model, num_classes=10):
     '''
     Define optimizer
     '''
@@ -212,6 +215,13 @@ def get_optimizer(args, model):
         base_optimizer = torch.optim.SGD
         optimizer = sam.SAM(optim_param, base_optimizer, rho=args.rho, lr=args.lr_init, momentum=args.momentum,
                         weight_decay=args.wd)
+    
+    elif args.optim == "bsam":
+        if args.dat_per_cls < 0:
+            args.dat_per_cls = 5000 if args.dataset == 'cifar10' else 500
+        optimizer = bsam.bSAM(optim_param, Ndata=num_classes * args.dat_per_cls, lr=args.lr_init, 
+                            betas=(args.momentum, args.beta2), weight_decay=args.wd, rho=args.rho,
+                            noise_scale=args.noise_scale)
         
     return optimizer
 
@@ -223,14 +233,14 @@ def get_scheduler(args, optimizer):
     '''
     if args.scheduler == "step_lr":
         from timm.scheduler.step_lr import StepLRScheduler
-        if args.optim in ['sgd', "adam"]:
+        if args.optim in ['sgd', "adam", "bsam"]:
             scheduler_ = StepLRScheduler(optimizer, decay_rate=0.2, )
-        elif args.optim in ['sam', 'bsam']:
+        elif args.optim in ['sam']:
             scheduler_ = StepLRScheduler(optimizer.base_optimizer, decay_rate=0.2, )
             
     elif args.scheduler == "cos_decay":
         from timm.scheduler.cosine_lr import CosineLRScheduler
-        if args.optim in ["sgd", "adam"]:
+        if args.optim in ["sgd", "adam", "bsam"]:
             scheduler_ = CosineLRScheduler(optimizer = optimizer,
                                         t_initial= args.epochs,
                                         lr_min=args.lr_min,
@@ -240,7 +250,7 @@ def get_scheduler(args, optimizer):
                                         warmup_t=args.warmup_t,
                                         warmup_lr_init=args.warmup_lr_init,
                                             )
-        elif args.optim in ["sam", "bsam"]:
+        elif args.optim in ["sam"]:
             scheduler_ = CosineLRScheduler(optimizer = optimizer.base_optimizer,
                                         t_initial= args.epochs,
                                         lr_min=args.lr_min,
@@ -331,7 +341,7 @@ def save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_s
                             optimizer = optimizer.state_dict(),
                             # scheduler = scheduler.state_dict(),
                             )
-    elif args.optim == "sam":
+    elif args.optim in ["sam", "bsam"]:
         if not args.no_amp:
             save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
                             epoch = best_epoch,
@@ -508,6 +518,44 @@ def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler
             loss_sum += loss.data.item() * X.size(0)
             num_objects_current += X.size(0)
                       
+    return {
+        "loss": loss_sum / num_objects_current,
+        "accuracy": correct / num_objects_current * 100.0,
+    }
+
+
+
+# train bSAM
+def train_bsam(dataloader, model, criterion, optimizer, device):
+    loss_sum = 0.0
+    correct = 0.0
+
+    num_objects_current = 0
+
+    model.train()
+    for _, (X, y) in enumerate(dataloader):
+        X, y = X.to(device), y.to(device)
+        optimizer.zero_grad()
+
+        ## noisy sample : p + e
+        optimizer.add_noise(zero_grad=True)
+        
+        ## perturb parameter : p + eps
+        pred = model(X)
+        loss = criterion(pred, y)        
+        loss.backward() # gradient of "p + e"
+        optimizer.first_step(zero_grad=True)
+
+        ## actual sharpness-aware update
+        pred = model(X)
+        loss = criterion(pred, y)        
+        loss.backward() # gradient of "p + eps"
+        optimizer.second_step(zero_grad=True)
+
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
+
     return {
         "loss": loss_sum / num_objects_current,
         "accuracy": correct / num_objects_current * 100.0,

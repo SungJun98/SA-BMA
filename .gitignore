@@ -4,3 +4,6 @@ resnet18_mean.pt
 resnet18_variance.pt
 resnet18_model.pt
 resnet18_covmat.pt
+
+*.pyc
+*.cpython-39.pyc

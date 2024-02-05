@@ -85,12 +85,13 @@ parser.add_argument(
 
 parser.add_argument("--save_path",
             type=str, default="/data2/lsj9862/exp_result/",
+            # type=str, default="/data1/mulan98/exp_result",
             help="Path to save best model dict")
 #----------------------------------------------------------------
 
 ## Optimizer Hyperparameter --------------------------------------
 parser.add_argument("--optim", type=str, default="sgd",
-                    choices=["sgd", "sam", "adam"],
+                    choices=["sgd", "sam", "adam", "bsam"],
                     help="Optimization options")
 
 parser.add_argument("--lr_init", type=float, default=0.01,
@@ -105,6 +106,12 @@ parser.add_argument("--epochs", type=int, default=100, metavar="N",
 parser.add_argument("--wd", type=float, default=5e-4, help="weight decay (default: 5e-4)")
 
 parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation ball for SAM / BSAM")
+
+parser.add_argument('--beta2', dest='beta2', type=float, default=0.999, help='momentum for variance')
+
+parser.add_argument('--damping', dest='damping', type=float, default=0.1, help='damping to stabilize the method')
+
+parser.add_argument("--noise_scale", type=float, default=1e-4, help="noise scale (default: 1e-4)")
 
 # Scheduler
 parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
@@ -173,6 +180,7 @@ args = parser.parse_args()
 
 if not args.ignore_wandb:
     wandb.init(project="SA-BTL", entity='sungjun98')
+    # wandb.init(project="SA-BTL", entity='mulan98')
 
 # Set Device and Seed--------------------------------------------
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -294,7 +302,7 @@ print("-"*30)
 
 # Set Optimizer--------------------------------------
 optimizer = utils.get_optimizer(args, model)
-print(f"Set {args.optim} optimizer with lr_init {args.lr_init} / wd {args.wd} / momentum {args.momentum}")
+print(f"Set {args.optim} optimizer with lr_init {args.lr_init} / wd {args.wd} / momentum {args.momentum} / rho {args.rho} / noise_scale {args.noise_scale}")
 print("-"*30)
 #----------------------------------------------------------------
     
@@ -390,6 +398,8 @@ if args.method not in ["la", "ll_la"]:
                 tr_res = utils.train_sgd(tr_loader, model, criterion, optimizer, args.device, scaler)
             elif args.optim == "sam":
                 tr_res = utils.train_sam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
+            elif args.optim == "bsam":
+                tr_res = utils.train_bsam(tr_loader, model, criterion, optimizer, args.device)
 
         ## valid
         if args.method in ["vi", "ll_vi"]:
