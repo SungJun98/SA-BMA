@@ -10,10 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import utils.utils as utils
-from utils.swag import swag, swag_utils
-from utils.vi import vi_utils
-from utils.la import la_utils
-from utils import temperature_scaling as ts
+
 
 
 import warnings
@@ -39,7 +36,7 @@ parser.add_argument(
 parser.add_argument(
     "--data_dir",
     type=str,
-    default='/data1/lsj9862/data/cifar10',
+    default='/data1/lsj9862/data/',
     help="path to datasets location",)
 
 parser.add_argument("--severity", type=int, default=1,
@@ -56,7 +53,7 @@ parser.add_argument("--num_workers", type=int, default=4,
 parser.add_argument(
     "--model",
     type=str, default='resnet18', required=True,
-    choices=['resnet14', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
+    choices=['resnet18', 'resnet50', 'resnet101', 'resnet152',
             'resnet18-noBN',
             "vitb16-i21k"],
     help="model name (default : resnet18)")
@@ -72,12 +69,6 @@ parser.add_argument("--num_bins", type=int, default=15, help="bin number for ece
 """
 distributional shift에서는 validation set 없다는 가정 ==> ts 적용 불가
 """
-# ## calibration --------------------------------------------------
-# parser.add_argument("--no_ts", action="store_true", default=False,
-#             help="Deactivate Temperature Scaling (Default: False)")
-# parser.add_argument("--ts_opt", type=int, default=1,
-#                 help="BNN calibration option 1) fit tau on MAP model, 2) fit tau on every sampled model, 3) fit tau on ensembled model (Default: 1)")
-# #----------------------------------------------------------------
 
 args = parser.parse_args()
 #----------------------------------------------------------------
@@ -147,7 +138,7 @@ def load_corrupted_cifar10(severity, data_dir='/data1/lsj9862/data', batch_size=
 
 def load_corrupted_cifar100(severity, data_dir='/data1/lsj9862/data', batch_size=256, cuda=True,
                            workers=1):
-    """ load corrupted CIFAR10 dataset """
+    """ load corrupted CIFAR100 dataset """
 
     x_file = data_dir + '/CIFAR-100-C/CIFAR100_c%d.npy' % severity
     np_x = np.load(x_file)

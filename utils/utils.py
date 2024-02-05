@@ -76,8 +76,7 @@ def set_save_path(args):
         save_path_ = f"{save_path_}_{args.rho}"
         
     if args.optim in ["bsam"]:
-        # save_path_ = f"{save_path_}_{args.eta}"
-        save_path_ = f"{save_path_}"
+        save_path_ = f"{save_path_}_{args.kl_eta}_{args.alpha}"
     
     return save_path_
     
@@ -124,8 +123,7 @@ def set_wandb_runname(args):
         run_name_ = f"{run_name_}_{args.rho}"
     
     if args.optim in ["bsam"]:
-        # run_name_ = f"{run_name_}_{args.eta}"
-        run_name_ = f"{run_name_}"
+        run_name_ = f"{run_name_}_{args.kl_eta}_{args.alpha}"
     
     return run_name_
 

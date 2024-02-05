@@ -33,8 +33,8 @@ parser.add_argument("--resume", type=str, default=None,
 parser.add_argument("--tr_layer", type=str, default="nl_ll", choices=["last_layer", "full_layer", "last_block", "nl_ll"],
             help="Choose layer which would be trained with our method (Default : nl_ll)")
 
-parser.add_argument("--tol", type=int, default=30,
-        help="tolerance for early stopping (Default : 30)")
+parser.add_argument("--tol", type=int, default=50,
+        help="tolerance for early stopping (Default : 50)")
 
 parser.add_argument("--ignore_wandb", action="store_true", default=False, help="Deactivate wandb")
 
@@ -72,7 +72,7 @@ parser.add_argument(
     help="model name (default : resnet18)")
 
 parser.add_argument(
-    "--pre_trained", action='store_true', default=False,
+    "--pre_trained", action='store_true', default=True,
     help="Using pre-trained model from zoo"
     )
 
@@ -103,7 +103,8 @@ parser.add_argument("--wd", type=float, default=5e-4, help="weight decay (defaul
 
 parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation ball for SAM / BSAM")
 
-# parser.add_argument("--eta", type=float, default=1.0, help="Eta to calculate Inverse of Fisher Information Matrix (In case of diagonal)")
+parser.add_argument("--kl_eta", type=float, default=0.1,
+                help="Hyperparameter for KLD loss")
 
 parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
 
@@ -122,24 +123,25 @@ parser.add_argument("--warmup_lr_init", type=float, default=1e-7,
 parser.add_argument("--src_bnn", type=str, default="swag", choices=["swag", "la", "vi"],
         help="Type of pre-trained BNN model")
 
+parser.add_argument("--pretrained_set", type=str, default='source', choices=['source', 'down'],
+        help="Trained set to make prior (Default: source)")
+
 parser.add_argument("--diag_only", action="store_true", default=False, help="Consider only diagonal variance")
 
-parser.add_argument("--low_rank", type=int, default=3, help="Low-rank component")
+parser.add_argument("--low_rank", type=int, default=-1, help="Low-rank component")
 
 parser.add_argument("--var_scale", type=float, default=1, help="Scaling prior variance")
 
 parser.add_argument("--cov_scale", type=float, default=1, help="Scaling prior covariance")
 
-parser.add_argument("--mean_path", type=str, required=True, default=None,
-    help="path to load saved mean of swag model for transfer learning (default: None)")
-parser.add_argument("--var_path", type=str, required=True, default=None,
-    help="path to load saved variance of swag model for transfer learning (default: None)")
-parser.add_argument("--covmat_path", type=str, default=None,
-    help="path to load saved covariance matrix of swag model for transfer learning (default: None)")
+parser.add_argument("--prior_path", type=str, required=True, default=None,
+    help="path to load saved swag model for transfer learning (default: None)")
+
+parser.add_argument("--alpha", type=float, default=1e-2, help="Scale of variance initialized with classifier")
 #----------------------------------------------------------------
 
 ## bma or metrics -----------------------------------------------
-parser.add_argument("--val_mc_num", type=int, default=1, help="Number of models for Mc integration in validation phase")
+parser.add_argument("--val_mc_num", type=int, default=3, help="Number of models for Mc integration in validation phase")
 parser.add_argument("--eps", type=float, default=1e-8, help="small float to calculate nll")
 parser.add_argument("--bma_num_models", type=int, default=30, help="Number of models for bma in test phase")
 parser.add_argument("--num_bins", type=int, default=15, help="bin number for ece")
@@ -202,19 +204,19 @@ print("-"*30)
 
 # Define Model------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
-checkpoint = torch.load(args.model_path)
-if args.src_bnn == 'swag':
-    model.load_state_dict(checkpoint)
-elif args.src_bnn == "vi":
-    bn_state_dict = {key: value for key, value in checkpoint["state_dict"].items() if 'bn' in key}
-    model.load_state_dict(bn_state_dict, strict=False)
+# checkpoint = torch.load(f"{args.prior_path}/{args.model}_model.pt")
+# if args.src_bnn == 'swag':
+#     model.load_state_dict(checkpoint)
+# elif args.src_bnn == "vi":
+#     bn_state_dict = {key: value for key, value in checkpoint["state_dict"].items() if 'bn' in key}
+#     model.load_state_dict(bn_state_dict, strict=False)
 
 
 
-w_mean = torch.load(args.mean_path)
-w_var = torch.load(args.var_path)
-if args.covmat_path is not None:
-    w_covmat = torch.load(args.covmat_path)
+w_mean = torch.load(f"{args.prior_path}/{args.model}_mean.pt")
+w_var = torch.load(f"{args.prior_path}/{args.model}_variance.pt")
+if not args.diag_only:
+    w_covmat = torch.load(f"{args.prior_path}/{args.model}_covmat.pt")
 else:
     w_covmat=None
 sabma_model = sabma.SABMA(copy.deepcopy(model),
@@ -227,9 +229,11 @@ sabma_model = sabma.SABMA(copy.deepcopy(model),
                         w_cov_sqrt=w_covmat,
                         cov_scale=args.cov_scale,
                         tr_layer=args.tr_layer,
+                        pretrained_set = 'source',
+                        alpha=args.alpha
                         ).to(args.device)
 if not args.ignore_wandb:
-    wandb.config.update({"low_rank" : sabma_model.low_rank})
+    wandb.config.update({"low_rank_true" : sabma_model.low_rank})
 
 print(f"Load sabma Model with prior made of {args.src_bnn} with rank {sabma_model.low_rank}")
 if not args.diag_only:
@@ -302,12 +306,12 @@ for epoch in range(start_epoch, int(args.epochs)+1):
     elif args.optim == "sam":
         tr_res = sabma_utils.train_sabma_sam(tr_loader, sabma_model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
     elif args.optim == "bsam":
-        tr_res = sabma_utils.train_sabma_bsam(tr_loader, sabma_model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler, args.tr_layer)
+        tr_res = sabma_utils.train_sabma_bsam(tr_loader, sabma_model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler, args.kl_eta)
 
     # validation / test
     if args.val_mc_num ==1:
-        tr_params, _, _ = sabma_model.sample(z_scale=0.0, sample_param='tr')
-        frz_params, _, _ = sabma_model.sample(z_scale=0.0, sample_param='frz')
+        tr_params, _, _ = sabma_model.sample(z_scale=1.0, sample_param='tr')
+        frz_params, _, _ = sabma_model.sample(z_scale=1.0, sample_param='frz')
         params = sabma_utils.format_weights(tr_params, frz_params, sabma_model)
         val_res = sabma_utils.eval_sabma(val_loader, sabma_model, params, criterion, args.device, args.num_bins, args.eps)
     else:
@@ -446,8 +450,8 @@ if not args.ignore_wandb:
     wandb.run.summary['test nll'] = res['nll']
     wandb.run.summary["test ece"]  = te_ece
 
-print("[Best Test Results]\n")
-tab_name = ["Best Epoch", "BMA Accuracy", "BMA NLL", "BMA ECE"]
+print("[Best MAP Results]\n")
+tab_name = ["Best Epoch", "MAP Accuracy", "MAP NLL", "MAP ECE"]
 tab_contents= [checkpoint['epoch'], format(res['accuracy'], '.2f'), format(res['nll'], '.4f'), format(te_ece, '.4f')]
 table = [tab_name, tab_contents]
 print(tabulate.tabulate(table, tablefmt="simple"))

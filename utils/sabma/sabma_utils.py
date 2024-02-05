@@ -184,7 +184,7 @@ def train_sabma_sam(dataloader, sabma_model, criterion, optimizer, device, first
 
 
 
-def train_sabma_bsam(dataloader, sabma_model, criterion, optimizer, device, first_step_scaler, second_step_scaler, tr_layer):
+def train_sabma_bsam(dataloader, sabma_model, criterion, optimizer, device, first_step_scaler, second_step_scaler, kl_eta=1.0):
     loss_sum = 0.0
     correct = 0.0
     num_objects_current = 0
@@ -197,9 +197,9 @@ def train_sabma_bsam(dataloader, sabma_model, criterion, optimizer, device, firs
         # Sample weight
         tr_params, z_1, z_2 = sabma_model.sample(z_scale = 1.0, sample_param='tr')    
         frz_params, _, _ = sabma_model.sample(z_scale = 1.0, sample_param='frz')
-        
-        # compute gradient of log probability w.r.t. model parameters
-        log_grad = sabma_model.log_grad(tr_params) # , frz_params)             
+
+        # compute log probability and gradient of log probability w.r.t. model parameters
+        _, log_grad = sabma_model.log_grad(tr_params)
         
         # Change weight sample shape to input model
         params = format_weights(tr_params, frz_params, sabma_model)
@@ -230,10 +230,14 @@ def train_sabma_bsam(dataloader, sabma_model, criterion, optimizer, device, firs
             tr_params = optimizer.second_sample(z_1, z_2, sabma_model)
             params = format_weights(tr_params, frz_params, sabma_model)
             
+            prior_log_prob = sabma_model.prior_log_prob()
+            posterior_log_prob = sabma_model.posterior_log_prob()
+            kld_loss = (posterior_log_prob - prior_log_prob).mean()
+
             with torch.cuda.amp.autocast():
                 pred = sabma_model(params, X)
-                loss = criterion(pred, y)
-
+                loss = criterion(pred, y) + kl_eta * kld_loss
+            
             second_step_scaler.scale(loss).backward()
             if sam_first_step_applied:
                 optimizer.second_step()  
@@ -244,7 +248,7 @@ def train_sabma_bsam(dataloader, sabma_model, criterion, optimizer, device, firs
             loss_sum += loss.data.item() * X.size(0)
             num_objects_current += X.size(0)
             
-            print(f"Batch : {batch} / Tr loss : {loss} / Pred NaN : {torch.sum(torch.isnan(pred))/100} ")
+            # print(f"Batch : {batch} / Tr loss : {loss:.4f} / KL loss : {kld_loss:.4f} / Pred NaN : {torch.sum(torch.isnan(pred))/100} ")
         else:
             ## first forward & backward
             pred = sabma_model(params, X)
@@ -325,8 +329,8 @@ def bma_sabma(te_loader, sabma_model, bma_num_models,
         for i in range(bma_num_models):
             
             if i == 0:
-                tr_params, _, _ = sabma_model.sample(z_scale=0, sample_param='tr')
-                frz_params, _, _ = sabma_model.sample(z_scale=0, sample_param='frz')
+                tr_params, _, _ = sabma_model.sample(z_scale=1.0, sample_param='tr')
+                frz_params, _, _ = sabma_model.sample(z_scale=1.0, sample_param='frz')
             else:
                 tr_params, _, _  = sabma_model.sample(z_scale=1.0, sample_param='tr')
                 frz_params, _, _  = sabma_model.sample(z_scale=1.0, sample_param='frz')

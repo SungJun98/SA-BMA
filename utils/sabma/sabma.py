@@ -24,6 +24,8 @@ class SABMA(torch.nn.Module):
         cov_scale = 1,
         var_clamp = 1e-16,
         tr_layer="nl_ll",
+        pretrained_set = 'source',
+        alpha=1e-2
     ):
         """
         TODO : last layer random initialization 코드 추가 (argument 받아서)
@@ -38,21 +40,52 @@ class SABMA(torch.nn.Module):
         self.backbone = backbone
         self.src_bnn = src_bnn
         
-        # mean (random intialization for classifier)
-        # w_mean
+        classifier_param = list()
+        if isinstance(backbone, torchvision.models.ResNet):
+            for param in backbone.fc.parameters():
+                classifier_param.extend(torch.flatten(param))
+        else:    
+            for param in backbone.head.parameters():
+                classifier_param.extend(torch.flatten(param))
+        classifier_param = torch.tensor(classifier_param)
+        self.classifier_param_num = len(classifier_param)
+    
         
-        # diagonal variance (as form of log standard deviation)
-        w_var = torch.clamp(w_var, self.var_clamp) * var_scale
-        w_var = 0.5 * torch.log(w_var)
+        ## w_mean
+        # random initialization classifier
+        if pretrained_set == 'downstream':
+            w_mean[-len(classifier_param):] = classifier_param
+        elif pretrained_set == 'source':
+            # w_mean = torch.cat((w_mean, classifier_param))
+            w_mean = torch.cat((w_mean, torch.zeros_like(classifier_param)))
+        else:
+            raise NotImplementedError("Choose the pretrained_set between 'source' and 'downstream'")
         
-        # low-ranked covariance matrix
+        ## diagonal variance (as form of log standard deviation)
+        # random initialization classifier
+        w_var = torch.clamp(w_var, self.var_clamp)
+        if pretrained_set == 'downstream':
+            # w_var[-len(classifier_param):] = 1e-2*torch.rand(len(classifier_param))
+            w_var[-len(classifier_param):] = alpha*torch.ones(len(classifier_param))
+        elif pretrained_set == 'source':
+            # w_var = torch.cat((w_var, 1e-2*torch.rand(len(classifier_param))))
+            w_var = torch.cat((w_var, alpha*torch.ones(len(classifier_param))))
+        
+        ## low-ranked covariance matrix
         if src_bnn == 'swag':
             if not self.diag_only:
                 if w_cov_sqrt is not None:
                     if type(w_cov_sqrt) == list:
                         # cat blockwise covmat list as full matrix
                         w_cov_sqrt = torch.cat(w_cov_sqrt, dim=1)
-                w_cov_sqrt = w_cov_sqrt * cov_scale
+                w_cov_sqrt = w_cov_sqrt # * cov_scale
+                if pretrained_set == 'downstream':
+                    # w_cov_sqrt[:, -len(classifier_param):] = 1e-2*torch.rand((w_cov_sqrt.size(0), len(classifier_param)))
+                    w_cov_sqrt[:, -len(classifier_param):] = alpha**0.5*torch.zeros((w_cov_sqrt.size(0), len(classifier_param)))
+                else:
+                    # w_cov_sqrt = torch.cat((w_cov_sqrt, 1e-2*torch.rand((w_cov_sqrt.size(0), len(classifier_param)))), dim=1)
+                    w_cov_sqrt = torch.cat((w_cov_sqrt, alpha**0.5*torch.zeros((w_cov_sqrt.size(0), len(classifier_param)))), dim=1)
+                
                 self.frz_low_rank = w_cov_sqrt.size(0)
                 if self.low_rank < 0:
                     self.low_rank = self.frz_low_rank
@@ -106,17 +139,26 @@ class SABMA(torch.nn.Module):
         self.bnn_param.update({"mean" :
                 nn.Parameter(torch.index_select(w_mean, dim=0, index=self.tr_param_idx))})
 
-        self.register_buffer("frz_log_std", w_var[self.frz_param_idx])
+        self.register_buffer("frz_log_std", 0.5 * torch.log(w_var[self.frz_param_idx] * var_scale))
         self.bnn_param.update({"log_std" :
-                nn.Parameter(torch.index_select(w_var, dim=0, index=self.tr_param_idx))})
+                nn.Parameter(0.5*torch.log(torch.index_select(w_var, dim=0, index=self.tr_param_idx) * var_scale))})
         
-        self.register_buffer("frz_cov_sqrt", w_cov_sqrt[:, self.frz_param_idx])
+        self.register_buffer("frz_cov_sqrt", w_cov_sqrt[:, self.frz_param_idx] * cov_scale)
         self.bnn_param.update({"cov_sqrt" :
-                nn.Parameter(torch.index_select(w_cov_sqrt, dim=1, index=self.tr_param_idx))[:self.low_rank, :]})    
+                nn.Parameter(torch.index_select(w_cov_sqrt, dim=1, index=self.tr_param_idx))[:self.low_rank, :] * cov_scale})    
 
         assert self.frz_mean.numel() + self.bnn_param['mean'].numel() == self.full_param_num, "division of mean parameters was not right!"
         assert self.frz_log_std.numel() + self.bnn_param['log_std'].numel() == self.full_param_num, "division of variance parameters was not right!"
         assert self.frz_cov_sqrt.numel() + self.bnn_param['cov_sqrt'].numel() == self.full_param_num * self.low_rank,  "division of covariance parameters was not right!"
+        
+        if self.tr_layer == 'last_layer':
+            print("Prior cannot be defined")
+        elif self.tr_layer == 'nl_ll':
+            self.register_buffer("prior_mean", self.bnn_param['mean'].detach().clone()[:-self.classifier_param_num])
+            self.register_buffer("prior_log_std", self.bnn_param['log_std'].detach().clone()[:-self.classifier_param_num])
+            self.register_buffer("prior_cov_sqrt", self.bnn_param['cov_sqrt'].detach().clone()[:, :-self.classifier_param_num])
+        else:
+            raise NotImplementedError("No code for prior except last layer and normalization layer + last layer setting")
         # -----------------------------------------------------------------------------------------------------    
 
 
@@ -163,6 +205,44 @@ class SABMA(torch.nn.Module):
         return sample, z_1, z_2
         
         
+    def prior_log_prob(self):
+        '''
+        calculate prior log_grad
+        '''
+        if not self.diag_only:
+            cov_mat_lt = RootLazyTensor(self.prior_cov_sqrt.t())
+            var_lt = DiagLazyTensor(torch.exp(self.prior_log_std))
+            covar = AddedDiagLazyTensor(var_lt, cov_mat_lt).add_jitter(1e-10)
+        else:
+            covar = DiagLazyTensor(torch.exp(self.prior_log_std))
+        qdist = MultivariateNormal(self.prior_mean, covar)
+        prior_sample = qdist.rsample()
+        with gpytorch.settings.num_trace_samples(1) and gpytorch.settings.max_cg_iterations(25):
+            prior_log_prob =  qdist.log_prob(prior_sample)
+        
+        return prior_log_prob
+
+
+    def posterior_log_prob(self):
+        '''
+        calculate prior log_grad
+        '''
+        if self.tr_layer != 'nl_ll':
+            raise NotImplementedError("Need to fix indexing except training normalization and last layer")
+        
+        if not self.diag_only:    
+            cov_mat_lt = RootLazyTensor(self.bnn_param['cov_sqrt'][:,:-self.classifier_param_num].t())
+            var_lt = DiagLazyTensor(torch.exp(self.bnn_param['log_std'][:-self.classifier_param_num]))
+            covar = AddedDiagLazyTensor(var_lt, cov_mat_lt).add_jitter(1e-10)   
+        else:
+            covar = DiagLazyTensor(torch.exp(self.bnn_param['log_std'][:-self.classifier_param_num]))
+        
+        qdist = MultivariateNormal(self.bnn_param['mean'][:-self.classifier_param_num], covar)
+        posterior_sample = qdist.rsample()
+        with gpytorch.settings.num_trace_samples(1) and gpytorch.settings.max_cg_iterations(25):
+            posterior_log_prob =  qdist.log_prob(posterior_sample)
+        
+        return posterior_log_prob
 
 
     def log_grad(self, params):
@@ -190,7 +270,7 @@ class SABMA(torch.nn.Module):
         cov_log_grad = torch.autograd.grad(log_prob, self.bnn_param['cov_sqrt'], retain_graph=True)[0]
         cov_log_grad = torch.flatten(cov_log_grad)
         
-        return [mean_log_grad, std_log_grad, cov_log_grad]   
+        return log_prob, [mean_log_grad, std_log_grad, cov_log_grad]   
     
     
         

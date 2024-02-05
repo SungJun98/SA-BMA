@@ -1,6 +1,6 @@
 wandb
 tmp.py
-down_resnet18_mean.pt
-down_resnet18_variance.pt
-down_resnet18_model.pt
-down_resnet18_covmat.pt
+resnet18_mean.pt
+resnet18_variance.pt
+resnet18_model.pt
+resnet18_covmat.pt
