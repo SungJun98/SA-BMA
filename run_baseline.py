@@ -107,7 +107,7 @@ parser.add_argument("--wd", type=float, default=5e-4, help="weight decay (defaul
 parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation ball for SAM / BSAM")
 
 # Scheduler
-parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
+parser.add_argument("--scheduler", type=str, default='cos_decay', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
 
 parser.add_argument("--lr_min", type=float, default=1e-8,
                 help="Min learning rate. (Cosine Annealing Warmup Restarts)")

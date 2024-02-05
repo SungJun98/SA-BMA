@@ -107,7 +107,7 @@ parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation
 parser.add_argument("--kl_eta", type=float, default=0.1,
                 help="Hyperparameter for KLD loss")
 
-parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
+parser.add_argument("--scheduler", type=str, default='cos_decay', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
 
 parser.add_argument("--lr_min", type=float, default=1e-8,
                 help="Min learning rate. (Cosine Annealing Warmup Restarts)")
@@ -419,7 +419,7 @@ scaled_model.set_temperature(val_loader, ens_logits=torch.tensor(bma_logits), en
 bma_temperature = scaled_model.temperature
 bma_logits = torch.tensor(bma_logits) / bma_temperature.cpu()
 bma_predictions_ts = F.softmax(bma_logits, dim=1).detach().numpy()
-bma_accuracy_ts = np.mean(np.argmax(bma_predictions_ts, axis=1) == bma_targets)
+bma_accuracy_ts = np.mean(np.argmax(bma_predictions_ts, axis=1) == bma_targets) * 100
 bma_nll_ts = -np.mean(np.log(bma_predictions_ts[np.arange(bma_predictions_ts.shape[0]), bma_targets] + args.eps))
 bma_unc_ts = utils.calibration_curve(bma_predictions_ts, bma_targets, args.num_bins)
 bma_ece_ts = bma_unc_ts['ece']
