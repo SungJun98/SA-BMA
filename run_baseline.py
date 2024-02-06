@@ -33,6 +33,8 @@ parser.add_argument("--print_epoch", type=int, default=10, help="Printing epoch"
 
 parser.add_argument("--ignore_wandb", action="store_true", default=False, help="Deactivate wandb")
 
+parser.add_argument("--group", type=str, default=None, help="wandb group")
+
 parser.add_argument("--resume", type=str, default=None,
     help="path to load saved model to resume training (default: None)",)
 
@@ -85,7 +87,7 @@ parser.add_argument(
 
 parser.add_argument("--save_path",
             # type=str, default="/data2/lsj9862/exp_result/",
-            type=str, default="/data/mulan98/exp_result",
+            type=str, default="/data1/mulan98/exp_result",
             help="Path to save best model dict")
 #----------------------------------------------------------------
 
@@ -180,7 +182,7 @@ args = parser.parse_args()
 
 if not args.ignore_wandb:
     # wandb.init(project="SA-BTL", entity='sungjun98')
-    wandb.init(project="SA-BTL", entity='mulan98')
+    wandb.init(project="SA-BTL", entity='mulan98', group=args.group)
 
 # Set Device and Seed--------------------------------------------
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
