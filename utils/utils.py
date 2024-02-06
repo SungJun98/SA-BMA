@@ -561,6 +561,8 @@ def eval(loader, model, criterion, device, num_bins=15, eps=1e-8):
         
     return {
         "loss" : loss_sum / num_objects_total,
+        "predictions" : preds,
+        "targets" : targets,
         "accuracy" : accuracy * 100.0,
         "nll" : nll,
         "ece" : unc['ece'],
@@ -662,6 +664,7 @@ def no_ts_map_estimation(args, te_loader, num_classes, model, mean, variance, cr
         res = vi_utils.bma_vi(None, te_loader, mean, variance, model, args.method, criterion, num_classes, temperature=None, bma_num_models=1,  bma_save_path=None, num_bins=args.num_bins, eps=args.eps)  
     else:
         res = eval(te_loader, model, criterion, args.device)
+    
     return res
 
 
@@ -708,9 +711,15 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
     bma_nll = bma_res['nll']
     bma_ece = bma_res['ece']
     
+    if True: 
+        _, top5_acc = topk_accuracy(bma_res['predictions'], bma_res['targets'], topk=(1,5))
+    
     print(f"3) Uncalibrated BMA Results:")
     table = [["Num BMA models", "Test Accuracy", "Test NLL", "Test Ece"],
             [args.bma_num_models, format(bma_accuracy, '.4f'), format(bma_nll, '.4f'), format(bma_ece, '.4f')]]
+    if True:
+        table[0].append("Test Top 5 Accuracy")
+        table[1].append(format(top5_acc.item(), '.4f'))
     print(tabulate.tabulate(table, tablefmt="simple"))
     
     scaled_model = ts.ModelWithTemperature(model, ens=True)
@@ -725,9 +734,15 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
     bma_ece_ts = bma_unc_ts['ece']
     tmp_ = bma_temperature.item()
     
+    if True: 
+        _, top5_acc_ts = topk_accuracy(bma_predictions_ts, bma_res['targets'], topk=(1,5))
+    
     print(f"4) Calibrated BMA Results:")
     table = [["Num BMA models", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
             [args.bma_num_models, format(bma_accuracy_ts, '.4f'), format(bma_nll_ts, '.4f'), format(bma_ece_ts, '.4f'), format(tmp_, '.4f')]]
+    if True:
+        table[0].append("Test Top 5 Accuracy")
+        table[1].append(format(top5_acc_ts.item(), '.4f'))
     print(tabulate.tabulate(table, tablefmt="simple"))
     
     if not args.ignore_wandb:
@@ -740,4 +755,29 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
         wandb.run.summary['bma ece w/ ts'] = bma_ece_ts
         wandb.run.summary['bma temperature'] = tmp_
 
+        if True:
+            wandb.run.summary['bma top-5 accuracy'] = top5_acc.item()
+            wandb.run.summary['bma top-5 accuracy w/ ts'] = top5_acc_ts.item()
+        
     save_reliability_diagram(args.method, args.optim, args.save_path, bma_res['unc'], True)
+    
+    
+
+def topk_accuracy(output, target, topk=(1,5)):
+    """Compute the top-k accuracy for the specified values of k"""
+    with torch.no_grad():
+        output = torch.tensor(output).float()
+        target = torch.tensor(target).float()
+        
+        maxk = max(topk)
+        batch_size = target.size(0)
+
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.t()
+        correct = pred.eq(target.view(1, -1).expand_as(pred))
+
+        topk_acc = []
+        for k in topk:
+            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
+            topk_acc.append(correct_k.mul_(100.0 / batch_size))
+        return topk_acc

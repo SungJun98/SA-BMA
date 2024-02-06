@@ -495,16 +495,27 @@ model, mean, variance, best_epoch = utils.load_best_model(args, model, swag_mode
 #### MAP
 ## Unscaled Results
 res = utils.no_ts_map_estimation(args, te_loader, num_classes, model, mean, variance, criterion)
+if True: # args.dataset == 'imagnet':
+    _, top5_acc = utils.topk_accuracy(res['predictions'], res['targets'], topk=(1, 5))
+    
 print(f"1) Unscaled Results:")
 table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece" ],
         [best_epoch, format(res['accuracy'], '.2f'), format(res['nll'], '.4f'), format(res['ece'], '.4f')]]
+if True: # args.dataset == 'imagenet':
+    table[0].append("Top-5 Accuracy")
+    table[1].append(format(top5_acc.item(), '.4f'))
 print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
 
 ## Temperature Scaled Results
 res_ts, temperature = utils.ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, variance, criterion)
+if True : # args.dataset == 'imagnet':
+    _, top5_acc_ts = utils.topk_accuracy(res_ts['predictions'], res_ts['targets'], topk=(1, 5))
 print(f"2) Scaled Results:")
 table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
         [best_epoch, format(res_ts['accuracy'], '.2f'), format(res_ts['nll'],'.4f'), format(res_ts['ece'], '.4f'), format(temperature.item(), '.4f')]]
+if True: # args.dataset == 'imagenet':
+    table[0].append("Top-5 Accuracy")
+    table[1].append(format(top5_acc_ts.item(), '.4f'))
 print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
 
 
@@ -517,7 +528,10 @@ if not args.ignore_wandb:
     wandb.run.summary['test nll w/ ts'] = res_ts['nll']
     wandb.run.summary["test ece w/ ts"]  = res_ts['ece']
 
-    
+    if True:
+        wandb.run.summary['test top-5 accuracy'] = top5_acc.item()
+        wandb.run.summary['test top-5 accuracy w/ ts'] = top5_acc_ts.item()
+
 
 #### Bayesian Model Averaging
 if args.method in ["swag", "ll_swag", "vi", "ll_vi"]:
