@@ -1,5 +1,5 @@
 # conda activate /data1/lsj9862/anaconda3/envs/bsam
-for lr_init in 1e-3 1e-5 1e-4
+for lr_init in 1e-2 1e-3 1e-4
 do
 for wd in 1e-2 1e-3
 do
