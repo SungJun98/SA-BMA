@@ -232,7 +232,7 @@ def schedule(epoch, lr_init, epochs, swa, swa_start=None, swa_lr=None):
 
 
 
-def bma_swag(tr_loader, val_loader, te_loader, model, num_classes, criterion, bma_num_models=30, bma_save_path=None, eps=1e-8, batch_norm=True, seed=None, num_bins=15):
+def bma_swag(tr_loader, te_loader, model, num_classes, criterion, bma_num_models=30, bma_save_path=None, eps=1e-8, batch_norm=True, seed=None, num_bins=15):
     '''
     run bayesian model averaging in test step
     '''

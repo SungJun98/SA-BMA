@@ -684,9 +684,9 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
     ## TS : temperature scaling on ensembled output
     # find temperature tau on validation loader first
     if args.method in ["swag", "ll_swag"]:
-        bma_res = swag_utils.bma_swag(tr_loader, val_loader, val_loader, model, num_classes, criterion, args.bma_num_models, None, args.eps, args.batch_norm, num_bins=args.num_bins)       
+        bma_res = swag_utils.bma_swag(tr_loader, te_loader, model, num_classes, criterion, args.bma_num_models, None, args.eps, args.batch_norm, num_bins=args.num_bins)       
     elif args.method in ["vi", "ll_vi"]:
-        bma_res = vi_utils.bma_vi(val_loader, val_loader, mean, variance, model, args.method, criterion, num_classes, None, args.bma_num_models, None, args.num_bins, args.eps)
+        bma_res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, None, args.bma_num_models, None, args.num_bins, args.eps)
     else:
         raise NotImplementedError("Add code for Bayesian Model Averaging with Temperature scaling for this method")
     bma_logits = bma_res["logits"]; bma_targets = bma_res["targets"]
