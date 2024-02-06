@@ -25,11 +25,9 @@ class SABMA(torch.nn.Module):
         var_clamp = 1e-16,
         tr_layer="nl_ll",
         pretrained_set = 'source',
-        alpha=1e-2
+        alpha=1e-4
     ):
-        """
-        TODO : last layer random initialization 코드 추가 (argument 받아서)
-        """
+
         super(SABMA, self).__init__()
         
         self.var_clamp = var_clamp

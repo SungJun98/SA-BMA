@@ -68,7 +68,7 @@ parser.add_argument(
     "--model",
     type=str, default='resnet18', required=True,
     choices=['resnet18', 'resnet50', 'resnet101',
-             'resnet50-clip', 'resnet101-clip', 'vitb16-clip'
+            'resnet50-clip', 'resnet101-clip', 'vitb16-clip',
             'resnet18-noBN', "vitb16-i21k"],
     help="model name (default : resnet18)")
 
@@ -107,7 +107,7 @@ parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation
 parser.add_argument("--kl_eta", type=float, default=0.1,
                 help="Hyperparameter for KLD loss")
 
-parser.add_argument("--scheduler", type=str, default='cos_decay', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
+parser.add_argument("--scheduler", type=str, default='cos_decay', choices=['constant', "step_lr",  "swag_lr", "cos_decay"])
 
 parser.add_argument("--lr_min", type=float, default=1e-8,
                 help="Min learning rate. (Cosine Annealing Warmup Restarts)")
