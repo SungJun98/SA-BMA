@@ -53,24 +53,23 @@ def create_transform_v2(data_name='cifar10', aug=True, scale=None, ratio=None,
                         ])
     elif data_name in ['imagenet']:
         if aug:
-            raise NotImplementedError("No code for augmentation on ImageNet")
-        else:
-            normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                        std=[0.229, 0.224, 0.225])
+            print("Deactivate Higher Augmentation for ImageNet")
+        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                    std=[0.229, 0.224, 0.225])
 
-            transform_train = transforms.Compose(
-                [transforms.Resize(256),
-                transforms.CenterCrop(224),
-                transforms.ToTensor(),
-                normalize,
-                ])
-            
-            transform_test = transforms.Compose(
-                [transforms.Resize(256),
-                transforms.CenterCrop(224),
-                transforms.ToTensor(),
-                normalize,
-                ])
+        transform_train = transforms.Compose(
+            [transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            normalize,
+            ])
+        
+        transform_test = transforms.Compose(
+            [transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            normalize,
+            ])
         
     return transform_train, transform_test
 
@@ -110,13 +109,13 @@ def create_dataset(data_name='cifar10', data_path='/data1/lsj9862/data/cifar10',
         
     elif data_name == 'imagenet':
         import pickle
-        with open(f'{data_path}/{dat_per_cls}shot/tr_loader_seed{seed}.pth', 'rb') as f:
+        with open(f'{data_path}/{dat_per_cls}shot/tr_loader_seed{seed}.pkl', 'rb') as f:
             tr_data = pickle.load(f)
-        with open(f'{data_path}/{dat_per_cls}shot/val_loader_seed{seed}.pth', 'rb') as f:
+        with open(f'{data_path}/{dat_per_cls}shot/val_loader_seed{seed}.pkl', 'rb') as f:
             val_data = pickle.load(f)
-        with open(f'{data_path}/{dat_per_cls}shot/te_loader_seed{seed}.pth', 'rb') as f:
+        with open(f'{data_path}/{dat_per_cls}shot/te_loader_seed{seed}.pkl', 'rb') as f:
             te_data = pickle.load(f)
-        num_classes = max(te_data.targets) + 1
+        num_classes = 1000
 
     return tr_data, val_data, te_data, num_classes
 

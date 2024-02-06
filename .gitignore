@@ -1,9 +1,9 @@
 wandb
 tmp.py
-resnet18_mean.pt
-resnet18_variance.pt
-resnet18_model.pt
-resnet18_covmat.pt
+*_mean.pt
+*_variance.pt
+*_model.pt
+*_covmat.pt
 
 *.pyc
 *.cpython-39.pyc

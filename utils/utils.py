@@ -15,6 +15,7 @@ from utils.vi import vi_utils
 from utils import temperature_scaling as ts
 
 from utils.models import resnet_noBN
+import utils.models.clip_img_enc as clip_img_enc
 import torchvision.models as torch_models
 import timm
 
@@ -177,9 +178,21 @@ def get_backbone(model_name, num_classes, device, pre_trained=True):
         model = resnet_noBN.resnet18(num_classes=num_classes)
     
     ## ViT-B/16-ImageNet21K
-    if model_name == "vitb16-i21k":
+    elif model_name == "vitb16-i21k":
         model = timm.create_model('vit_base_patch16_224_in21k', pretrained=pre_trained)
         model.head = torch.nn.Linear(768, num_classes)
+
+    elif model_name == 'resnet50-clip':
+        model = clip_img_enc.resnet50_clip(num_classes=num_classes)
+        
+    elif model_name == 'resnet101-clip':
+        model = clip_img_enc.resnet101_clip(num_classes=num_classes)
+        
+    elif model_name =='vitb16-clip':
+        model = clip_img_enc.vitb16_clip(num_classes=num_classes)
+        
+    else:
+        raise NotImplementedError("No code for the backbone")
     
     model.to(device)
     if pre_trained:
