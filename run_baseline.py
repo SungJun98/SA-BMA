@@ -52,7 +52,7 @@ parser.add_argument(
 parser.add_argument(
     "--data_path",
     type=str,
-    default='/mlainas/lsj9862/data',
+    default='/data1/lsj9862/data',
     help="path to datasets location",)
 
 parser.add_argument("--batch_size", type=int, default=256,
