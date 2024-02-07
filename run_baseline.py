@@ -124,7 +124,7 @@ parser.add_argument("--swa_start", type=int, default=161, help="Start epoch of S
 parser.add_argument("--swa_lr", type=float, default=0.05, help="Learning rate for SWAG")
 parser.add_argument("--diag_only", action="store_true", default=False, help="Calculate only diagonal covariance")
 parser.add_argument("--swa_c_epochs", type=int, default=1, help="Cycle to calculate SWAG statistics")
-parser.add_argument("--max_num_models", type=int, default=3, help="Number of models to get SWAG statistics")
+parser.add_argument("--max_num_models", type=int, default=5, help="Number of models to get SWAG statistics")
 
 parser.add_argument("--swag_resume", type=str, default=None,
     help="path to load saved swag model to resume training (default: None)",)
