@@ -184,7 +184,7 @@ def train_sabma_sam(dataloader, sabma_model, criterion, optimizer, device, first
 
 
 
-def train_sabma_bsam(dataloader, sabma_model, criterion, optimizer, device, first_step_scaler, second_step_scaler, kl_eta=1.0):
+def train_sabma_sabma(dataloader, sabma_model, criterion, optimizer, device, first_step_scaler, second_step_scaler, kl_eta=1.0):
     loss_sum = 0.0
     correct = 0.0
     num_objects_current = 0
@@ -399,7 +399,7 @@ def save_best_sabma_model(args, best_epoch, sabma_model, optimizer, scaler, firs
                             optimizer = optimizer.state_dict(),
                             # scheduler = scheduler.state_dict(),
                             )
-    elif args.optim in ["sam", "bsam"]:
+    elif args.optim in ["sam", "sabma"]:
         if not args.no_amp:
             utils.save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
                                 epoch = best_epoch,

@@ -147,7 +147,7 @@ def parse_arguments():
     parser.add_argument(
         "--cache-dir",
         type=str,
-        default=None,
+        default="/data2/lsj9862/cache",
         help="Directory for caching features and encoder",
     )
     # parser.add_argument(

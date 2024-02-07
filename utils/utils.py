@@ -75,7 +75,7 @@ def set_save_path(args):
     if args.optim not in ["sgd", "adam"]:
         save_path_ = f"{save_path_}_{args.rho}"
         
-    if args.optim in ["bsam"]:
+    if args.optim in ["sabma"]:
         save_path_ = f"{save_path_}_{args.kl_eta}_{args.alpha}"
     
     return save_path_
@@ -122,7 +122,7 @@ def set_wandb_runname(args):
     if args.optim not in ["sgd", "adam"]:
         run_name_ = f"{run_name_}_{args.rho}"
     
-    if args.optim in ["bsam"]:
+    if args.optim in ["sabma"]:
         run_name_ = f"{run_name_}_{args.kl_eta}_{args.alpha}"
     
     return run_name_
@@ -228,7 +228,7 @@ def get_scheduler(args, optimizer):
         from timm.scheduler.step_lr import StepLRScheduler
         if args.optim in ['sgd', "adam"]:
             scheduler_ = StepLRScheduler(optimizer, decay_rate=0.2, )
-        elif args.optim in ['sam', 'bsam']:
+        elif args.optim in ['sam', 'sabma']:
             scheduler_ = StepLRScheduler(optimizer.base_optimizer, decay_rate=0.2, )
             
     elif args.scheduler == "cos_decay":
@@ -243,7 +243,7 @@ def get_scheduler(args, optimizer):
                                         warmup_t=args.warmup_t,
                                         warmup_lr_init=args.warmup_lr_init,
                                             )
-        elif args.optim in ["sam", "bsam"]:
+        elif args.optim in ["sam", "sabma"]:
             scheduler_ = CosineLRScheduler(optimizer = optimizer.base_optimizer,
                                         t_initial= args.epochs,
                                         lr_min=args.lr_min,
@@ -268,7 +268,7 @@ def get_scaler(args):
             first_step_scaler = None
             second_step_scaler = None
 
-        elif args.optim in ["sam", "bsam"]:
+        elif args.optim in ["sam", "sabma"]:
             scaler = None
             first_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
             second_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)

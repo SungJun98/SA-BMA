@@ -87,8 +87,8 @@ parser.add_argument("--save_path",
 #----------------------------------------------------------------
 
 ## Optimizer Hyperparameter --------------------------------------
-parser.add_argument("--optim", type=str, default="bsam",
-                    choices=["sgd", "sam", "bsam"],
+parser.add_argument("--optim", type=str, default="sabma",
+                    choices=["sgd", "sam", "sabma"],
                     help="Optimization options")
 
 parser.add_argument("--lr_init", type=float, default=0.01,
@@ -102,9 +102,9 @@ parser.add_argument("--epochs", type=int, default=100, metavar="N",
 
 parser.add_argument("--wd", type=float, default=5e-4, help="weight decay (default: 5e-4)")
 
-parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation ball for SAM / BSAM")
+parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation ball for SAM / SABMA")
 
-parser.add_argument("--kl_eta", type=float, default=0.1,
+parser.add_argument("--kl_eta", type=float, default=0.0,
                 help="Hyperparameter for KLD loss")
 
 parser.add_argument("--scheduler", type=str, default='cos_decay', choices=['constant', "step_lr",  "swag_lr", "cos_decay"])
@@ -306,8 +306,8 @@ for epoch in range(start_epoch, int(args.epochs)+1):
         tr_res = sabma_utils.train_sabma_sgd(tr_loader, sabma_model, criterion, optimizer, args.device, scaler)
     elif args.optim == "sam":
         tr_res = sabma_utils.train_sabma_sam(tr_loader, sabma_model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
-    elif args.optim == "bsam":
-        tr_res = sabma_utils.train_sabma_bsam(tr_loader, sabma_model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler, args.kl_eta)
+    elif args.optim == "sabma":
+        tr_res = sabma_utils.train_sabma_sabma(tr_loader, sabma_model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler, args.kl_eta)
 
     # validation / test
     if args.val_mc_num ==1:
