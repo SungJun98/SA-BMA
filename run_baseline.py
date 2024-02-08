@@ -15,6 +15,7 @@ from utils.swag import swag, swag_utils
 from utils.vi import vi_utils
 from utils.la import la_utils
 from utils import temperature_scaling as ts
+import utils.data.data as data
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -161,6 +162,19 @@ parser.add_argument("--no_save_bma", action='store_true', default=False,
             help="Deactivate saving model samples in BMA")
 #----------------------------------------------------------------
 
+## OOD test -----------------------------------------------------
+parser.add_argument("--corrupt_option",
+    default=['brightness.npy','contrast.npy','defocus_blur.npy','elastic_transform.npy','fog.npy',
+    'frost.npy','gaussian_blur.npy','gaussian_noise.npy','glass_blur.npy','impulse_noise.npy','jpeg_compression.npy',
+    'motion_blur.npy','pixelate.npy','saturate.npy','shot_noise.npy','snow.npy','spatter.npy','speckle_noise.npy','zoom_blur.npy'],
+    help='corruption option of CIFAR10/100-C'
+        )
+parser.add_argument("--severity",
+    default=1,
+    type=int,
+    help='Severity of corruptness in CIFAR10/100-C (1 to 5)')
+#----------------------------------------------------------------
+
 args = parser.parse_args()
 #----------------------------------------------------------------
 
@@ -202,6 +216,7 @@ if not args.ignore_wandb:
 #------------------------------------------------------------------
 
 # Load Data --------------------------------------------------------
+data_path_ood = args.data_path
 args.data_path = os.path.join(args.data_path, args.dataset)
 tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
                                                         data_path=args.data_path,
@@ -489,33 +504,42 @@ else:
 
 ## Test ------------------------------------------------------------------------------------------------------
 ##### Get test nll, Entropy, ece, Reliability Diagram on best model
+## Load Distributional shifted data
+if args.dataset == 'cifar10':
+    ood_loader = data.corrupted_cifar10(data_path=data_path_ood,
+                            corrupt_option=args.corrupt_option,
+                            severity=args.severity,
+                            batch_size=args.batch_size, 
+                            num_workers=args.num_workers)
+elif args.dataset == 'cifar100':
+        ood_loader = data.corrupted_cifar100(data_path=data_path_ood,
+                            corrupt_option=args.corrupt_option,
+                            severity=args.severity,
+                            batch_size=args.batch_size, 
+                            num_workers=args.num_workers)
+
 ### Load Best Model
 model, mean, variance, best_epoch = utils.load_best_model(args, model, swag_model, num_classes)
+
 
 #### MAP
 ## Unscaled Results
 res = utils.no_ts_map_estimation(args, te_loader, num_classes, model, mean, variance, criterion)
-if True: # args.dataset == 'imagnet':
-    _, top5_acc = utils.topk_accuracy(res['predictions'], res['targets'], topk=(1, 5))
-    
+ood_res = utils.no_ts_map_estimation(args, ood_loader, num_classes, model, mean, variance, criterion)
+
 print(f"1) Unscaled Results:")
-table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece" ],
+table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece"],
         [best_epoch, format(res['accuracy'], '.2f'), format(res['nll'], '.4f'), format(res['ece'], '.4f')]]
-if True: # args.dataset == 'imagenet':
-    table[0].append("Top-5 Accuracy")
-    table[1].append(format(top5_acc.item(), '.4f'))
+print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
+table = [["OOD Accuracy", "OOD NLL", "OOD ECE"],
+         [format(ood_res['accuracy'], '.2f'), format(ood_res['nll'], '.4f'), format(ood_res['ece'], '.4f')]]
 print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
 
 ## Temperature Scaled Results
 res_ts, temperature = utils.ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, variance, criterion)
-if True : # args.dataset == 'imagnet':
-    _, top5_acc_ts = utils.topk_accuracy(res_ts['predictions'], res_ts['targets'], topk=(1, 5))
 print(f"2) Scaled Results:")
 table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
         [best_epoch, format(res_ts['accuracy'], '.2f'), format(res_ts['nll'],'.4f'), format(res_ts['ece'], '.4f'), format(temperature.item(), '.4f')]]
-if True: # args.dataset == 'imagenet':
-    table[0].append("Top-5 Accuracy")
-    table[1].append(format(top5_acc_ts.item(), '.4f'))
 print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
 
 
@@ -527,10 +551,10 @@ if not args.ignore_wandb:
     wandb.run.summary['test accuracy w/ ts'] = res_ts['accuracy']
     wandb.run.summary['test nll w/ ts'] = res_ts['nll']
     wandb.run.summary["test ece w/ ts"]  = res_ts['ece']
-
-    if True:
-        wandb.run.summary['test top-5 accuracy'] = top5_acc.item()
-        wandb.run.summary['test top-5 accuracy w/ ts'] = top5_acc_ts.item()
+    
+    wandb.run.summary['ood accuracy'] = ood_res['accuracy']
+    wandb.run.summary['ood nll'] = ood_res['nll']
+    wandb.run.summary['ood ece'] = ood_res['ece']
 
 
 #### Bayesian Model Averaging
@@ -539,7 +563,7 @@ if args.method in ["swag", "ll_swag", "vi", "ll_vi"]:
     bma_save_path = f"{args.save_path}/bma_models"
     os.makedirs(bma_save_path, exist_ok=True) 
     print(f"Start Bayesian Model Averaging with {args.bma_num_models} samples")
-    utils.bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, variance, criterion, bma_save_path)
+    utils.bma(args, tr_loader, val_loader, te_loader, ood_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature)
 else:
     pass
 

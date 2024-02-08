@@ -169,3 +169,122 @@ def create_loader(data_name='cifar10',
         
     return tr_loader, val_loader, te_loader
 
+
+
+
+# Load OOD Dataset
+from torchvision import transforms
+import numpy as np
+import os
+
+corrupt_types = [
+    'brightness.npy',
+    'contrast.npy',
+    'defocus_blur.npy',
+    'elastic_transform.npy',
+    'fog.npy',
+    'frost.npy',
+    'gaussian_blur.npy',
+    'gaussian_noise.npy',
+    'glass_blur.npy',
+    'impulse_noise.npy',
+    'jpeg_compression.npy',
+    'motion_blur.npy',
+    'pixelate.npy',
+    'saturate.npy',
+    'shot_noise.npy',
+    'snow.npy',
+    'spatter.npy',
+    'speckle_noise.npy',
+    'zoom_blur.npy'
+]
+
+class CIFAR10_C(torch.utils.data.Dataset):
+    def __init__(self, transform, corrupt_option=corrupt_types, severity=1, data_dir="/data1/lsj9862/data"):
+        assert type(severity) is int and 1<=severity<=5, 'Invalid severity!'
+
+        self.root = os.path.join(data_dir, 'CIFAR-10-C')
+        self.transform = transform
+
+        if type(corrupt_option) == list:
+            self.data = list()
+            self.targets = list()
+            for corrupt_option_ in corrupt_option:
+                data_ = np.load(os.path.join(self.root, corrupt_option_))[10000*(severity-1):10000*severity]
+                targets_ = np.load(os.path.join(self.root,'labels.npy'))[10000*(severity-1):10000*severity]
+                self.data.append(data_)
+                self.targets.append(targets_)
+            self.data = np.concatenate(self.data)
+            self.targets = np.concatenate(self.targets)
+        else:
+            self.data = np.load(os.path.join(self.root,corrupt_option))[10000*(severity-1):10000*severity]
+            self.targets = np.load(os.path.join(self.root,'labels.npy'))[10000*(severity-1):10000*severity]
+
+    def __len__(self):
+        return len(self.targets)
+
+    def __getitem__(self,index):
+        img,target = self.data[index],self.targets[index]
+        return self.transform(img),target
+
+
+def corrupted_cifar10(data_path='/data1/lsj9862/data', corrupt_option=corrupt_types, severity=1, batch_size=256, num_workers=4):
+    _test_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+    ])
+
+    _test_set = CIFAR10_C(transform=_test_transform, corrupt_option=corrupt_option,severity=severity, data_dir=data_path)
+    test_loader = torch.utils.data.DataLoader(_test_set,
+                                        batch_size=batch_size,
+                                        shuffle=False,
+                                        drop_last=False,
+                                        num_workers=num_workers)
+
+    return test_loader
+
+
+
+class CIFAR100_C(torch.utils.data.Dataset):
+    def __init__(self, transform, corrupt_option=corrupt_types, severity=1, data_dir="/data1/lsj9862/data"):
+        assert type(severity) is int and 1<=severity<=5, 'Invalid severity!'
+
+        self.root = os.path.join(data_dir, 'CIFAR-100-C')
+        self.transform = transform
+
+        if type(corrupt_option) == list:
+            self.data = list()
+            self.targets = list()
+            for corrupt_option_ in corrupt_option:
+                data_ = np.load(os.path.join(self.root, corrupt_option_))[10000*(severity-1):10000*severity]
+                targets_ = np.load(os.path.join(self.root,'labels.npy'))[10000*(severity-1):10000*severity]
+                self.data.append(data_)
+                self.targets.append(targets_)
+            self.data = np.concatenate(self.data)
+            self.targets = np.concatenate(self.targets)
+        else:
+            self.data = np.load(os.path.join(self.root,corrupt_option))[10000*(severity-1):10000*severity]
+            self.targets = np.load(os.path.join(self.root,'labels.npy'))[10000*(severity-1):10000*severity]
+
+    def __len__(self):
+        return len(self.targets)
+
+    def __getitem__(self,index):
+        img,target = self.data[index],self.targets[index]
+        return self.transform(img),target
+
+
+def corrupted_cifar100(data_path='/data1/lsj9862/data', corrupt_option=corrupt_types, severity=1, batch_size=256, num_workers=4):
+    _test_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+    ])
+
+    _test_set = CIFAR100_C(transform=_test_transform, corrupt_option=corrupt_option,severity=severity, data_dir=data_path)
+    test_loader = torch.utils.data.DataLoader(_test_set,
+                                        batch_size=batch_size,
+                                        shuffle=False,
+                                        drop_last=False,
+                                        num_workers=num_workers)
+
+    return test_loader
