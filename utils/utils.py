@@ -658,14 +658,15 @@ def no_ts_map_estimation(args, te_loader, num_classes, model, mean, variance, cr
     return res
 
 
-def ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, variance, criterion):
+def ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, variance, criterion, save=True):
     # Temperature Scaled Results
     scaled_model = None
     if args.method in ["dnn", "swag", "ll_swag"]:
         scaled_model = ts.ModelWithTemperature(model)
         scaled_model.set_temperature(val_loader)
         temperature = scaled_model.temperature
-        torch.save(scaled_model, f"{args.save_path}/{args.method}-{args.optim}_best_val_scaled_model.pt")
+        if save:
+            torch.save(scaled_model, f"{args.save_path}/{args.method}-{args.optim}_best_val_scaled_model.pt")
         if not args.ignore_wandb:
             wandb.run.summary['temperature'] = temperature.item()
         res = eval(te_loader, scaled_model, criterion, args.device)   
@@ -675,8 +676,9 @@ def ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, var
         temperature = res["temperature"]
     else:
         raise NotImplementedError("Need Code for temperature scaling on this method")
-    
-    save_reliability_diagram(args.method, args.optim, args.save_path, res['unc'], False)
+
+    if save:
+        save_reliability_diagram(args.method, args.optim, args.save_path, res['unc'], False)
     
     return res, temperature
 
@@ -689,7 +691,7 @@ def bma(args, tr_loader, val_loader, te_loader, ood_loader, num_classes, model, 
     if args.method in ["swag", "ll_swag"]:
         bma_res = swag_utils.bma_swag(tr_loader, te_loader, ood_loader, model, num_classes, criterion, args.bma_num_models, bma_save_path, args.eps, args.batch_norm, num_bins=args.num_bins)       
     elif args.method in ["vi", "ll_vi"]:
-        bma_res = vi_utils.bma_vi(val_loader, te_loader, ood_loader, mean, variance, model, args.method, criterion, num_classes, None, args.bma_num_models, None, args.num_bins, args.eps)
+        bma_res = vi_utils.bma_vi(val_loader, te_loader, ood_loader, mean, variance, model, args.method, criterion, num_classes, None, args.bma_num_models, bma_save_path, args.num_bins, args.eps)
     else:
         raise NotImplementedError("Add code for Bayesian Model Averaging with Temperature scaling for this method")
     bma_logits = bma_res["logits"]; bma_targets = bma_res["targets"]
@@ -733,13 +735,16 @@ def bma(args, tr_loader, val_loader, te_loader, ood_loader, num_classes, model, 
         wandb.run.summary['bma ece w/ ts'] = bma_ece_ts
         wandb.run.summary['bma temperature'] = temperature.item()
         
-        wandb.rum.summary['ood bma accuracy'] = bma_res['ood_accuracy']
-        wandb.rum.summary['ood bma nll'] = bma_res['ood_nll']
-        wandb.rum.summary['ood bma ece'] = bma_res['ood_ece']
-        
-    save_reliability_diagram(args.method, args.optim, args.save_path, bma_res['unc'], True)
+        wandb.run.summary['ood bma accuracy'] = bma_res['ood_accuracy']
+        wandb.run.summary['ood bma nll'] = bma_res['ood_nll']
+        wandb.run.summary['ood bma ece'] = bma_res['ood_ece']
     
+    if not bma_save_path is not None:    
+        save_reliability_diagram(args.method, args.optim, args.save_path, bma_res['unc'], True)
     
+    return bma_res, bma_accuracy, bma_nll, bma_ece, bma_accuracy_ts, bma_nll_ts, bma_ece_ts, temperature.item(), bma_res['ood_accuracy'], bma_res['ood_nll'], bma_res['ood_ece']
+
+
 
 def topk_accuracy(output, target, topk=(1,5)):
     """Compute the top-k accuracy for the specified values of k"""

@@ -11,6 +11,7 @@ import utils.utils as utils
 from utils import temperature_scaling as ts
 from utils.swag import swag, swag_utils
 from utils.sabma import sabma, sabma_utils
+import utils.data.data as data
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -184,6 +185,7 @@ if not args.ignore_wandb:
 #----------------------------------------------------------------
 
 # Load Data --------------------------------------------------------
+data_path_ood = args.data_path
 args.data_path = os.path.join(args.data_path, args.dataset)
 tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
                                                         data_path=args.data_path,
@@ -319,7 +321,7 @@ for epoch in range(start_epoch, int(args.epochs)+1):
         val_res = sabma_utils.bma_sabma(val_loader, sabma_model, args.val_mc_num,
                             num_classes, criterion, args.device,
                             bma_save_path=None, eps=1e-8, num_bins=50,
-                            validation=True, tr_layer=args.tr_layer
+                            validation=True, tr_layer=args.tr_layer, ood_loader=None
                             )
 
     time_ep = time.time() - time_ep
@@ -385,12 +387,25 @@ for epoch in range(start_epoch, int(args.epochs)+1):
 
 ## Test ------------------------------------------------------------------------------------------------------
 ##### Get test nll, Entropy, ece, Reliability Diagram on best model
+## Load Distributional shifted data
 # Load Best Model
 print("Load Best Validation Model (Lowest Loss)")
 state_dict_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt"
 checkpoint = torch.load(state_dict_path)   
 sabma_model.load_state_dict(checkpoint["state_dict"])
 sabma_model.to(args.device)
+
+
+### Get temperature
+val_res = sabma_utils.bma_sabma(val_loader, sabma_model, 1,
+                    num_classes, criterion, args.device,
+                    bma_save_path=None, eps=args.eps, num_bins=args.num_bins,
+                    validation=False, tr_layer=args.tr_layer, ood_loader=None)
+scaled_model = ts.ModelWithTemperature(sabma_model, ens=True)
+scaled_model.set_temperature(val_loader, ens_logits=torch.tensor(val_res['logits']), ens_pred=torch.tensor(val_res['targets']))
+bma_temperature = scaled_model.temperature
+
+
 
 ### BMA prediction
 if args.no_save_bma:
@@ -402,7 +417,7 @@ else:
 bma_res = sabma_utils.bma_sabma(te_loader, sabma_model, args.bma_num_models,
                     num_classes, criterion, args.device,
                     bma_save_path=bma_save_path, eps=args.eps, num_bins=args.num_bins,
-                    validation=False, tr_layer=args.tr_layer)
+                    validation=False, tr_layer=args.tr_layer, ood_loader=None)
 bma_logits = bma_res["logits"]
 bma_predictions = bma_res["predictions"]
 bma_targets = bma_res["targets"]
@@ -413,18 +428,13 @@ bma_nll = bma_res["nll"]
 unc = utils.calibration_curve(bma_predictions, bma_targets, args.num_bins)
 bma_ece = bma_res['ece']
 
-# Temperature Scale
-scaled_model = ts.ModelWithTemperature(sabma_model, ens=True)
-scaled_model.set_temperature(val_loader, ens_logits=torch.tensor(bma_logits), ens_pred=torch.tensor(bma_targets))
-bma_temperature = scaled_model.temperature
+# Temperature Scaling
 bma_logits = torch.tensor(bma_logits) / bma_temperature.cpu()
 bma_predictions_ts = F.softmax(bma_logits, dim=1).detach().numpy()
 bma_accuracy_ts = np.mean(np.argmax(bma_predictions_ts, axis=1) == bma_targets) * 100
 bma_nll_ts = -np.mean(np.log(bma_predictions_ts[np.arange(bma_predictions_ts.shape[0]), bma_targets] + args.eps))
 bma_unc_ts = utils.calibration_curve(bma_predictions_ts, bma_targets, args.num_bins)
 bma_ece_ts = bma_unc_ts['ece']
-tmp_ = bma_temperature.item()
-
 
     
 if not args.ignore_wandb:
@@ -435,7 +445,7 @@ if not args.ignore_wandb:
     wandb.run.summary['bma accuracy w/ ts'] = bma_accuracy_ts
     wandb.run.summary['bma nll w/ ts'] = bma_nll_ts
     wandb.run.summary['bma ece w/ ts'] = bma_ece_ts
-    wandb.run.summary['bma temperature'] = tmp_
+    wandb.run.summary['bma temperature'] = bma_temperature.item()
 
 print("[BMA w/o TS Results]\n")
 tab_name = ["# of Models", "BMA Accuracy", "BMA NLL", "BMA ECE"]
@@ -446,7 +456,7 @@ print("-"*30)
 
 print("[BMA w/ TS Results]\n")
 tab_name = ["# of Models", "BMA Accuracy", "BMA NLL", "BMA ECE", "BMA Temperature"]
-tab_contents = [args.bma_num_models, format(bma_accuracy_ts, '.2f'), format(bma_nll_ts, '.4f'), format(bma_ece_ts, '.4f'), format(tmp_, '.4f')]
+tab_contents = [args.bma_num_models, format(bma_accuracy_ts, '.2f'), format(bma_nll_ts, '.4f'), format(bma_ece_ts, '.4f'), format(bma_temperature.item(), '.4f')]
 table = [tab_name, tab_contents]
 print(tabulate.tabulate(table, tablefmt="simple"))
 print("-"*30)

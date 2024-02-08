@@ -17,8 +17,8 @@
 # done
 
 
-# ## SWAG SGD
-# for seed in 0 # 0 1 2
+## SWAG SGD
+# for seed in 0 1 2
 # do
 # CUDA_VISIBLE_DEVICES=7 python3 run_baseline.py --method=swag --dataset=cifar100 --data_path=/data1/lsj9862/data/ --use_validation --dat_per_cls=10 \
 # --model=resnet18 --pre_trained --optim=sgd --epochs=150 --lr_init=1e-2 --wd=1e-4 \
@@ -28,9 +28,9 @@
 # done
 
 # ## VI SGD
-# for seed in 0 # 0 1 2
+# for seed in 0 1 2
 # do
-# CUDA_VISIBLE_DEVICES=1 python3 run_baseline.py --dataset=cifar100 --data_path=/data1/lsj9862/data --use_validation --dat_per_cls=10 \
+# CUDA_VISIBLE_DEVICES=6 python3 run_baseline.py --dataset=cifar100 --data_path=/data1/lsj9862/data --use_validation --dat_per_cls=10 \
 # --method=vi --model=resnet18 --pre_trained --optim=sgd --lr_init=1e-2 --wd=1e-3 --epoch=100 \
 # --vi_moped_delta=0.1 --kl_beta=1 \
 # --seed=${seed} \
@@ -40,7 +40,7 @@
 # ## SWAG SAM
 # for seed in 0 1 2
 # do
-# CUDA_VISIBLE_DEVICES=1 python3 run_baseline.py --method=swag --dataset=cifar100 --data_path=/data1/lsj9862/data --use_validation  --dat_per_cls=10 \
+# CUDA_VISIBLE_DEVICES=5 python3 run_baseline.py --method=swag --dataset=cifar100 --data_path=/data1/lsj9862/data --use_validation  --dat_per_cls=10 \
 # --model=resnet18 --pre_trained --optim=sam --rho=0.05 --epochs=150 --lr_init=1e-2 --wd=1e-2 \
 # --swa_start=76 --swa_c_epochs=3 --max_num_models=5 \
 # --seed=${seed} \

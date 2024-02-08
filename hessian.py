@@ -1,14 +1,16 @@
 import argparse
-import torch
-import pickle
-import os, copy
+import pickle, os, copy
+
 import utils.data.data as data
 import utils.utils as utils
+from utils.swag import swag, swag_utils
+
+import torch
 import numpy as np
 
 from hessian_eigenthings import compute_hessian_eigenthings
+import torch.nn.functional as F
 
-from utils.swag import swag, swag_utils
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -45,23 +47,20 @@ parser.add_argument("--dat_per_cls", type=int, default=-1,
 parser.add_argument(
     "--model",
     type=str, default='resnet18', required=True,
-    choices=['resnet18', 'resnet50', 'resnet101', 'wideresnet28x10', 'wideresnet40x10',
-            'resnet18-noBN', 'resnet50-noBN', 'resnet101-noBN', 'wideresnet28x10-noBN', 'wideresnet40x10-noBN',
-            "vitb16-i21k"],
+    choices=['resnet18', 'resnet18-noBN', "vitb16-i21k"],
     help="model name (default : resnet18)")
 
 parser.add_argument("--swag_load_path", type=str, default=None,
     help="path to load saved swag model (default: None)",)
 
+parser.add_argument("--vi_load_path", type=str, default=None,
+    help="path to load saved vi model (default: None)",)
+
+parser.add_argument("--sabma_load_path", type=str, default=None,
+    help="path to load saved sabma model (default: None)",)
+
 parser.add_argument("--load_path", type=str, default=None,
     help="path to load saved model (default: None)")
-
-parser.add_argument(
-    "--last_swag",
-    action='store_true',
-    default=False,
-    help ="When model trained with last swag (Default : False)"
-)
 
 parser.add_argument(
     "--pre_trained", action='store_true', default=True,
@@ -111,6 +110,8 @@ def load_swag_model_to_base_model(model, bma_sample):
     return model
 
 
+
+
 # Set Device and Seed------------------------------------------------------
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device : {args.device}")
@@ -126,24 +127,20 @@ utils.set_seed(args.seed)
 #---------------------------------------------------------------------------
 
 # Load Data -----------------------------------------------------------------
-if not args.last_layer:
-    tr_loader, _, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
-                                                data_path=args.data_path,
-                                                dat_per_cls=args.dat_per_cls,
-                                                use_validation=args.use_validation, 
-                                                batch_size=args.batch_size,
-                                                num_workers=args.num_workers,
-                                                seed=args.seed,
-                                                aug=args.batch_norm,
-                                                )
-    if args.dat_per_cls >= 0:
-        print(f"Load Data : {args.dataset}-{args.dat_per_cls}shot")
-    else:
-        print(f"Load Data : {args.dataset}")
-        
+tr_loader, _, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
+                                            data_path=args.data_path,
+                                            dat_per_cls=args.dat_per_cls,
+                                            use_validation=args.use_validation, 
+                                            batch_size=args.batch_size,
+                                            num_workers=args.num_workers,
+                                            seed=args.seed,
+                                            aug=args.batch_norm,
+                                            )
+if args.dat_per_cls >= 0:
+    print(f"Load Data : {args.dataset}-{args.dat_per_cls}shot")
 else:
-    raise ValueError("Add code that loads the Feature Extracted dataset")
-    print(f"Load Data : Feature Extracted {args.dataset}")
+    print(f"Load Data : {args.dataset}")
+    
 #---------------------------------------------------------------------------
 
 ## Define Model--------------------------------------------------------------
@@ -166,6 +163,18 @@ if args.swag_load_path is not None:
     """
     # Get bma weights list
     bma_load_paths = sorted(os.listdir(args.swag_load_path))
+    
+elif args.sabma_load_path is not None:
+    bma_load_paths = sorted(os.listdir(args.sabma_load_path))
+    model_path = args.sabma_load_path.split("/")[:-2]
+    model_path = '/'+os.path.join(*model_path)
+    model_path = os.path.join(model_path, "sabma-sabma_best_val_model.pt" )
+    model = torch.load(model_path)
+    model = model.backbone
+
+elif args.vi_load_path is not None:
+    bma_load_paths = sorted(os.listdir(args.vi_load_path))
+
 else:
     checkpoint = torch.load(args.load_path)
     if hasattr(checkpoint, "temperature"):
@@ -180,22 +189,27 @@ model.to(args.device)
 ## Set save path ---------------------------------------------------------------
 if args.swag_load_path is not None:
     save_path = f"{args.swag_load_path}/performance"
-    os.makedirs(save_path, exist_ok=True)
+    
+elif args.sabma_load_path is not None:
+    save_path = f"{args.sabma_load_path}/performance"
+
+elif args.vi_load_path is not None:
+    save_path = f"{args.vi_load_path}/performance"
+
 else:
     save_path = args.load_path.split("/")[:-1]
     save_path = os.path.join(*save_path)
     save_path = f"/{save_path}/performance"
-    os.makedirs(save_path, exist_ok=True)
-
+os.makedirs(save_path, exist_ok=True)
 print(f"Save path : {save_path}")
 # ------------------------------------------------------------------------------
 
-model.eval()
+# model.eval()
 
 criterion = torch.nn.CrossEntropyLoss()
 
 ## Calculate Hessian ------------------------------------------------------------
-if args.swag_load_path is not None:
+if (args.swag_load_path is not None) or (args.vi_load_path is not None) or (args.sabma_load_path is not None):
     model_num_list = list(); acc_list = list(); ece_list = list(); nll_list = list()
     tr_cum_eigenval_list = list() ; tr_max_eigenval_list = list()
     for path in bma_load_paths:
@@ -203,10 +217,25 @@ if args.swag_load_path is not None:
         model_num = model_num.split("-")[-1]
         
         # get sampled model
-        bma_sample = torch.load(f"{args.swag_load_path}/{path}")
-        model = load_swag_model_to_base_model(model, bma_sample)
-
-        res = utils.eval(te_loader, bma_sample, criterion, args.device)
+        if args.swag_load_path is not None:
+            bma_sample = torch.load(f"{args.swag_load_path}/{path}")
+            model = load_swag_model_to_base_model(model, bma_sample)
+            # model = torch.load(f"{args.swag_load_path}/{path}")
+        elif args.vi_load_path is not None:
+            bma_sample = torch.load(f"{args.vi_load_path}/{path}")
+            model = bma_sample
+            # model = torch.load(f"{args.vi_load_path}/{path}")
+        elif args.sabma_load_path is not None:
+            bma_sample = torch.load(f"{args.sabma_load_path}/{path}")
+            model.load_state_dict(bma_sample, strict=False)
+            
+        if (args.swag_load_path) is not None or (args.vi_load_path is not None):
+            res = utils.eval(te_loader, bma_sample, criterion, args.device)
+        elif args.sabma_load_path is not None:
+            res = utils.eval(te_loader, model, criterion, args.device)
+        for p in model.parameters():
+            p.requires_grad_(True)
+        
         print(f"# {model_num} / Test Accuracy : {res['accuracy']:8.4f}% / ECE : {res['ece']} / NLL : {res['nll']}")
         
         model_num_list.append(model_num); acc_list.append(res['accuracy']); ece_list.append(res['ece']); nll_list.append(res['nll'])
@@ -217,7 +246,8 @@ if args.swag_load_path is not None:
                     tr_loader,
                     criterion,
                     num_eigenthings=args.num_eigen,
-                    mode="lanczos", #"power_iter"
+                    mode="lanczos",
+                    # mode="power_iter",
                     # power_iter_steps=50,
                     max_possible_gpu_samples=args.max_possible_gpu_samples,
                     # momentum=args.momentum,
@@ -226,12 +256,17 @@ if args.swag_load_path is not None:
 
             tr_cum_eigenval_list.append(tr_eigenvals)
             tr_max_eigenval_list.append(max(tr_eigenvals))
-            print(f"Successfully get {model_num}-th swag bma model eigenvalues for train set")
+            if args.swag_load_path is not None:
+                print(f"Successfully get {model_num}-th swag bma model eigenvalues for train set")
+            elif args.vi_load_path is not None:
+                print(f"Successfully get {model_num}-th vi bma model eigenvalues for train set")
+            elif args.sabma_load_path is not None:
+                print(f"Successfully get {model_num}-th sabma bma model eigenvalues for train set")
             print(f"Train Eigenvalues for {model_num}-th bma model : {tr_eigenvals}")
         except:
            print(f"Numerical Issue on {model_num}-th model with train data")
-           tr_cum_eigenval_list.append(9999999)
-           tr_max_eigenval_list.append(9999999)
+           tr_cum_eigenval_list.append(999999999)
+           tr_max_eigenval_list.append(999999999)
         
         # save results
         performance = dict({"model_num" : model_num_list,
