@@ -9,6 +9,7 @@ class bSAM(torch.optim.Optimizer):
         super(bSAM, self).__init__(params, defaults) 
         self.gamma = weight_decay
         for group in self.param_groups:
+            s_init = group["s_init"]
             for p in group["params"]:
                 self.state[p]["step"] = 0
                 self.state[p]["gm"] = torch.zeros_like(p, memory_format=torch.preserve_format)

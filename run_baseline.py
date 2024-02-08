@@ -115,6 +115,8 @@ parser.add_argument('--damping', dest='damping', type=float, default=0.1, help='
 
 parser.add_argument("--noise_scale", type=float, default=1e-4, help="noise scale (default: 1e-4)")
 
+parser.add_argument("--s_init", type=float, default=1.0, help="initialize variance vector (default: 1)")
+
 # Scheduler
 parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
 
