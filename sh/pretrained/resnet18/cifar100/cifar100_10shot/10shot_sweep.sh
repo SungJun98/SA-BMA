@@ -1,8 +1,8 @@
-# for seed in 0 1 2
-# do
-# CUDA_VISIBLE_DEVICES=5 python3 run_baseline.py --method=dnn --optim=sgd --dataset=cifar100 --use_validation --dat_per_cls=10 \
-# --model=resnet18 --pre_trained --lr_init=5e-3 --wd=1e-4 --epochs=100 --seed=${seed}
-# done
+for seed in 0 1 2
+do
+CUDA_VISIBLE_DEVICES=5 python3 run_baseline.py --method=dnn --optim=sgd --dataset=cifar100 --use_validation --dat_per_cls=10 \
+--model=resnet18 --pre_trained --lr_init=5e-3 --wd=1e-4 --epochs=100 --seed=${seed} --ignore_wandb
+done
 
 # for seed in 0 1 2
 # do
