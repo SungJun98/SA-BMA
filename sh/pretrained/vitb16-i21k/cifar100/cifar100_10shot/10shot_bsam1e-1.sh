@@ -1,5 +1,9 @@
 # conda activate /data1/lsj9862/anaconda3/envs/bsam
+<<<<<<< HEAD:sh/pretrained/vitb16-i21k/cifar100/cifar100_10shot/10shot_bsam1e-1.sh
 for lr_init in 1e-1
+=======
+for lr_init in 1e-2 1e-3 1e-4
+>>>>>>> bf27d32467a061afd70786902cc4337ae2f90594:sh/pretrained/vitb16-i21k/cifar10/cifar10_10shot/10shot_bsam1e-4.sh
 do
 for wd in 1e-2 1e-3 1e-4
 do
