@@ -11,10 +11,10 @@ for noise_scale in 1e-3 1e-4
 do
 for seed in 0 # 1 2
 do
-CUDA_VISIBLE_DEVICES=7 python3 run_baseline.py --method=dnn --optim=bsam --rho=${rho} --dataset=cifar100 --use_validation --dat_per_cls=10 \
+CUDA_VISIBLE_DEVICES=0 python3 run_baseline.py --method=dnn --optim=bsam --rho=${rho} --dataset=cifar100 --use_validation --dat_per_cls=10 \
 --model=vitb16-i21k --pre_trained --lr_init=${lr_init} --epochs=200 --wd=${wd} \
 --scheduler=cos_decay --lr_min=1e-8 --warmup_t=20 --warmup_lr_init=1e-7 --seed=${seed} \
---no_amp --noise_scale=${noise_scale} --group=ViT-CIFAR100-sweep # --ignore_wandb
+--no_amp --noise_scale=${noise_scale} --group=ViT-CIFAR100-sweep --momentum=${momentum} # --ignore_wandb
 done
 done
 done
