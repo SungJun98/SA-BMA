@@ -739,8 +739,8 @@ def bma(args, tr_loader, val_loader, te_loader, ood_loader, num_classes, model, 
         wandb.run.summary['ood bma nll'] = bma_res['ood_nll']
         wandb.run.summary['ood bma ece'] = bma_res['ood_ece']
     
-    if not bma_save_path is not None:    
-        save_reliability_diagram(args.method, args.optim, args.save_path, bma_res['unc'], True)
+    # if not bma_save_path is not None:    
+    #     save_reliability_diagram(args.method, args.optim, args.save_path, bma_res['unc'], True)
     
     return bma_res, bma_accuracy, bma_nll, bma_ece, bma_accuracy_ts, bma_nll_ts, bma_ece_ts, temperature.item(), bma_res['ood_accuracy'], bma_res['ood_nll'], bma_res['ood_ece']
 

@@ -259,12 +259,16 @@ if args.method != 'sabma':
 
 
     #### Bayesian Model Averaging
+    if args.no_save_bma:
+        bma_save_path  = None
+    else:
+        bma_save_path = f"{args.save_path}/bma_models"
+        os.makedirs(bma_save_path, exist_ok=True)
+    
     if args.method in ["swag", "ll_swag", "vi", "ll_vi"]:
         utils.set_seed(args.seed)
-        bma_save_path = f"{args.load_path}/bma_models"
-        os.makedirs(bma_save_path, exist_ok=True) 
         print(f"Start Bayesian Model Averaging with {args.bma_num_models} samples")
-        bma_res, bma_accuracy, bma_nll, bma_ece, bma_accuracy_ts, bma_nll_ts, bma_ece_ts, temperature, bma_ood_accuracy, bma_ood_nll, bma_ood_ece = utils.bma(args, tr_loader, val_loader, te_loader, ood_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature)
+        bma_res, bma_accuracy, bma_nll, bma_ece, bma_accuracy_ts, bma_nll_ts, bma_ece_ts, temperature, bma_ood_accuracy, bma_ood_nll, bma_ood_ece = utils.bma(args, tr_loader, val_loader, te_loader, ood_loader, num_classes, model, mean, variance, criterion, None, temperature)
     else:
         pass
 
@@ -328,7 +332,7 @@ else:
     bma_nll_ts = -np.mean(np.log(bma_predictions_ts[np.arange(bma_predictions_ts.shape[0]), bma_targets] + args.eps))
     bma_unc_ts = utils.calibration_curve(bma_predictions_ts, bma_targets, args.num_bins)
     bma_ece_ts = bma_unc_ts['ece']
-    temperature = temperature.item()
+    temperature = temperature.cpu().item()
 
     print("[BMA w/ TS Results]\n")
     tab_name = ["# of Models", "BMA Accuracy", "BMA NLL", "BMA ECE", "BMA Temperature"]
@@ -395,7 +399,11 @@ if args.method == "dnn":
     bma_ood_accuracy = None
     bma_ood_nll = None
     bma_ood_ece = None
-    
+
+try:
+    temperature = temperature.cpu().detach().numpy()
+except:
+    pass
     
 result_df["BMA Accuracy"] = bma_accuracy
 result_df["BMA NLL"] = bma_nll

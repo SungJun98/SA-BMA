@@ -59,6 +59,12 @@ parser.add_argument("--vi_load_path", type=str, default=None,
 parser.add_argument("--sabma_load_path", type=str, default=None,
     help="path to load saved sabma model (default: None)",)
 
+parser.add_argument("--emcmc_load_path", type=str, default=None,
+    help="path to load save emcmc model (default : None)")
+
+parser.add_argument("--ptl_load_path", type=str, default=None,
+    help="path to load save pre-train your loss model (default : None)")
+
 parser.add_argument("--load_path", type=str, default=None,
     help="path to load saved model (default: None)")
 
@@ -175,6 +181,20 @@ elif args.sabma_load_path is not None:
 elif args.vi_load_path is not None:
     bma_load_paths = sorted(os.listdir(args.vi_load_path))
 
+elif args.emcmc_load_path is not None:
+    bma_load_paths = sorted(os.listdir(args.emcmc_load_path))
+
+elif args.ptl_load_path is not None:
+    checkpoint = torch.load(args.ptl_load_path)
+    for key in list(checkpoint.keys()):
+        if 'backbone.' in key:
+            new_key = key.replace('backbone.', '')
+            checkpoint[new_key] = checkpoint.pop(key)
+        elif 'classifier.' in key:
+            new_key = key.replace('classifier', 'fc')
+            checkpoint[new_key] = checkpoint.pop(key)
+    model.load_state_dict(checkpoint)
+
 else:
     checkpoint = torch.load(args.load_path)
     if hasattr(checkpoint, "temperature"):
@@ -196,6 +216,13 @@ elif args.sabma_load_path is not None:
 elif args.vi_load_path is not None:
     save_path = f"{args.vi_load_path}/performance"
 
+elif args.emcmc_load_path is not None:
+    save_path = f"{args.emcmc_load_path}/performance"
+
+elif args.ptl_load_path is not None:
+    save_path = args.ptl_load_path.split("/")[:-1]
+    save_path = os.path.join(*save_path)
+    save_path = f"/{save_path}/performance"
 else:
     save_path = args.load_path.split("/")[:-1]
     save_path = os.path.join(*save_path)
@@ -209,12 +236,16 @@ print(f"Save path : {save_path}")
 criterion = torch.nn.CrossEntropyLoss()
 
 ## Calculate Hessian ------------------------------------------------------------
-if (args.swag_load_path is not None) or (args.vi_load_path is not None) or (args.sabma_load_path is not None):
+if (args.swag_load_path is not None) or (args.vi_load_path is not None) or (args.sabma_load_path is not None) or (args.emcmc_load_path is not None):
     model_num_list = list(); acc_list = list(); ece_list = list(); nll_list = list()
     tr_cum_eigenval_list = list() ; tr_max_eigenval_list = list()
     for path in bma_load_paths:
-        model_num = path.split(".")[0]
-        model_num = model_num.split("-")[-1]
+        if args.emcmc_load_path is None:
+            model_num = path.split(".")[0]
+            model_num = model_num.split("-")[-1]
+        else:
+            model_num = path.split(".")[0]
+            model_num = model_num.split("_")[-1]
         
         # get sampled model
         if args.swag_load_path is not None:
@@ -228,10 +259,17 @@ if (args.swag_load_path is not None) or (args.vi_load_path is not None) or (args
         elif args.sabma_load_path is not None:
             bma_sample = torch.load(f"{args.sabma_load_path}/{path}")
             model.load_state_dict(bma_sample, strict=False)
+        elif args.emcmc_load_path is not None:
+            try:
+                bma_sample = torch.load(f"{args.emcmc_load_path}/{path}", map_location=args.device)
+            except:
+                pass
+            model.load_state_dict(bma_sample)
+            
             
         if (args.swag_load_path) is not None or (args.vi_load_path is not None):
             res = utils.eval(te_loader, bma_sample, criterion, args.device)
-        elif args.sabma_load_path is not None:
+        elif (args.sabma_load_path is not None) or (args.emcmc_load_path is not None):
             res = utils.eval(te_loader, model, criterion, args.device)
         for p in model.parameters():
             p.requires_grad_(True)
