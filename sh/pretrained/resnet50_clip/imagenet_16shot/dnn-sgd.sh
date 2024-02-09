@@ -45,8 +45,16 @@ export PYTHONPATH="$PYTHONPATH:$PWD"
 
 
 ## BEST
-CUDA_VISIBLE_DEVICES=6 python3 src/wise_ft.py --epochs=100 --lr=1e-4 --wd=5e-4 --warmup_length=400 --batch-size=256 \
+# CUDA_VISIBLE_DEVICES=4 python3 src/wise_ft.py --epochs=100 --lr=1e-4 --wd=5e-4 --warmup_length=400 --batch-size=256 \
+# --cache-dir=/data1/lsj9862/cache \
+# --results-db=/data1/lsj9862/exp_result/clip_resnet50/results_dnn-sgd.jsonl \
+# --save=/data1/lsj9862/exp_result/clip_resnet50_dnn-sgd \
+# --seed=0
+
+
+
+CUDA_VISIBLE_DEVICES=4 python3 src/wise_ft.py --epochs=50 --lr=1e-4 --wd=5e-4 --warmup_length=200 --batch-size=512 \
 --cache-dir=/data1/lsj9862/cache \
---results-db=/data1/lsj9862/exp_result/clip_resnet50/results.jsonl \
---save=/data1/lsj9862/exp_result/clip_resnet50 \
---seed=0
+--results-db=/data1/lsj9862/exp_result/clip_resnet50/results/dnn-sgd.jsonl \
+--save=/data1/lsj9862/exp_result/clip_resnet50/dnn-sgd \
+--freeze-encoder

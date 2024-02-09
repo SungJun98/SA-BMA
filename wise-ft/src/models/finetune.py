@@ -158,8 +158,21 @@ def finetune(args):
             
         # Evaluate
         args.current_epoch = epoch
+        
+        if ((args.current_epoch + 1) == args.epochs) and (args.method == "swag"):
+            mean = swag_model.get_mean_vector()
+            torch.save(mean, os.path.join(args.save, f'swag_mean.pt'))
+            
+            variance = swag_model.get_variance_vector()
+            torch.save(variance, os.path.join(args.save, f'swag_variance.pt'))
+            
+            cov_mat = swag_model.get_covariance_matrix()
+            torch.save(cov_mat, os.path.join(args.save, f'swag_covmat.pt'))
+        
+        
         eval_results = evaluate(image_classifier, args, swag_model)
         wandb.log(eval_results)
+            
             
             
     if args.save is not None:

@@ -119,12 +119,12 @@ def parse_arguments():
     parser.add_argument(
         "--warmup_length",
         type=int,
-        default=500,
+        default=400,
     )
     parser.add_argument(
         "--epochs",
         type=int,
-        default=10,
+        default=100,
     )
     parser.add_argument(
         "--load",
@@ -147,7 +147,7 @@ def parse_arguments():
     parser.add_argument(
         "--cache-dir",
         type=str,
-        default="/data2/lsj9862/cache",
+        default="/data1/lsj9862/cache",
         help="Directory for caching features and encoder",
     )
     # parser.add_argument(
@@ -183,6 +183,13 @@ def parse_arguments():
         "--bma_num_models",
         type=int,
         default=30
+    )
+    
+    ## SA-BMA parameters
+    parser.add_argument(
+        "--alpha",
+        type=int,
+        default=5
     )
     
     ## ---------------------------------
