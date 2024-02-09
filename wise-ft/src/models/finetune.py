@@ -12,11 +12,11 @@ from src.models.utils import cosine_lr, torch_load, LabelSmoothing
 
 import src.datasets as datasets
 
-import utils.utils as utils
-from utils.swag import swag, swag_utils
-from utils.sam import sam, sam_utils
-from utils.sabma import sabma, sabma_utils
-from utils import temperature_scaling as ts
+import utils.utils_img as utils
+# from utils.swag import swag
+# from utils.sam import sam, sam_utils
+# from utils.sabma import sabma, sabma_utils
+# from utils import temperature_scaling as ts
 
 def train_sabma(args):
     pass
@@ -56,7 +56,7 @@ def finetune(args):
 
     swag_model = None
     if args.method == "swag":
-        swag_model = swag.SWAG(copy.deepcopy(model),
+        swag_model = utils.SWAG(copy.deepcopy(model),
                             no_cov_mat=False,
                             max_num_models=args.max_num_models,
                             last_layer=False).cuda()
@@ -79,10 +79,10 @@ def finetune(args):
                             momentum=0.9)
     elif args.optim == 'sam':
         base_optimizer = torch.optim.SGD
-        optimizer = sam.SAM(params, base_optimizer, rho=args.rho, lr=args.lr, momentum=0.9, weight_decay=args.wd)
+        optimizer = utils.SAM(params, base_optimizer, rho=args.rho, lr=args.lr, momentum=0.9, weight_decay=args.wd)
     elif args.optim == 'sabma':
         base_optimizer = torch.optim.SGD
-        optimizer = sabma.SABMA_optim(model.bnn_param.values(), base_optimizer, rho=args.rho, lr=args.lr, momentum=0.9, weight_decay=args.wd)
+        optimizer = utils.SABMA_optim(model.bnn_param.values(), base_optimizer, rho=args.rho, lr=args.lr, momentum=0.9, weight_decay=args.wd)
     elif args.optim == 'bsam':
         raise NotImplementedError()
     else:
@@ -126,6 +126,12 @@ def finetune(args):
             
             batch_time = time.time() - start_time
             
+            ## swag
+            if (args.method == 'swag') and ((epoch + 1) > args.swa_start) and ((epoch + 1 - args.swa_start) % args.swa_c_epochs == 0):
+                swag_model.collect_model(model)
+                swag_model.sample(0.0)
+                utils.bn_update(data_loader, swag_model, input_key)
+            
             if i % print_every == 0:
                 percent_complete = 100 * i / len(data_loader)
                 print(
@@ -152,7 +158,7 @@ def finetune(args):
             
         # Evaluate
         args.current_epoch = epoch
-        eval_results = evaluate(image_classifier, args)
+        eval_results = evaluate(image_classifier, args, swag_model)
         wandb.log(eval_results)
             
             

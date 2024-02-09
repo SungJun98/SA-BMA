@@ -170,7 +170,7 @@ def parse_arguments():
         default=5
     )
     parser.add_argument(
-        "--swa_c_epoch",
+        "--swa_c_epochs",
         type=int,
         default=5
     )
@@ -179,6 +179,12 @@ def parse_arguments():
         type=int,
         default=5
     )
+    parser.add_argument(
+        "--bma_num_models",
+        type=int,
+        default=30
+    )
+    
     ## ---------------------------------
     
     parsed_args = parser.parse_args()

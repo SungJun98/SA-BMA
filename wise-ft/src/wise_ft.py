@@ -1,8 +1,10 @@
-import os,wandb
+import os,sys, wandb
+
+sys_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, sys_dir)
+import torch
 
 import numpy as np
-
-import torch
 
 # from src.models.eval import evaluate
 from src.models.finetune import finetune
@@ -10,6 +12,8 @@ from src.models.modeling import ClassificationHead, ImageEncoder, ImageClassifie
 from src.models.utils import fisher_load
 from src.models.zeroshot import get_zeroshot_classifier
 from src.args import parse_arguments
+
+
 
 """def _merge(alpha, theta_0, theta_1, fishers, fisher_floor):
     if fishers is None:

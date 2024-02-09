@@ -6,9 +6,9 @@ import numpy as np
 
 from src.models import utils
 from src.datasets.common import get_dataloader, maybe_dictionarize
-
 import src.datasets as datasets
 
+import utils.utils_img as utils_img
 
 def eval_single_dataset(image_classifier, dataset, args):
     if args.freeze_encoder:
@@ -77,7 +77,82 @@ def eval_single_dataset(image_classifier, dataset, args):
     
     return metrics
 
-def evaluate(image_classifier, args):
+
+
+def bma_single_dataset(image_classifier, swag_model, dataset, args):  
+    if args.freeze_encoder:
+        model = swag_model
+        input_key = 'features'
+        image_enc = image_classifier.image_encoder
+        
+    else:
+        model = image_classifier
+        input_key = 'images'
+        image_enc = None
+
+    model.eval()
+    dataloader = get_dataloader(
+        dataset, is_train=False, args=args, image_encoder=image_enc)
+    device = args.device
+    metrics = {}
+    
+    num_classes = 1000
+    
+    
+    with torch.no_grad():
+        # bma_predictions = np.zeros((len(dataset.test_loader.dataset), len(dataset.test_loader.dataset.classes)))
+        try:
+            bma_predictions = torch.zeros((len(dataset.test_loader.dataset), len(dataset.test_loader.dataset.classes)))
+        except:
+            bma_predictions = torch.zeros((len(dataset.test_loader.dataset), 1000))
+        for idx in range(args.bma_num_models):
+            model.sample(1.0, cov=True)
+            try:
+                utils_img.bn_update(dataset.train_loader, model, input_key)
+            except:
+                pass
+            
+            inputs_list = list(); targets_list = list()
+            for i, data in enumerate(dataloader):
+                data = maybe_dictionarize(data)
+                x = data[input_key].to(device)
+                y = data['labels'].to(device)
+                if hasattr(dataset, 'project_labels'):
+                    y = dataset.project_labels(y, device) 
+                
+                inputs_list.append(x)
+                targets_list.append(y)
+            inputs = torch.concat(inputs_list)
+            logits = utils.get_logits(inputs, model)
+            projection_fn = getattr(dataset, 'project_logits', None)
+            if projection_fn is not None:
+                logits = projection_fn(logits, device)   
+            
+            ## cumulate preds and y
+            predictions = torch.nn.functional.softmax(logits, dim=1).cpu() #.cpu().numpy())
+            bma_predictions += predictions
+            targets = torch.concat(targets_list).cpu()
+            
+            # sample_acc = np.mean(np.argmax(predictions, axis=1) == targets)*100
+            sample_acc = (torch.argmax(predictions, axis=1) == targets).sum().item() / targets.size(0) * 100
+            print(f"Sample {idx+1}/{args.bma_num_models}. Accuracy: {sample_acc:.2f}")
+            # ens_acc = np.mean(np.argmax(bma_predictions, axis=1) == targets)*100
+            ens_acc = (torch.argmax(bma_predictions, axis=1) == targets).sum().item() / targets.size(0) *100
+            print(f"Ensemble {idx+1}/{args.bma_num_models}. Accuracy: {ens_acc:.2f}")
+            
+        bma_predictions /= args.bma_num_models
+            
+    # bma_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
+    bma_accuracy = (torch.argmax(bma_predictions, axis=1) == targets).sum().item() / targets.size(0) *100
+    metrics['bma_top1'] = bma_accuracy
+    
+    return metrics
+ 
+    
+
+
+
+def evaluate(image_classifier, args, swag_model):
     if args.eval_datasets is None:
         return
     info = vars(args)
@@ -91,13 +166,23 @@ def evaluate(image_classifier, args):
         )
 
         results = eval_single_dataset(image_classifier, dataset, args)
-        
+
+        if (args.method in ["swag", "sabma"]) and ((args.current_epoch + 1) == args.epochs):
+            bma_results = bma_single_dataset(image_classifier, swag_model, dataset, args)
+        else:
+            bma_results = None
+ 
         if 'top1' in results:
             print(f"{dataset_name} Top-1 accuracy: {results['top1']:.4f}")
+            if bma_results is not None:
+                print(f"{dataset_name} Top-1 BMA accuracy : {bma_results['bma_top1']:.4f}")
         for key, val in results.items():
             if 'worst' in key or 'f1' in key.lower() or 'pm0' in key:
                 print(f"{dataset_name} {key}: {val:.4f}")
             info[dataset_name + ':' + key] = val
+        if bma_results is not None:
+            for key, val in bma_results.items():
+                info[dataset_name + ":" + key] = val
 
     if args.results_db is not None:
         dirname = os.path.dirname(args.results_db)
