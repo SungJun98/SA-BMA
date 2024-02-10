@@ -216,7 +216,6 @@ if not args.ignore_wandb:
 #------------------------------------------------------------------
 
 # Load Data --------------------------------------------------------
-data_path_ood = args.data_path
 args.data_path = os.path.join(args.data_path, args.dataset)
 tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
                                                         data_path=args.data_path,
@@ -505,19 +504,6 @@ else:
 ## Test ------------------------------------------------------------------------------------------------------
 ##### Get test nll, Entropy, ece, Reliability Diagram on best model
 ## Load Distributional shifted data
-if args.dataset == 'cifar10':
-    ood_loader = data.corrupted_cifar10(data_path=data_path_ood,
-                            corrupt_option=args.corrupt_option,
-                            severity=args.severity,
-                            batch_size=args.batch_size, 
-                            num_workers=args.num_workers)
-elif args.dataset == 'cifar100':
-        ood_loader = data.corrupted_cifar100(data_path=data_path_ood,
-                            corrupt_option=args.corrupt_option,
-                            severity=args.severity,
-                            batch_size=args.batch_size, 
-                            num_workers=args.num_workers)
-
 ### Load Best Model
 model, mean, variance, best_epoch = utils.load_best_model(args, model, swag_model, num_classes)
 
@@ -525,14 +511,10 @@ model, mean, variance, best_epoch = utils.load_best_model(args, model, swag_mode
 #### MAP
 ## Unscaled Results
 res = utils.no_ts_map_estimation(args, te_loader, num_classes, model, mean, variance, criterion)
-ood_res = utils.no_ts_map_estimation(args, ood_loader, num_classes, model, mean, variance, criterion)
 
 print(f"1) Unscaled Results:")
 table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece"],
         [best_epoch, format(res['accuracy'], '.2f'), format(res['nll'], '.4f'), format(res['ece'], '.4f')]]
-print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
-table = [["OOD Accuracy", "OOD NLL", "OOD ECE"],
-         [format(ood_res['accuracy'], '.2f'), format(ood_res['nll'], '.4f'), format(ood_res['ece'], '.4f')]]
 print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
 
 ## Temperature Scaled Results
@@ -552,9 +534,6 @@ if not args.ignore_wandb:
     wandb.run.summary['test nll w/ ts'] = res_ts['nll']
     wandb.run.summary["test ece w/ ts"]  = res_ts['ece']
     
-    wandb.run.summary['ood accuracy'] = ood_res['accuracy']
-    wandb.run.summary['ood nll'] = ood_res['nll']
-    wandb.run.summary['ood ece'] = ood_res['ece']
 
 
 #### Bayesian Model Averaging
@@ -563,7 +542,7 @@ if args.method in ["swag", "ll_swag", "vi", "ll_vi"]:
     bma_save_path = f"{args.save_path}/bma_models"
     os.makedirs(bma_save_path, exist_ok=True) 
     print(f"Start Bayesian Model Averaging with {args.bma_num_models} samples")
-    utils.bma(args, tr_loader, val_loader, te_loader, ood_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature)
+    utils.bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature)
 else:
     pass
 

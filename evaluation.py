@@ -36,11 +36,11 @@ parser = argparse.ArgumentParser(description="training baselines")
 parser.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
 
 parser.add_argument("--method", type=str, default="dnn",
-                    choices=["dnn", "swag", "ll_swag", "vi", "ll_vi", "la", "ll_la", "sabma"],
+                    choices=["dnn", "swag", "ll_swag", "vi", "ll_vi", "la", "ll_la", "sabma", "ptl"],
                     help="Learning Method")
 
 parser.add_argument("--optim", type=str, default="sgd",
-                    choices=["sgd", "sam", "bsam", "sabma"],
+                    choices=["sgd", "sgld", "sam", "bsam", "sabma"],
                     help="Learning Method")
 
 parser.add_argument("--load_path", type=str, default=None,
@@ -186,6 +186,9 @@ print("-"*30)
 #-------------------------------------------------------------------
 
 
+method = args.method
+if args.method == 'ptl':
+    args.method = 'dnn'
 
 ## Test ------------------------------------------------------------------------------------------------------
 ##### Get test nll, Entropy, ece, Reliability Diagram on best model
@@ -206,7 +209,7 @@ elif args.dataset == 'cifar100':
 ### Load Best Model
 print("Load Best Validation Model (Lowest Loss)")
 if args.method != 'sabma':
-    state_dict_path = f'{args.load_path}/{args.method}-{args.optim}_best_val.pt'
+    state_dict_path = f'{args.load_path}/{method}-{args.optim}_best_val.pt'
     checkpoint = torch.load(state_dict_path)
 else:
     model = torch.load(f'{args.load_path}/{args.method}-{args.optim}_best_val_model.pt')
@@ -227,7 +230,17 @@ elif args.method in ["vi", "ll_vi"]:
     variance = torch.load(f'{args.load_path}/{args.method}-{args.optim}_best_val_variance.pt')
     
 elif args.method == 'dnn':
-    model.load_state_dict(checkpoint["state_dict"])
+    if method == 'dnn':
+        model.load_state_dict(checkpoint["state_dict"])
+    elif method == 'ptl':
+        for key in list(checkpoint.keys()):
+            if 'backbone.' in key:
+                new_key = key.replace('backbone.', '')
+                checkpoint[new_key] = checkpoint.pop(key)
+            elif 'classifier.' in key:
+                new_key = key.replace('classifier', 'fc')
+                checkpoint[new_key] = checkpoint.pop(key)
+        model.load_state_dict(checkpoint)
     
 else:
     pass
@@ -389,7 +402,11 @@ result_df = pd.DataFrame({"method" : [args.method],
                 "Test Ece ts" : [res_ts['ece']],
                 })
 
-if args.method == "dnn":
+
+if method == 'ptl':
+    args.method = 'ptl'
+
+if args.method in ["dnn", "ptl"]:
     bma_accuracy = None
     bma_nll = None
     bma_ece = None

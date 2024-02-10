@@ -232,7 +232,7 @@ def schedule(epoch, lr_init, epochs, swa, swa_start=None, swa_lr=None):
 
 
 
-def bma_swag(tr_loader, te_loader, ood_loader,  model, num_classes, criterion, bma_num_models=30, bma_save_path=None, eps=1e-8, batch_norm=True, seed=None, num_bins=15):
+def bma_swag(tr_loader, te_loader,  model, num_classes, criterion, bma_num_models=30, bma_save_path=None, eps=1e-8, batch_norm=True, seed=None, num_bins=15):
     '''
     run bayesian model averaging in test step
     '''
@@ -240,7 +240,6 @@ def bma_swag(tr_loader, te_loader, ood_loader,  model, num_classes, criterion, b
         utils.set_seed(seed)
     bma_logits = np.zeros((len(te_loader.dataset), num_classes))
     bma_predictions = np.zeros((len(te_loader.dataset), num_classes))
-    ood_bma_predictions = np.zeros((len(ood_loader.dataset), num_classes))
     with torch.no_grad():
         for i in range(bma_num_models):          
             model.sample(1.0, cov=True, seed=seed)
@@ -252,9 +251,7 @@ def bma_swag(tr_loader, te_loader, ood_loader,  model, num_classes, criterion, b
                 torch.save(model, f'{bma_save_path}/bma_model-{i}.pt')
 
             res = predict(te_loader, model)
-            ood_res = predict(ood_loader, model)
             logits = res["logits"]; predictions = res["predictions"]; targets = res["targets"]
-            ood_predictions = ood_res["predictions"];ood_targets = ood_res["targets"]
             
             accuracy = np.mean(np.argmax(predictions, axis=1) == targets)
             nll = -np.mean(np.log(predictions[np.arange(predictions.shape[0]), targets] + eps))
@@ -262,8 +259,6 @@ def bma_swag(tr_loader, te_loader, ood_loader,  model, num_classes, criterion, b
             
             bma_logits += logits
             bma_predictions += predictions
-            
-            ood_bma_predictions += ood_predictions
             
             ens_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
             ens_nll = -np.mean(
@@ -276,8 +271,6 @@ def bma_swag(tr_loader, te_loader, ood_loader,  model, num_classes, criterion, b
 
         bma_logits /= bma_num_models
         bma_predictions /= bma_num_models
-        
-        ood_bma_predictions /= bma_num_models
 
         bma_loss = criterion(torch.tensor(bma_predictions), torch.tensor(targets)).item()
         bma_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
@@ -285,12 +278,6 @@ def bma_swag(tr_loader, te_loader, ood_loader,  model, num_classes, criterion, b
             np.log(bma_predictions[np.arange(bma_predictions.shape[0]), targets] + eps)
         )
         bma_unc = utils.calibration_curve(bma_predictions, targets, num_bins)
-        
-        ood_bma_accuracy = np.mean(np.argmax(ood_bma_predictions, axis=1) == ood_targets)
-        ood_bma_nll = -np.mean(
-            np.log(ood_bma_predictions[np.arange(ood_bma_predictions.shape[0]), ood_targets] + eps)
-        )
-        ood_bma_unc = utils.calibration_curve(ood_bma_predictions, ood_targets, num_bins)
         
     print(f"bma Accuracy using {bma_num_models} model : {bma_accuracy * 100:.2f}% / NLL : {bma_nll:.4f}")
     return {"logits" : bma_logits,
@@ -300,10 +287,4 @@ def bma_swag(tr_loader, te_loader, ood_loader,  model, num_classes, criterion, b
             "nll" : bma_nll,
             "unc" : bma_unc, 
             "ece" : bma_unc['ece'],
-            "ood_predictions" : ood_bma_predictions,
-            "ood_targets" : ood_targets,
-            "ood_accuracy" : ood_bma_accuracy * 100,
-            "ood_nll" : ood_bma_nll,
-            "ood_unc" : ood_bma_unc,
-            "ood_ece" : ood_bma_unc['ece']
     }

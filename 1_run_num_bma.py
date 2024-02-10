@@ -32,7 +32,7 @@ parser.add_argument(
 parser.add_argument(
     "--data_path",
     type=str,
-    default='/data2/lsj9862/data/cifar10',
+    default='/data1/lsj9862/data/cifar10',
     help="path to datasets location",)
 
 parser.add_argument("--batch_size", type=int, default=256,
@@ -52,7 +52,7 @@ parser.add_argument("--dat_per_cls", type=int, default=-1,
 parser.add_argument(
     "--model",
     type=str, default='resnet18-noBN',
-    choices=['resnet18-noBN', 'wideresnet28x10-noBN'],
+    choices=['resnet18-noBN'],
     help="model name (default : resnet18-noBN)")
 
 parser.add_argument(
@@ -61,18 +61,18 @@ parser.add_argument(
     )
 
 parser.add_argument("--load_path",
-            type=str, default=None, required=True,
+            type=str, default="/data2/lsj9862/best_result/bma_num_plot/swag-sgd_best_val_model.pt", 
             help="Path for model")
 
 parser.add_argument("--bma_load_path",
-            type=str, default=None, required=True,
+            type=str, default="/data2/lsj9862/best_result/bma_num_plot/bma_models",
             help="Path for sampled model")
 
-parser.add_argument("--performance_path", type=str, default=None, required=True,
+parser.add_argument("--performance_path", type=str, default="/data2/lsj9862/best_result/bma_num_plot/performance/performance_final.pt",
             help="Path for performance (model_num, accuracy, ece, nll, flat_idx, rand_idx, sharp_idx, tr_cum_eign, tr_max_eign)")
 #----------------------------------------------------------------
 
-parser.add_argument("--num_bins", type=int, default=50, help="bin number for ece")
+parser.add_argument("--num_bins", type=int, default=15, help="bin number for ece")
 parser.add_argument("--eps", type=float, default=1e-8, help="small float to calculate nll")
 
 args = parser.parse_args()
@@ -153,7 +153,7 @@ for flat_idx in flat_indices:
     flat_bma_paths.append(f'bma_model-{flat_idx}.pt')
 for rand_idx in rand_indices:
     rand_bma_paths.append(f'bma_model-{rand_idx}.pt')
-for sharp_idx in flat_indices:
+for sharp_idx in sharp_indices:
     sharp_bma_paths.append(f'bma_model-{sharp_idx}.pt')
 #-------------------------------------------------------------------
 
@@ -185,7 +185,7 @@ for type_, bma_paths in enumerate([flat_bma_paths, rand_bma_paths, sharp_bma_pat
 
                 if args.batch_norm:
                     swag_utils.bn_update(tr_loader, model, verbose=False, subset=1.0)
-                res = swag_utils.predict(te_loader, model, verbose=False)
+                res = swag_utils.predict(te_loader, model)
 
                 predictions = res["predictions"]
                 targets = res["targets"]

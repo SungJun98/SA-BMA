@@ -684,14 +684,14 @@ def ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, var
 
 
 
-def bma(args, tr_loader, val_loader, te_loader, ood_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature=None):
+def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature=None):
     if args.no_save_bma:
         bma_save_path = None
         
     if args.method in ["swag", "ll_swag"]:
-        bma_res = swag_utils.bma_swag(tr_loader, te_loader, ood_loader, model, num_classes, criterion, args.bma_num_models, bma_save_path, args.eps, args.batch_norm, num_bins=args.num_bins)       
+        bma_res = swag_utils.bma_swag(tr_loader, te_loader, model, num_classes, criterion, args.bma_num_models, bma_save_path, args.eps, args.batch_norm, num_bins=args.num_bins)       
     elif args.method in ["vi", "ll_vi"]:
-        bma_res = vi_utils.bma_vi(val_loader, te_loader, ood_loader, mean, variance, model, args.method, criterion, num_classes, None, args.bma_num_models, bma_save_path, args.num_bins, args.eps)
+        bma_res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, None, args.bma_num_models, bma_save_path, args.num_bins, args.eps)
     else:
         raise NotImplementedError("Add code for Bayesian Model Averaging with Temperature scaling for this method")
     bma_logits = bma_res["logits"]; bma_targets = bma_res["targets"]
@@ -734,15 +734,11 @@ def bma(args, tr_loader, val_loader, te_loader, ood_loader, num_classes, model, 
         wandb.run.summary['bma nll w/ ts'] = bma_nll_ts
         wandb.run.summary['bma ece w/ ts'] = bma_ece_ts
         wandb.run.summary['bma temperature'] = temperature.item()
-        
-        wandb.run.summary['ood bma accuracy'] = bma_res['ood_accuracy']
-        wandb.run.summary['ood bma nll'] = bma_res['ood_nll']
-        wandb.run.summary['ood bma ece'] = bma_res['ood_ece']
     
     # if not bma_save_path is not None:    
     #     save_reliability_diagram(args.method, args.optim, args.save_path, bma_res['unc'], True)
     
-    return bma_res, bma_accuracy, bma_nll, bma_ece, bma_accuracy_ts, bma_nll_ts, bma_ece_ts, temperature.item(), bma_res['ood_accuracy'], bma_res['ood_nll'], bma_res['ood_ece']
+    return bma_res, bma_accuracy, bma_nll, bma_ece, bma_accuracy_ts, bma_nll_ts, bma_ece_ts, temperature.item()
 
 
 

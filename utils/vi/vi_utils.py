@@ -222,7 +222,7 @@ def eval_vi(val_loader, model, num_classes, criterion, val_mc_num, num_bins=15, 
     
     
     
-def bma_vi(val_loader, te_loader, ood_loader, mean, variance, model, method, criterion, num_classes, temperature=None, bma_num_models=30,  bma_save_path=None, num_bins=15, eps=1e-8):
+def bma_vi(val_loader, te_loader, mean, variance, model, method, criterion, num_classes, temperature=None, bma_num_models=30,  bma_save_path=None, num_bins=15, eps=1e-8):
     '''
     run bayesian model averaging
     '''
@@ -246,8 +246,6 @@ def bma_vi(val_loader, te_loader, ood_loader, mean, variance, model, method, cri
         
     bma_logits = np.zeros((len(te_loader.dataset), num_classes))
     bma_predictions = np.zeros((len(te_loader.dataset), num_classes))
-    if ood_loader is not None:
-        ood_bma_predictions = np.zeros((len(ood_loader.dataset), num_classes))
     with torch.no_grad():
         for i in range(bma_num_models):
             if i == 0:
@@ -272,10 +270,7 @@ def bma_vi(val_loader, te_loader, ood_loader, mean, variance, model, method, cri
  
             res = predict(te_loader, model)
             logits = res["logits"]; predictions = res["predictions"];targets = res["targets"]
-            
-            if ood_loader is not None:
-                ood_res = predict(ood_loader, model)
-                ood_predictions = ood_res["predictions"];ood_targets = ood_res["targets"]
+
             
             accuracy = np.mean(np.argmax(predictions, axis=1) == targets)
             nll = -np.mean(np.log(predictions[np.arange(predictions.shape[0]), targets] + eps))
@@ -287,9 +282,6 @@ def bma_vi(val_loader, te_loader, ood_loader, mean, variance, model, method, cri
 
             bma_logits += logits
             bma_predictions += predictions
-            
-            if ood_loader is not None:
-                ood_bma_predictions += ood_predictions
 
             ens_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
             ens_nll = -np.mean(
@@ -306,9 +298,6 @@ def bma_vi(val_loader, te_loader, ood_loader, mean, variance, model, method, cri
 
         bma_logits /= bma_num_models
         bma_predictions /= bma_num_models
-        
-        if ood_loader is not None:
-            ood_bma_predictions /= bma_num_models
 
         bma_loss = criterion(torch.tensor(bma_predictions), torch.tensor(targets)).item()
         bma_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
@@ -316,43 +305,17 @@ def bma_vi(val_loader, te_loader, ood_loader, mean, variance, model, method, cri
             np.log(bma_predictions[np.arange(bma_predictions.shape[0]), targets] + eps)
         )
         bma_unc = utils.calibration_curve(bma_predictions, targets, num_bins)
-
-        if ood_loader is not None:
-            ood_bma_accuracy = np.mean(np.argmax(ood_bma_predictions, axis=1) == ood_targets)
-            ood_bma_nll = -np.mean(
-                np.log(ood_bma_predictions[np.arange(ood_bma_predictions.shape[0]), ood_targets] + eps)
-            )
-            ood_bma_unc = utils.calibration_curve(ood_bma_predictions, ood_targets, num_bins)
         
     print(f"bma Accuracy using {bma_num_models} model : {bma_accuracy * 100:.2f}% / NLL : {bma_nll:.4f}")
-    if ood_loader is not None:
-        print(f"OOD bma Accuracy using {bma_num_models} model : {ood_bma_accuracy * 100:.2f}% / NLL : {ood_bma_nll:.4f}")
 
-    if ood_loader is not None:
-        return {"logits" : bma_logits,
-                "predictions" : bma_predictions,
-                "targets" : targets,
-                "loss" : bma_loss,
-                "accuracy" : bma_accuracy * 100,
-                "nll" : bma_nll,
-                "unc" : bma_unc,
-                "ece" : bma_unc['ece'],
-                "temperature" : temperature_,
-                "ood_predictions" : ood_bma_predictions,
-                "ood_targets" : ood_targets,
-                "ood_accuracy" : ood_bma_accuracy * 100,
-                "ood_nll" : ood_bma_nll,
-                "ood_unc" : ood_bma_unc,
-                "ood_ece" : ood_bma_unc['ece']
-        }    
-    else:
-                return {"logits" : bma_logits,
-                "predictions" : bma_predictions,
-                "targets" : targets,
-                "loss" : bma_loss,
-                "accuracy" : bma_accuracy * 100,
-                "nll" : bma_nll,
-                "unc" : bma_unc,
-                "ece" : bma_unc['ece'],
-                "temperature" : temperature_,
+
+    return {"logits" : bma_logits,
+        "predictions" : bma_predictions,
+        "targets" : targets,
+        "loss" : bma_loss,
+        "accuracy" : bma_accuracy * 100,
+        "nll" : bma_nll,
+        "unc" : bma_unc,
+        "ece" : bma_unc['ece'],
+        "temperature" : temperature_,
         }

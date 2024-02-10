@@ -1,10 +1,10 @@
 # %%
-import pickle
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
+import torch
 
 plt.rc('font', size=20)        # 기본 폰트 크기
 plt.rc('axes', labelsize=20)   # x,y축 label 폰트 크기
@@ -15,33 +15,30 @@ plt.rc('figure', titlesize=20) # figure title 폰트 크기
 
 # %%
 ### Load Data
-path = r"C:\Users\LimSungJun\Desktop\exp_result\cifar10\resnet18-noBN\swag-sgd\swag_lr\bma_num_plot"
+path = "/home/lsj9862/SA-BTL"
 
 # Flat
-with open(f"{path}/flat_bma_num.pickle", 'rb') as f:
-    flat_dat = pickle.load(f)
-
+flat_dat = torch.load(f"{path}/flat_bma_num.pt")
 flat_df = pd.DataFrame(flat_dat)
 flat_df = flat_df.iloc[:-1, :]
-    
-# Random
-with open(f"{path}/rand_bma_num.pickle", 'rb') as f:
-    rand_dat = pickle.load(f)    
+flat_df['error'] = 1 - flat_df['acc']
 
+# Random
+rand_dat = torch.load(f"{path}/rand_bma_num.pt")   
 rand_df = pd.DataFrame(rand_dat)
 rand_df = rand_df.iloc[:-1, :]
+rand_df['error'] = 1 - rand_df['acc']
 
 # Sharp
-with open(f"{path}/sharp_bma_num.pickle", 'rb') as f:
-    sharp_dat = pickle.load(f)    
-    
+sharp_dat = torch.load(f"{path}/sharp_bma_num.pt")   
 sharp_df = pd.DataFrame(sharp_dat)
 sharp_df = sharp_df.iloc[:-1, :]
+sharp_df['error'] = 1 - sharp_df['acc']
 # ----------------------------------------------   
 
 
 # %%
-### Plot Acc
+### Plot Acc (error)
 acc = pd.concat([flat_df.iloc[:,:2], rand_df.iloc[:,1], sharp_df.iloc[:,1]], axis=1)
 acc.columns = ['num_models', 'Sharp', 'Rand', 'Flat']
 
@@ -56,7 +53,7 @@ for _, label in enumerate(labels):
 plt.xlabel('# of BMA Models')
 plt.ylabel('BMA Accuracy')
 
-plt.savefig(f'{path}/acc.png', transparent=True, dpi=500)
+# plt.savefig(f'{path}/acc.png', transparent=True, dpi=500)
 
 
 
