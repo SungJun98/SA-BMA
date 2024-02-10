@@ -4,6 +4,7 @@ tmp.py
 *_variance.pt
 *_model.pt
 *_covmat.pt
-
+*.pt
+*.csv
 *.pyc
 *.cpython-39.pyc
