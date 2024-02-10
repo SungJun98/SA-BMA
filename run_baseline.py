@@ -51,7 +51,7 @@ parser.add_argument(
 parser.add_argument(
     "--data_path",
     type=str,
-    default='/mlainas/lsj9862/data',
+    default=None,
     help="path to datasets location",)
 
 parser.add_argument("--batch_size", type=int, default=256,
@@ -85,7 +85,7 @@ parser.add_argument(
     )
 
 parser.add_argument("--save_path",
-            type=str, default="/data2/lsj9862/exp_result/",
+            type=str, default=None,
             help="Path to save best model dict")
 #----------------------------------------------------------------
 
@@ -179,7 +179,7 @@ args = parser.parse_args()
 #----------------------------------------------------------------
 
 if not args.ignore_wandb:
-    wandb.init(project="SA-BTL", entity='sungjun98')
+    wandb.init(project="SA-BTL", entity=None)
 
 # Set Device and Seed--------------------------------------------
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
