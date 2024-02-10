@@ -387,6 +387,7 @@ else:
 
 result_df = pd.DataFrame({"method" : [args.method],
                 "optim" : [args.optim],
+                "seed" : [args.seed],
                 "dataset" : [args.dataset],
                 "dat_per_cls" : [args.dat_per_cls],
                 "corrupt_option" : [corr],
