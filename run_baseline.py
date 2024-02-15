@@ -51,7 +51,7 @@ parser.add_argument(
 parser.add_argument(
     "--data_path",
     type=str,
-    default='/mlainas/lsj9862/data',
+    default='/data1/lsj9862/data',
     help="path to datasets location",)
 
 parser.add_argument("--batch_size", type=int, default=256,
@@ -91,7 +91,7 @@ parser.add_argument("--save_path",
 
 ## Optimizer Hyperparameter --------------------------------------
 parser.add_argument("--optim", type=str, default="sgd",
-                    choices=["sgd", "sam", "adam"],
+                    choices=["sgd", "sam", "fsam", "adam"],
                     help="Optimization options")
 
 parser.add_argument("--lr_init", type=float, default=0.01,
@@ -105,7 +105,9 @@ parser.add_argument("--epochs", type=int, default=100, metavar="N",
 
 parser.add_argument("--wd", type=float, default=5e-4, help="weight decay (default: 5e-4)")
 
-parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation ball for SAM / BSAM")
+parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation ball for SAM / FSAM")
+
+parser.add_argument("--eta", type=float, default=1.0, help="diagonal fisher inverse weighting term in FSAM")
 
 # Scheduler
 parser.add_argument("--scheduler", type=str, default='cos_decay', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
@@ -160,19 +162,6 @@ parser.add_argument("--bma_num_models", type=int, default=30, help="Number of mo
 parser.add_argument("--num_bins", type=int, default=15, help="bin number for ece")
 parser.add_argument("--no_save_bma", action='store_true', default=False,
             help="Deactivate saving model samples in BMA")
-#----------------------------------------------------------------
-
-## OOD test -----------------------------------------------------
-parser.add_argument("--corrupt_option",
-    default=['brightness.npy','contrast.npy','defocus_blur.npy','elastic_transform.npy','fog.npy',
-    'frost.npy','gaussian_blur.npy','gaussian_noise.npy','glass_blur.npy','impulse_noise.npy','jpeg_compression.npy',
-    'motion_blur.npy','pixelate.npy','saturate.npy','shot_noise.npy','snow.npy','spatter.npy','speckle_noise.npy','zoom_blur.npy'],
-    help='corruption option of CIFAR10/100-C'
-        )
-parser.add_argument("--severity",
-    default=1,
-    type=int,
-    help='Severity of corruptness in CIFAR10/100-C (1 to 5)')
 #----------------------------------------------------------------
 
 args = parser.parse_args()
@@ -314,10 +303,6 @@ print("-"*30)
 
 
 ## Resume ---------------------------------------------------------------------------
-"""
-get_resume로 정리
-"""
-
 start_epoch = 1
 
 if not args.pre_trained and args.resume is not None:
@@ -392,11 +377,15 @@ if args.method not in ["la", "ll_la"]:
                 tr_res = vi_utils.train_vi_sgd(tr_loader, model, criterion, optimizer, args.device, scaler, args.batch_size, args.kl_beta)
             elif args.optim == "sam":
                 tr_res = vi_utils.train_vi_sam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler, args.batch_size, args.kl_beta)
+            elif args.optim == "fsam":
+                raise NotImplementedError("No code for fsam with VI yet")
         else:
             if args.optim in ["sgd", "adam"]:
                 tr_res = utils.train_sgd(tr_loader, model, criterion, optimizer, args.device, scaler)
             elif args.optim == "sam":
                 tr_res = utils.train_sam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
+            elif args.optim == "fsam":
+                tr_res = utils.train_fsam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
 
         ## valid
         if args.method in ["vi", "ll_vi"]:

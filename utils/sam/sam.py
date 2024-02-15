@@ -110,10 +110,10 @@ class SAM(torch.optim.Optimizer):
 
 
 
-"""
+
 ## FisherSAM
 class FSAM(torch.optim.Optimizer):
-    def __init__(self, params, base_optimizer, rho=0.05, **kwargs):
+    def __init__(self, params, base_optimizer, rho=0.05, eta=1.0, **kwargs):
         assert rho >= 0.0, f"Invalid rho, should be non-negative: {rho}"
 
         defaults = dict(rho=rho, **kwargs)
@@ -122,10 +122,30 @@ class FSAM(torch.optim.Optimizer):
         self.base_optimizer = base_optimizer(self.param_groups, **kwargs)
         self.param_groups = self.base_optimizer.param_groups
         self.defaults.update(self.base_optimizer.defaults)
+        self.eta = eta
 
     @torch.no_grad()
-    def first_step(self, eta=1.0, zero_grad=False):
-        with torch.cuda.amp.autocast():
+    def first_step(self, zero_grad=False, amp=True):
+        if amp:
+            with torch.cuda.amp.autocast():
+                for group in self.param_groups:
+                    for p in group["params"]:
+                        if p.grad is None: continue
+                        self.state[p]["old_p"] = p.data.clone()
+
+                        flat_grad = (p.grad.view(-1))**2 + 1e-8
+                    
+                        fish_inv = 1 / (1 + self.eta*flat_grad)
+                        e_w = group["rho"] * torch.mul(fish_inv, flat_grad) / torch.sqrt(torch.dot(fish_inv, (flat_grad**2)))
+
+                        # unflatten fish_inv like p
+                        e_w = e_w.view(p.grad.shape)
+
+                        p.add_(e_w)  # climb to the local maximum "w + e(w)"
+
+                if zero_grad: self.zero_grad()
+                
+        else:
             for group in self.param_groups:
                 for p in group["params"]:
                     if p.grad is None: continue
@@ -133,25 +153,35 @@ class FSAM(torch.optim.Optimizer):
 
                     flat_grad = (p.grad.view(-1))**2 + 1e-8
                 
-                    fish_inv = 1 / (1 + eta*flat_grad)
+                    fish_inv = 1 / (1 + self.eta*flat_grad)
                     e_w = group["rho"] * torch.mul(fish_inv, flat_grad) / torch.sqrt(torch.dot(fish_inv, (flat_grad**2)))
 
                     # unflatten fish_inv like p
                     e_w = e_w.view(p.grad.shape)
 
                     p.add_(e_w)  # climb to the local maximum "w + e(w)"
-
             if zero_grad: self.zero_grad()
 
+
+
     @torch.no_grad()
-    def second_step(self, zero_grad=False):
-        with torch.cuda.amp.autocast():
+    def second_step(self, zero_grad=False, amp=True):
+        if amp:
+            with torch.cuda.amp.autocast():
+                for group in self.param_groups:
+                    for p in group["params"]:
+                        if p.grad is None: continue
+                        p.data = self.state[p]["old_p"]  # get back to "w" from "w + e(w)"
+        
+        else:
             for group in self.param_groups:
                 for p in group["params"]:
                     if p.grad is None: continue
                     p.data = self.state[p]["old_p"]  # get back to "w" from "w + e(w)"
-
+            
+            self.base_optimizer.step()
+                        
+                    
     @torch.no_grad()
     def step(self, closure=None):
         self.base_optimizer.step(closure)
-"""

@@ -216,6 +216,11 @@ def get_optimizer(args, model):
         optimizer = sam.SAM(optim_param, base_optimizer, rho=args.rho, lr=args.lr_init, momentum=args.momentum,
                         weight_decay=args.wd)
         
+    elif args.optim == "fsam":
+        base_optimizer = torch.optim.SGD
+        optimizer = sam.FSAM(optim_param, base_optimizer, rho=args.rho, eta=args.eta, lr=args.lr_init, momentum=args.momentum,
+                        weight_decay=args.wd)
+        
     return optimizer
 
 
@@ -228,7 +233,7 @@ def get_scheduler(args, optimizer):
         from timm.scheduler.step_lr import StepLRScheduler
         if args.optim in ['sgd', "adam"]:
             scheduler_ = StepLRScheduler(optimizer, decay_rate=0.2, )
-        elif args.optim in ['sam', 'sabma']:
+        elif args.optim in ['sam', 'fsam', 'sabma']:
             scheduler_ = StepLRScheduler(optimizer.base_optimizer, decay_rate=0.2, )
             
     elif args.scheduler == "cos_decay":
@@ -243,7 +248,7 @@ def get_scheduler(args, optimizer):
                                         warmup_t=args.warmup_t,
                                         warmup_lr_init=args.warmup_lr_init,
                                             )
-        elif args.optim in ["sam", "sabma"]:
+        elif args.optim in ["sam", "fsam", "sabma"]:
             scheduler_ = CosineLRScheduler(optimizer = optimizer.base_optimizer,
                                         t_initial= args.epochs,
                                         lr_min=args.lr_min,
@@ -268,7 +273,7 @@ def get_scaler(args):
             first_step_scaler = None
             second_step_scaler = None
 
-        elif args.optim in ["sam", "sabma"]:
+        elif args.optim in ["sam", "fsam", "sabma"]:
             scaler = None
             first_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
             second_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
@@ -334,7 +339,7 @@ def save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_s
                             optimizer = optimizer.state_dict(),
                             # scheduler = scheduler.state_dict(),
                             )
-    elif args.optim == "sam":
+    elif args.optim in ["sam", "fsam"]:
         if not args.no_amp:
             save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
                             epoch = best_epoch,
@@ -489,10 +494,6 @@ def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler
             second_step_scaler.step(optimizer)
             second_step_scaler.update()
             
-            # Calculate loss and accuracy
-            correct += (model(X).argmax(1) == y).type(torch.float).sum().item()
-            loss_sum += loss.data.item() * X.size(0)
-            num_objects_current += X.size(0)
         
         else:
             ## first forward & backward
@@ -506,16 +507,94 @@ def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler
             loss = criterion(pred, y)
             loss.backward()
             optimizer.second_step(zero_grad=True, amp=False)   
-                       
-            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-            loss_sum += loss.data.item() * X.size(0)
-            num_objects_current += X.size(0)
+        
+        # Calculate loss and accuracy              
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
                       
     return {
         "loss": loss_sum / num_objects_current,
         "accuracy": correct / num_objects_current * 100.0,
     }
 
+
+
+# train FSAM
+def train_fsam(dataloader, model, criterion, optimizer, device, first_step_scaler, second_step_scaler):
+    # https://github.com/davda54/sam/issues/7
+    loss_sum = 0.0
+    correct = 0.0
+
+    num_objects_current = 0
+    num_batches = len(dataloader)
+
+    model.train()
+    for batch, (X, y) in enumerate(dataloader):
+        X, y = X.to(device), y.to(device)
+        optimizer.zero_grad()
+
+        if first_step_scaler is not None:
+            sam_utils.enable_running_stats(model)
+            ### first forward-backward pass
+            with torch.cuda.amp.autocast():
+                pred = model(X)
+                loss = criterion(pred, y)
+            first_step_scaler.scale(loss).backward()
+            
+            first_step_scaler.unscale_(optimizer)
+            
+            optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
+            
+            inf_grad_cnt = sum(v.item() for v in optimizer_state["found_inf_per_device"].values())      # Check if any gradients are inf/nan
+            
+            if inf_grad_cnt == 0:
+                # if valid graident, apply sam_first_step
+                optimizer.first_step(zero_grad=True)
+                sam_first_step_applied = True
+            else:
+                # if invalid graident, skip sam and revert to single optimization step
+                optimizer.zero_grad()
+                sam_first_step_applied = False
+
+            first_step_scaler.update()
+
+            sam_utils.disable_running_stats(model)
+            
+            ### second forward-backward pass
+            with torch.cuda.amp.autocast():
+                pred = model(X)
+                loss = criterion(pred, y)
+            second_step_scaler.scale(loss).backward()
+
+            if sam_first_step_applied:
+                optimizer.second_step()
+            
+            second_step_scaler.step(optimizer)
+            second_step_scaler.update()
+        
+        else:
+            ## first forward & backward
+            pred = model(X)
+            loss = criterion(pred, y)        
+            loss.backward()
+            optimizer.first_step(zero_grad=True, amp=False)
+            
+            ## second forward-backward pass
+            pred = model(X)
+            loss = criterion(pred, y)
+            loss.backward()
+            optimizer.second_step(zero_grad=True, amp=False)   
+            
+        # Calculate loss and accuracy               
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
+                      
+    return {
+        "loss": loss_sum / num_objects_current,
+        "accuracy": correct / num_objects_current * 100.0,
+    }
 
 
 # Test
