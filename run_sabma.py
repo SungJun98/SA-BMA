@@ -48,7 +48,7 @@ parser.add_argument(
 parser.add_argument(
     "--data_path",
     type=str,
-    default=None,
+    default='/data1/lsj9862/data',
     help="path to datasets location",)
 
 parser.add_argument("--batch_size", type=int, default=256,
@@ -83,7 +83,7 @@ parser.add_argument("--model_path",
             help="Path to load state dict of backbone (to get bn statistics)")
 
 parser.add_argument("--save_path",
-            type=str, default=None,
+            type=str, default="/data2/lsj9862/exp_result",
             help="Path to save best model dict")
 #----------------------------------------------------------------
 
@@ -179,7 +179,7 @@ print("-"*30)
 
 # wandb config---------------------------------------------------
 if not args.ignore_wandb:
-    wandb.init(project="SA-BTL", entity=None)
+    wandb.init(project="SA-BTL", entity='sungjun98')
     wandb.config.update(args)
     wandb.run.name = utils.set_wandb_runname(args)
 #----------------------------------------------------------------

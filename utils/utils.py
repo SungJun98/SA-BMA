@@ -129,7 +129,7 @@ def set_wandb_runname(args):
 
 
 def get_dataset(dataset='cifar10',
-                data_path=None,
+                data_path='/mlainas/lsj9862/data/cifar10',
                 dat_per_cls=-1,
                 use_validation=True, 
                 batch_size=256,

@@ -75,7 +75,7 @@ def create_transform_v2(data_name='cifar10', aug=True, scale=None, ratio=None,
 
 
 
-def create_dataset(data_name='cifar10', data_path=None,
+def create_dataset(data_name='cifar10', data_path='/data1/lsj9862/data/cifar10',
             use_validation=True, val_ratio=0.1,
             dat_per_cls=-1, seed=0, 
             transform_train=None, transform_test=None):
@@ -200,7 +200,7 @@ corrupt_types = [
 ]
 
 class CIFAR10_C(torch.utils.data.Dataset):
-    def __init__(self, transform, corrupt_option=corrupt_types, severity=1, data_dir=None):
+    def __init__(self, transform, corrupt_option=corrupt_types, severity=1, data_dir="/data1/lsj9862/data"):
         assert type(severity) is int and 1<=severity<=5, 'Invalid severity!'
 
         self.root = os.path.join(data_dir, 'CIFAR-10-C')
@@ -228,7 +228,7 @@ class CIFAR10_C(torch.utils.data.Dataset):
         return self.transform(img),target
 
 
-def corrupted_cifar10(data_path=None, corrupt_option=corrupt_types, severity=1, batch_size=256, num_workers=4):
+def corrupted_cifar10(data_path='/data1/lsj9862/data', corrupt_option=corrupt_types, severity=1, batch_size=256, num_workers=4):
     _test_transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
@@ -246,7 +246,7 @@ def corrupted_cifar10(data_path=None, corrupt_option=corrupt_types, severity=1, 
 
 
 class CIFAR100_C(torch.utils.data.Dataset):
-    def __init__(self, transform, corrupt_option=corrupt_types, severity=1, data_dir=None):
+    def __init__(self, transform, corrupt_option=corrupt_types, severity=1, data_dir="/data1/lsj9862/data"):
         assert type(severity) is int and 1<=severity<=5, 'Invalid severity!'
 
         self.root = os.path.join(data_dir, 'CIFAR-100-C')
@@ -274,7 +274,7 @@ class CIFAR100_C(torch.utils.data.Dataset):
         return self.transform(img),target
 
 
-def corrupted_cifar100(data_path=None, corrupt_option=corrupt_types, severity=1, batch_size=256, num_workers=4):
+def corrupted_cifar100(data_path='/data1/lsj9862/data', corrupt_option=corrupt_types, severity=1, batch_size=256, num_workers=4):
     _test_transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
