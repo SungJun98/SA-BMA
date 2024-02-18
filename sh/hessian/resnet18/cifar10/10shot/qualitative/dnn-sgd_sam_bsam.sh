@@ -12,9 +12,19 @@
 # --model=resnet18  --load_path="/data2/lsj9862/best_result/seed_${seed}/cifar10/10shot/pretrained_resnet18/dnn-sam/cos_decay_1e-08/10_1e-07/0.01_0.0001_0.9_0.1/dnn-sam_best_val_scaled_model.pt"
 # done
 
-## dnn-bsam
+## dnn-fsam
 for seed in 0 1 2
 do
 CUDA_VISIBLE_DEVICES=5 python3 hessian.py --dataset=cifar10 --data_path=/data1/lsj9862/data/cifar10 --use_validation --dat_per_cls=10 --seed=${seed} \
---model=resnet18  --load_path="/data2/lsj9862/best_result/seed_${seed}/cifar10/10shot/pretrained_resnet18/dnn-bsam/dnn-bsam_best_val_scaled_model.pt"
+--model=resnet18  --load_path="/data2/lsj9862/best_result/seed_${seed}/cifar10/10shot/pretrained_resnet18/dnn-fsam/cos_decay_1e-08/10_1e-07/0.01_0.0001_0.9_0.1/dnn-fsam_best_val_scaled_model.pt"
+
 done
+
+# ## dnn-bsam
+# for seed in 0 1 2
+# do
+# CUDA_VISIBLE_DEVICES=5 python3 hessian.py --dataset=cifar10 --data_path=/data1/lsj9862/data/cifar10 --use_validation --dat_per_cls=10 --seed=${seed} \
+# --model=resnet18  --load_path="/data2/lsj9862/best_result/seed_${seed}/cifar10/10shot/pretrained_resnet18/dnn-bsam/dnn-bsam_best_val_scaled_model.pt"
+# done
+
+

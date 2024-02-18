@@ -183,6 +183,7 @@ for type_, bma_paths in enumerate([flat_bma_paths, rand_bma_paths, sharp_bma_pat
                 bma_state_dict = utils.list_to_state_dict(model, bma_sample, args.tr_layer, tr_layer_name)
                 model.load_state_dict(bma_state_dict, strict=False)
 
+                model.eval()
                 if args.batch_norm:
                     swag_utils.bn_update(tr_loader, model, verbose=False, subset=1.0)
                 res = swag_utils.predict(te_loader, model)
