@@ -730,7 +730,7 @@ def no_ts_map_estimation(args, te_loader, num_classes, model, mean, variance, cr
         model.sample(0)
         res = eval(te_loader, model, criterion, args.device)
     elif args.method in ["vi", "ll_vi"]:
-        res = vi_utils.bma_vi(None, te_loader, None, mean, variance, model, args.method, criterion, num_classes, temperature=None, bma_num_models=1,  bma_save_path=None, num_bins=args.num_bins, eps=args.eps)  
+        res = vi_utils.bma_vi(None, te_loader, mean, variance, model, args.method, criterion, num_classes, temperature=None, bma_num_models=1,  bma_save_path=None, num_bins=args.num_bins, eps=args.eps)  
     else:
         res = eval(te_loader, model, criterion, args.device)
     
@@ -751,7 +751,7 @@ def ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, var
         res = eval(te_loader, scaled_model, criterion, args.device)   
         
     elif args.method in ["vi", "ll_vi"]:
-        res = vi_utils.bma_vi(val_loader, te_loader, None, mean, variance, model, args.method, criterion, num_classes, temperature='local', bma_num_models=1,  bma_save_path=None, num_bins=args.num_bins, eps=args.eps)
+        res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, temperature='local', bma_num_models=1,  bma_save_path=None, num_bins=args.num_bins, eps=args.eps)
         temperature = res["temperature"]
     else:
         raise NotImplementedError("Need Code for temperature scaling on this method")
@@ -784,10 +784,6 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
     table = [["Num BMA models", "Test Accuracy", "Test NLL", "Test Ece"],
             [args.bma_num_models, format(bma_accuracy, '.4f'), format(bma_nll, '.4f'), format(bma_ece, '.4f')]]
     print(tabulate.tabulate(table, tablefmt="simple"))
-    table = [["Num BMA models", "OOD Accuracy", "OOD NLL", "OOD Ece"],
-            [args.bma_num_models, format(bma_res["ood_accuracy"], '.4f'), format(bma_res["ood_nll"], '.4f'), format(bma_res["ood_ece"], '.4f')]]
-    print(tabulate.tabulate(table, tablefmt="simple"))
-    
     
     ## Adjust temperature scaling on bma logits
     bma_logits_ts = torch.tensor(bma_logits) / temperature.cpu()

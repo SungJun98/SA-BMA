@@ -40,7 +40,7 @@ parser.add_argument("--method", type=str, default="dnn",
                     help="Learning Method")
 
 parser.add_argument("--optim", type=str, default="sgd",
-                    choices=["sgd", "sgld", "sam", "bsam", "sabma"],
+                    choices=["sgd", "sgld", "sam", "fsam", "bsam", "sabma"],
                     help="Learning Method")
 
 parser.add_argument("--load_path", type=str, default=None,
@@ -281,7 +281,7 @@ if args.method != 'sabma':
     if args.method in ["swag", "ll_swag", "vi", "ll_vi"]:
         utils.set_seed(args.seed)
         print(f"Start Bayesian Model Averaging with {args.bma_num_models} samples")
-        bma_res, bma_accuracy, bma_nll, bma_ece, bma_accuracy_ts, bma_nll_ts, bma_ece_ts, temperature, bma_ood_accuracy, bma_ood_nll, bma_ood_ece = utils.bma(args, tr_loader, val_loader, te_loader, ood_loader, num_classes, model, mean, variance, criterion, None, temperature)
+        bma_res, bma_accuracy, bma_nll, bma_ece, bma_accuracy_ts, bma_nll_ts, bma_ece_ts, temperature, bma_ood_accuracy, bma_ood_nll, bma_ood_ece = utils.bma(args, tr_loader, val_loader, ood_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature=None)
     else:
         pass
 
