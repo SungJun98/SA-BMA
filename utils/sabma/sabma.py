@@ -42,6 +42,9 @@ class SABMA(torch.nn.Module):
         if isinstance(backbone, torchvision.models.ResNet):
             for param in backbone.fc.parameters():
                 classifier_param.extend(torch.flatten(param))
+        elif isinstance(backbone, torchvision.models.vit_b_16):
+            for param in backbone.heads.head.parameters():
+                classifier_param.extend(torch.flatten(param))
         else:    
             for param in backbone.head.parameters():
                 classifier_param.extend(torch.flatten(param))
@@ -117,7 +120,20 @@ class SABMA(torch.nn.Module):
                 self.full_param_shape[name] = p.shape
                 self.full_param_num += p.shape.numel()      
                 
-            # Vit
+            # Vit pre-trained on ImageNet 1K
+            elif isinstance(backbone, torchvision.models.vit_b_16):
+                if ('ln' in name) or ('head' in name):
+                    self.tr_param_shape[name] = p.shape
+                    self.tr_param_num += p.shape.numel()
+                    self.tr_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))
+                else:
+                    self.frz_param_shape[name] = p.shape
+                    self.frz_param_num += p.shape.numel()
+                    self.frz_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
+                self.full_param_shape[name] = p.shape
+                self.full_param_num += p.shape.numel()
+                
+            # Vit pre-trained on ImageNet 21K
             else:
                 if ('norm' in name) or ('head' in name):
                     self.tr_param_shape[name] = p.shape
