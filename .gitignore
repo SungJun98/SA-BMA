@@ -8,3 +8,6 @@ tmp.py
 *.csv
 *.pyc
 *.cpython-39.pyc
+.png
+num_bma_plot
+sh
