@@ -75,8 +75,8 @@ parser.add_argument(
     "--model",
     type=str, default='resnet18', required=True,
     choices=['resnet18', 'resnet50', 'resnet101',
-             'resnet50-clip', 'resnet101-clip', 'vitb16-clip',
-            'resnet18-noBN', "vitb16-i21k"],
+            'resnet18-noBN',
+            'vitb16-i1k', "vitb16-i21k"],
     help="model name (default : resnet18)")
 
 parser.add_argument(
@@ -227,7 +227,6 @@ print("-"*30)
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
 if args.linear_probe or args.method in ["last_swag", "last_vi"]:
     utils.freeze_fe(model)
-
 
 swag_model=None
 if args.method == "swag":

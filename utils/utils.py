@@ -180,7 +180,10 @@ def get_backbone(model_name, num_classes, device, pre_trained=True):
     elif model_name == "vitb16-i21k":
         model = timm.create_model('vit_base_patch16_224_in21k', pretrained=pre_trained)
         model.head = torch.nn.Linear(768, num_classes)
-        
+    
+    elif model_name == 'vitb16-i1k':
+        model = torch_models.vit_b_16(weights='IMAGENET1K_V1')
+    
     else:
         raise NotImplementedError("No code for the backbone")
     
