@@ -60,7 +60,7 @@ parser.add_argument(
     default='/data1/lsj9862/data',
     help="path to datasets location",)
 
-parser.add_argument("--batch_size", type=int, default=256,
+parser.add_argument("--batch_size", type=int, default=1024,
             help="batch size")
 
 parser.add_argument("--num_workers", type=int, default=4,
@@ -193,18 +193,25 @@ if args.method == 'ptl':
 ## Test ------------------------------------------------------------------------------------------------------
 ##### Get test nll, Entropy, ece, Reliability Diagram on best model
 ## Load Distributional shifted data
+if args.model == 'vitb16-i21k':
+    is_backbone_vit = True
+else:
+    is_backbone_vit = False
+
 if args.dataset == 'cifar10':
     ood_loader = data.corrupted_cifar10(data_path=data_path_ood,
                             corrupt_option=args.corrupt_option,
                             severity=args.severity,
                             batch_size=args.batch_size, 
-                            num_workers=args.num_workers)
+                            num_workers=args.num_workers,
+                            is_vit=is_backbone_vit)
 elif args.dataset == 'cifar100':
         ood_loader = data.corrupted_cifar100(data_path=data_path_ood,
                             corrupt_option=args.corrupt_option,
                             severity=args.severity,
                             batch_size=args.batch_size, 
-                            num_workers=args.num_workers)
+                            num_workers=args.num_workers,
+                            is_vit=is_backbone_vit)
 
 ### Load Best Model
 print("Load Best Validation Model (Lowest Loss)")

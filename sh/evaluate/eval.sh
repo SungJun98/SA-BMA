@@ -13,17 +13,17 @@
 # done
 
 # ## vi-sgd
-for seed in 1 # 0 1 2
-do
-for severity in 5 # 1 2 3 4 5
-do
-CUDA_VISIBLE_DEVICES=3 python3 evaluation.py \
---load_path="/data2/lsj9862/best_result/seed_${seed}/cifar10/10shot/pretrained_resnet18/vi-sgd/cos_decay_1e-08/10_1e-07/0.01_0.0001_1.0_-5.0_0.1_0.1/" \
---save_path="/home/lsj9862/SA-BTL/evaluate.csv" --no_save_bma \
---method=vi --optim=sgd --dataset=cifar10 --dat_per_cls=10 \
---model=resnet18 --seed=${seed} --severity=${severity}
-done
-done
+# for seed in 0 1 2
+# do
+# for severity in 1 2 3 4 5
+# do
+# CUDA_VISIBLE_DEVICES=3 python3 evaluation.py \
+# --load_path="/data2/lsj9862/best_result/seed_${seed}/cifar10/10shot/pretrained_resnet18/vi-sgd/cos_decay_1e-08/10_1e-07/0.01_0.0001_1.0_-5.0_0.1_0.1/" \
+# --save_path="/home/lsj9862/SA-BTL/evaluate.csv" --no_save_bma \
+# --method=vi --optim=sgd --dataset=cifar10 --dat_per_cls=10 \
+# --model=resnet18 --seed=${seed} --severity=${severity}
+# done
+# done
 
 
 # ######## cifar10 - vit
@@ -82,18 +82,18 @@ done
 # done
 
 
-# # ## vi-sgd
-# for seed in 0 1 2
-# do
-# for severity in 1 2 3 4 5
-# do
-# CUDA_VISIBLE_DEVICES=3 python3 evaluation.py \
-# --load_path="/data2/lsj9862/best_result/seed_${seed}/cifar10/10shot/pretrained_vitb16-i21k/vi-sgd/cos_decay_1e-08/10_1e-07/0.001_0.0001_1.0_-3.0_0.05_1.0/" \
-# --save_path="/home/lsj9862/SA-BTL/evaluate_vit.csv" --no_save_bma \
-# --method=vi --optim=sgd --dataset=cifar10 --dat_per_cls=10 \
-# --model=vitb16-i21k --seed=${seed} --severity=${severity}
-# done
-# done
+## vi-sgd
+for seed in 0 # 0 1 2
+do
+for severity in 1 # 1 2 3 4 5
+do
+CUDA_VISIBLE_DEVICES=3 python3 evaluation.py \
+--load_path="/data2/lsj9862/best_result/seed_${seed}/cifar10/10shot/pretrained_vitb16-i21k/vi-sgd/cos_decay_1e-08/10_1e-07/0.001_0.0001_1.0_-3.0_0.05_1.0/" \
+--save_path="/home/lsj9862/SA-BTL/evaluate_vit.csv" --no_save_bma \
+--method=vi --optim=sgd --dataset=cifar10 --dat_per_cls=10 \
+--model=vitb16-i21k --seed=${seed} --severity=${severity}
+done
+done
 
 # ## sabma
 # for seed in 0 1 2

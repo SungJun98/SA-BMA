@@ -228,19 +228,22 @@ class CIFAR10_C(torch.utils.data.Dataset):
         return self.transform(img),target
 
 
-def corrupted_cifar10(data_path='/data1/lsj9862/data', corrupt_option=corrupt_types, severity=1, batch_size=256, num_workers=4):
-    _test_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-    ])
+def corrupted_cifar10(data_path='/data1/lsj9862/data', corrupt_option=corrupt_types, severity=1, batch_size=1024, num_workers=4, is_vit=False):
+    if is_vit:
+        tfs = [transforms.ToTensor(), transforms.Resize(224)]
+    else:
+        tfs = [transforms.ToTensor()]
+    
+    _test_transform = transforms.Compose(tfs)
 
     _test_set = CIFAR10_C(transform=_test_transform, corrupt_option=corrupt_option,severity=severity, data_dir=data_path)
     test_loader = torch.utils.data.DataLoader(_test_set,
                                         batch_size=batch_size,
                                         shuffle=False,
                                         drop_last=False,
+                                        pin_memory=True,
                                         num_workers=num_workers)
-
+    print(f"Load CIFAR10C with severity {severity}")
     return test_loader
 
 
@@ -274,7 +277,7 @@ class CIFAR100_C(torch.utils.data.Dataset):
         return self.transform(img),target
 
 
-def corrupted_cifar100(data_path='/data1/lsj9862/data', corrupt_option=corrupt_types, severity=1, batch_size=256, num_workers=4):
+def corrupted_cifar100(data_path='/data1/lsj9862/data', corrupt_option=corrupt_types, severity=1, batch_size=1024, num_workers=4):
     _test_transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
@@ -285,6 +288,7 @@ def corrupted_cifar100(data_path='/data1/lsj9862/data', corrupt_option=corrupt_t
                                         batch_size=batch_size,
                                         shuffle=False,
                                         drop_last=False,
+                                        pin_memory=True,
                                         num_workers=num_workers)
-
+    print(f"Load CIFAR100C with severity {severity}")
     return test_loader
