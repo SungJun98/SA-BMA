@@ -63,7 +63,7 @@ parser.add_argument(
 parser.add_argument("--batch_size", type=int, default=1024,
             help="batch size")
 
-parser.add_argument("--num_workers", type=int, default=4,
+parser.add_argument("--num_workers", type=int, default=0,
             help="number of workers")
 
 parser.add_argument("--use_validation", action='store_true', default=True,
@@ -213,8 +213,8 @@ elif args.dataset == 'cifar100':
                             num_workers=args.num_workers,
                             is_vit=is_backbone_vit)
 
+
 ### Load Best Model
-print("Load Best Validation Model (Lowest Loss)")
 if args.method != 'sabma':
     state_dict_path = f'{args.load_path}/{method}-{args.optim}_best_val.pt'
     checkpoint = torch.load(state_dict_path)
@@ -245,14 +245,19 @@ elif args.method == 'dnn':
                 new_key = key.replace('backbone.', '')
                 checkpoint[new_key] = checkpoint.pop(key)
             elif 'classifier.' in key:
-                new_key = key.replace('classifier', 'fc')
-                checkpoint[new_key] = checkpoint.pop(key)
+                if 'vit' in args.model:
+                    new_key = key.replace('classifier', 'head')
+                    checkpoint[new_key] = checkpoint.pop(key)
+                elif 'resnet' in args.model:
+                    new_key = key.replace('classifier', 'fc')
+                    checkpoint[new_key] = checkpoint.pop(key)
+                else:
+                    raise NotImplementedError("No code to load this backbone")
         model.load_state_dict(checkpoint)
-    
 else:
     pass
 model.to(args.device)        
-
+print("Load Best Validation Model (Lowest Loss)")
 
 
 if args.method != 'sabma':
