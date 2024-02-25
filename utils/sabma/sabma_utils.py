@@ -323,16 +323,13 @@ def eval_sabma(loader, sabma_model, params, criterion, device, num_bins=15, eps=
 def bma_sabma(te_loader, sabma_model, bma_num_models,
             num_classes, criterion, device,
             bma_save_path=None, eps=1e-8, num_bins=15,
-            validation=False, tr_layer="nl_ll",
-            ood_loader=None
+            validation=False, tr_layer="nl_ll"
             ):
     '''
     run bayesian model averaging in test step
     '''
     sabma_logits = np.zeros((len(te_loader.dataset), num_classes))
     sabma_predictions = np.zeros((len(te_loader.dataset), num_classes))
-    if ood_loader is not None:
-        ood_sabma_predictions =np.zeros((len(ood_loader.dataset), num_classes))
     with torch.no_grad():
         for i in range(bma_num_models):
             # if i == 0:
@@ -348,18 +345,13 @@ def bma_sabma(te_loader, sabma_model, bma_num_models,
                 torch.save(params, f'{bma_save_path}/bma_model-{i}.pt')
             
             res = eval_sabma(te_loader, sabma_model, params, criterion, device, num_bins, eps)
-            if ood_loader is not None:
-                ood_res = eval_sabma(ood_loader, sabma_model, params, criterion, device, num_bins, eps)
 
             if not validation:
                 print(f"SA-BMA Sample {i+1}/{bma_num_models}. Accuracy: {res['accuracy']:.2f}%  NLL: {res['nll']:.4f}")
 
             sabma_logits += res["logits"]
             sabma_predictions += res["predictions"]
-            
-            if ood_loader is not None:
-                ood_sabma_predictions += ood_res["predictions"]
-
+        
             ens_accuracy = np.mean(np.argmax(sabma_predictions, axis=1) == res["targets"]) * 100
             ens_nll = -np.mean(np.log(sabma_predictions[np.arange(sabma_predictions.shape[0]), res["targets"]] / (i + 1) + eps))
             
@@ -368,9 +360,6 @@ def bma_sabma(te_loader, sabma_model, bma_num_models,
 
         sabma_logits /= bma_num_models
         sabma_predictions /= bma_num_models
-        
-        if ood_loader is not None:
-            ood_sabma_predictions /= bma_num_models
 
         sabma_loss = criterion(torch.tensor(sabma_predictions), torch.tensor(res['targets'])).item()
         sabma_accuracy = np.mean(np.argmax(sabma_predictions, axis=1) == res["targets"]) * 100
@@ -378,32 +367,10 @@ def bma_sabma(te_loader, sabma_model, bma_num_models,
         unc = utils.calibration_curve(sabma_predictions, res["targets"], num_bins)
         sabma_ece = unc['ece']
         
-        if ood_loader is not None:
-            ood_sabma_accuracy = np.mean(np.argmax(ood_sabma_predictions, axis=1) == ood_res["targets"]) * 100
-            ood_sabma_nll = -np.mean(np.log(ood_sabma_predictions[np.arange(ood_sabma_predictions.shape[0]), ood_res["targets"]] + eps))
-            ood_sabma_unc = utils.calibration_curve(ood_sabma_predictions, ood_res["targets"], num_bins)
-            ood_sabma_ece = ood_sabma_unc['ece']
-        
     if not validation:
         print(f"bma Accuracy using {bma_num_models} model : {sabma_accuracy:.2f}% / NLL : {sabma_nll:.4f}")
         
-    if ood_loader is not None:    
-        return {"logits" : sabma_logits,
-            "predictions" : sabma_predictions,
-            "targets" : res["targets"],
-            "loss" : sabma_loss,
-            "accuracy" : sabma_accuracy,
-            "nll" : sabma_nll,
-            "ece" : sabma_ece,
-            "ood_predictions" : ood_sabma_predictions,
-            "ood_targets" : ood_res["targets"],
-            "ood_accuracy" : ood_sabma_accuracy,
-            "ood_nll" : ood_sabma_nll,
-            "ood_unc" : ood_sabma_unc,
-            "ood_ece" : ood_sabma_ece
-            }
-    else:
-        return {"logits" : sabma_logits,
+    return {"logits" : sabma_logits,
             "predictions" : sabma_predictions,
             "targets" : res["targets"],
             "loss" : sabma_loss,

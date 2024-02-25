@@ -60,7 +60,7 @@ parser.add_argument(
     default='/data1/lsj9862/data',
     help="path to datasets location",)
 
-parser.add_argument("--batch_size", type=int, default=1024,
+parser.add_argument("--batch_size", type=int, default=2048,
             help="batch size")
 
 parser.add_argument("--num_workers", type=int, default=4,
@@ -69,8 +69,8 @@ parser.add_argument("--num_workers", type=int, default=4,
 parser.add_argument("--use_validation", action='store_true', default=True,
             help ="Use validation for hyperparameter search (Default : False)")
 
-parser.add_argument("--dat_per_cls", type=int, default=-1,
-            help="Number of data points per class in few-shot setting. -1 denotes deactivate few-shot setting (Default : -1)")
+parser.add_argument("--dat_per_cls", type=int, default=10,
+            help="Number of data points per class in few-shot setting. -1 denotes deactivate few-shot setting (Default : 10)")
 
 parser.add_argument("--no_aug", action="store_true", default=False,
             help="Deactivate augmentation")
@@ -148,7 +148,7 @@ args.ignore_wandb = True
 # Load Data --------------------------------------------------------
 data_path_ood = args.data_path
 args.data_path = os.path.join(args.data_path, args.dataset)
-tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
+tr_loader, val_loader, _, num_classes = utils.get_dataset(dataset=args.dataset,
                                                         data_path=args.data_path,
                                                         dat_per_cls=args.dat_per_cls,
                                                         use_validation=args.use_validation,
@@ -213,8 +213,8 @@ elif args.dataset == 'cifar100':
                             num_workers=args.num_workers,
                             is_vit=is_backbone_vit)
 
+
 ### Load Best Model
-print("Load Best Validation Model (Lowest Loss)")
 if args.method != 'sabma':
     state_dict_path = f'{args.load_path}/{method}-{args.optim}_best_val.pt'
     checkpoint = torch.load(state_dict_path)
@@ -245,38 +245,27 @@ elif args.method == 'dnn':
                 new_key = key.replace('backbone.', '')
                 checkpoint[new_key] = checkpoint.pop(key)
             elif 'classifier.' in key:
-                new_key = key.replace('classifier', 'fc')
-                checkpoint[new_key] = checkpoint.pop(key)
+                if 'vit' in args.model:
+                    new_key = key.replace('classifier', 'head')
+                    checkpoint[new_key] = checkpoint.pop(key)
+                elif 'resnet' in args.model:
+                    new_key = key.replace('classifier', 'fc')
+                    checkpoint[new_key] = checkpoint.pop(key)
+                else:
+                    raise NotImplementedError("No code to load this backbone")
         model.load_state_dict(checkpoint)
-    
 else:
     pass
 model.to(args.device)        
-
+print("Load Best Validation Model (Lowest Loss)")
 
 
 if args.method != 'sabma':
     #### MAP
-    ## Unscaled Results
-    res = utils.no_ts_map_estimation(args, te_loader, num_classes, model, mean, variance, criterion)
-    ood_res = utils.no_ts_map_estimation(args, ood_loader, num_classes, model, mean, variance, criterion)
-
-    print(f"1) Unscaled Results:")
-    table = [["Test Accuracy", "Test NLL", "Test Ece"],
+    res = utils.no_ts_map_estimation(args, ood_loader, num_classes, model, mean, variance, criterion)
+    table = [["OOD Accuracy", "OOD NLL", "OOD ECE"],
             [format(res['accuracy'], '.2f'), format(res['nll'], '.4f'), format(res['ece'], '.4f')]]
     print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
-    table = [["OOD Accuracy", "OOD NLL", "OOD ECE"],
-            [format(ood_res['accuracy'], '.2f'), format(ood_res['nll'], '.4f'), format(ood_res['ece'], '.4f')]]
-    print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
-
-    ## Temperature Scaled Results
-    res_ts, temperature = utils.ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, variance, criterion, save=False)
-    print(f"2) Scaled Results:")
-    table = [["Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
-            [format(res_ts['accuracy'], '.2f'), format(res_ts['nll'],'.4f'), format(res_ts['ece'], '.4f'), format(temperature.item(), '.4f')]]
-    print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
-
-
 
     #### Bayesian Model Averaging
     if args.no_save_bma:
@@ -288,23 +277,12 @@ if args.method != 'sabma':
     if args.method in ["swag", "ll_swag", "vi", "ll_vi"]:
         utils.set_seed(args.seed)
         print(f"Start Bayesian Model Averaging with {args.bma_num_models} samples")
-        bma_res, bma_accuracy, bma_nll, bma_ece, bma_accuracy_ts, bma_nll_ts, bma_ece_ts, temperature, bma_ood_accuracy, bma_ood_nll, bma_ood_ece = utils.bma(args, tr_loader, val_loader, ood_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature=None)
+        res, bma_accuracy, bma_nll, bma_ece, bma_accuracy_ts, bma_nll_ts, bma_ece_ts, temperature = utils.bma(args, tr_loader, val_loader, ood_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature=None)
     else:
         pass
 
 
-
 else:
-    ### Get temperature
-    val_res = sabma_utils.bma_sabma(val_loader, model, 1,
-                        num_classes, criterion, args.device,
-                        bma_save_path=None, eps=args.eps, num_bins=args.num_bins,
-                        validation=True, tr_layer=args.tr_layer)
-    scaled_model = ts.ModelWithTemperature(model, ens=True)
-    scaled_model.set_temperature(val_loader, ens_logits=torch.tensor(val_res['logits']), ens_pred=torch.tensor(val_res['targets']))
-    temperature = scaled_model.temperature
-
-
     ### BMA prediction
     if args.no_save_bma:
         bma_save_path  = None
@@ -313,18 +291,19 @@ else:
         os.makedirs(bma_save_path, exist_ok=True)
 
     ## BMA result w/o Ts
-    bma_res = sabma_utils.bma_sabma(te_loader, model, args.bma_num_models,
+    res = sabma_utils.bma_sabma(ood_loader, model, args.bma_num_models,
                         num_classes, criterion, args.device,
                         bma_save_path=bma_save_path, eps=args.eps, num_bins=args.num_bins,
-                        validation=False, tr_layer=args.tr_layer, ood_loader=ood_loader)
-    bma_logits = bma_res["logits"]
-    bma_predictions = bma_res["predictions"]
-    bma_targets = bma_res["targets"]
+                        validation=False, tr_layer=args.tr_layer)
+    
+    bma_logits = res["logits"]
+    bma_predictions = res["predictions"]
+    bma_targets = res["targets"]
 
-    bma_accuracy = bma_res["accuracy"]
-    bma_nll = bma_res["nll"]
+    bma_accuracy = res["accuracy"]
+    bma_nll = res["nll"]
     unc = utils.calibration_curve(bma_predictions, bma_targets, args.num_bins)
-    bma_ece = bma_res['ece']
+    bma_ece = res['ece']
 
     print("[BMA w/o TS Results]\n")
     tab_name = ["# of Models", "BMA Accuracy", "BMA NLL", "BMA ECE"]
@@ -333,57 +312,6 @@ else:
     print(tabulate.tabulate(table, tablefmt="simple"))
     print("-"*30)
 
-    ## OOD result
-    bma_ood_accuracy = bma_res["ood_accuracy"]
-    bma_ood_nll = bma_res["ood_nll"]
-    bma_ood_ece = bma_res["ood_ece"]
-    
-    tab_name = ["# of Models", "OOD BMA Accuracy", "OOD BMA NLL", "OOD BMA ECE"]
-    tab_contents = [args.bma_num_models, format(bma_ood_accuracy, '.2f'), format(bma_ood_nll, '.4f'), format(bma_ood_ece, '.4f')]
-    table = [tab_name, tab_contents]
-    print(tabulate.tabulate(table, tablefmt="simple"))
-    print("-"*30)
-
-
-    ## BMA w/ TS
-    bma_logits = torch.tensor(bma_logits) / temperature.cpu()
-    bma_predictions_ts = F.softmax(bma_logits, dim=1).detach().numpy()
-    bma_accuracy_ts = np.mean(np.argmax(bma_predictions_ts, axis=1) == bma_targets) * 100
-    bma_nll_ts = -np.mean(np.log(bma_predictions_ts[np.arange(bma_predictions_ts.shape[0]), bma_targets] + args.eps))
-    bma_unc_ts = utils.calibration_curve(bma_predictions_ts, bma_targets, args.num_bins)
-    bma_ece_ts = bma_unc_ts['ece']
-    temperature = temperature.cpu().item()
-
-    print("[BMA w/ TS Results]\n")
-    tab_name = ["# of Models", "BMA Accuracy", "BMA NLL", "BMA ECE", "BMA Temperature"]
-    tab_contents = [args.bma_num_models, format(bma_accuracy_ts, '.2f'), format(bma_nll_ts, '.4f'), format(bma_ece_ts, '.4f'), format(temperature, '.4f')]
-    table = [tab_name, tab_contents]
-    print(tabulate.tabulate(table, tablefmt="simple"))
-    print("-"*30)
-
-
-    ## MAP Prediction
-    tr_params, _, _ = model.sample(0, sample_param='tr')
-    frz_params, _, _ = model.sample(0, sample_param='frz')
-    params = sabma_utils.format_weights(tr_params, frz_params, model)
-
-    res = sabma_utils.eval_sabma(te_loader, model, params, criterion, args.device, args.num_bins, args.eps)
-    ood_res = sabma_utils.eval_sabma(ood_loader, model, params, criterion, args.device, args.num_bins, args.eps)
-    unc = utils.calibration_curve(res['predictions'], res['targets'], args.num_bins)
-    te_ece = unc["ece"]
-
-    print("[Best Test Results]\n")
-    tab_name = ["MAP Accuracy", "MAP NLL", "MAP ECE"]
-    tab_contents= [format(res['accuracy'], '.2f'), format(res['nll'], '.4f'), format(te_ece, '.4f')]
-    table = [tab_name, tab_contents]
-    print(tabulate.tabulate(table, tablefmt="simple"))
-    
-    res_ts = dict()
-    res_ts['accuracy'] = None
-    res_ts['nll'] = None
-    res_ts['ece'] = None
-
- 
 if args.corrupt_option == ['brightness.npy','contrast.npy','defocus_blur.npy','elastic_transform.npy','fog.npy',
     'frost.npy','gaussian_blur.npy','gaussian_noise.npy','glass_blur.npy','impulse_noise.npy','jpeg_compression.npy',
     'motion_blur.npy','pixelate.npy','saturate.npy','shot_noise.npy','snow.npy','spatter.npy','speckle_noise.npy','zoom_blur.npy']:
@@ -399,46 +327,14 @@ result_df = pd.DataFrame({"method" : [args.method],
                 "dat_per_cls" : [args.dat_per_cls],
                 "corrupt_option" : [corr],
                 "severity" : [args.severity],
-                "Test Accuracy" : [res['accuracy']],
-                "Test NLL" : [res['nll']],
-                "Test Ece" : [res['ece']],
-                "OOD Accuracy" : [ood_res['accuracy']],
-                "OOD NLL" : [ood_res['nll']],
-                "OOD ECE" : [ood_res['ece']],
-                "Test Accuracy ts" : [res_ts['accuracy']],
-                "Test NLL ts" : [res_ts['nll']],
-                "Test Ece ts" : [res_ts['ece']],
+                "OOD Accuracy" : [res['accuracy']],
+                "OOD NLL" : [res['nll']],
+                "OOD ECE" : [res['ece']],
                 })
 
 
 if method == 'ptl':
     args.method = 'ptl'
 
-if args.method in ["dnn", "ptl"]:
-    bma_accuracy = None
-    bma_nll = None
-    bma_ece = None
-    bma_accuracy_ts = None
-    bma_nll_ts = None
-    bma_ece_ts = None
-    bma_ood_accuracy = None
-    bma_ood_nll = None
-    bma_ood_ece = None
-
-try:
-    temperature = temperature.cpu().detach().numpy()
-except:
-    pass
     
-result_df["BMA Accuracy"] = bma_accuracy
-result_df["BMA NLL"] = bma_nll
-result_df["BMA ECE"] = bma_ece
-result_df["BMA Accuracy ts"] = bma_accuracy_ts
-result_df["BMA NLL ts"] = bma_nll_ts
-result_df["BMA ECE ts"] = bma_ece_ts
-result_df["temperature"] = temperature
-result_df["BMA OOD Accuracy"] = bma_ood_accuracy
-result_df["BMA OOD NLL"] = bma_ood_nll
-result_df["BMA OOD ECE"] = bma_ood_ece
-
 save_to_csv_accumulated(result_df, args.save_path)

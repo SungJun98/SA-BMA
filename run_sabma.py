@@ -185,7 +185,6 @@ if not args.ignore_wandb:
 #----------------------------------------------------------------
 
 # Load Data --------------------------------------------------------
-data_path_ood = args.data_path
 args.data_path = os.path.join(args.data_path, args.dataset)
 tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
                                                         data_path=args.data_path,
@@ -321,7 +320,7 @@ for epoch in range(start_epoch, int(args.epochs)+1):
         val_res = sabma_utils.bma_sabma(val_loader, sabma_model, args.val_mc_num,
                             num_classes, criterion, args.device,
                             bma_save_path=None, eps=1e-8, num_bins=50,
-                            validation=True, tr_layer=args.tr_layer, ood_loader=None
+                            validation=True, tr_layer=args.tr_layer
                             )
 
     time_ep = time.time() - time_ep
@@ -400,7 +399,7 @@ sabma_model.to(args.device)
 val_res = sabma_utils.bma_sabma(val_loader, sabma_model, 1,
                     num_classes, criterion, args.device,
                     bma_save_path=None, eps=args.eps, num_bins=args.num_bins,
-                    validation=False, tr_layer=args.tr_layer, ood_loader=None)
+                    validation=False, tr_layer=args.tr_layer)
 scaled_model = ts.ModelWithTemperature(sabma_model, ens=True)
 scaled_model.set_temperature(val_loader, ens_logits=torch.tensor(val_res['logits']), ens_pred=torch.tensor(val_res['targets']))
 bma_temperature = scaled_model.temperature
@@ -417,7 +416,7 @@ else:
 bma_res = sabma_utils.bma_sabma(te_loader, sabma_model, args.bma_num_models,
                     num_classes, criterion, args.device,
                     bma_save_path=bma_save_path, eps=args.eps, num_bins=args.num_bins,
-                    validation=False, tr_layer=args.tr_layer, ood_loader=None)
+                    validation=False, tr_layer=args.tr_layer)
 bma_logits = bma_res["logits"]
 bma_predictions = bma_res["predictions"]
 bma_targets = bma_res["targets"]
