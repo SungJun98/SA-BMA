@@ -804,7 +804,12 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
         table = [["Num BMA models", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
                 [args.bma_num_models, format(bma_accuracy_ts, '.4f'), format(bma_nll_ts, '.4f'), format(bma_ece_ts, '.4f'), format(temperature.item(), '.4f')]]
         print(tabulate.tabulate(table, tablefmt="simple"))
-    
+    else:
+        bma_accuracy_ts = 0.0
+        bma_nll_ts = 0.0
+        bma_ece_ts = 0.0
+        temperature = torch.tensor(1.0)
+
     if not args.ignore_wandb:
         wandb.run.summary['bma accuracy'] = bma_accuracy
         wandb.run.summary['bma nll'] = bma_nll
