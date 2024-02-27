@@ -175,18 +175,26 @@ print("-"*30)
 ## Test ------------------------------------------------------------------------------------------------------
 ##### Get test nll, Entropy, ece, Reliability Diagram on best model
 ## Load Distributional shifted data
+if args.model == 'vitb16-i21k':
+    is_backbone_vit = True
+else:
+    is_backbone_vit = False
+
 if args.dataset == 'cifar10':
     ood_loader = data.corrupted_cifar10(data_path=data_path_ood,
                             corrupt_option=args.corrupt_option,
                             severity=args.severity,
                             batch_size=args.batch_size, 
-                            num_workers=args.num_workers)
+                            num_workers=args.num_workers,
+                            is_vit=is_backbone_vit)
 elif args.dataset == 'cifar100':
         ood_loader = data.corrupted_cifar100(data_path=data_path_ood,
                             corrupt_option=args.corrupt_option,
                             severity=args.severity,
                             batch_size=args.batch_size, 
-                            num_workers=args.num_workers)
+                            num_workers=args.num_workers,
+                            is_vit=is_backbone_vit)
+
 
 ### Load Best Model
 print("Load Best Validation Model (Lowest Loss)")
@@ -249,33 +257,16 @@ else:
     corr = args.corrupt_option
         
 
-result_df = pd.DataFrame({"method" : ['emcmc'],
-                "optim" : ['sgld'],
+result_df = pd.DataFrame({"method" : [args.method],
+                "optim" : [args.optim],
+                "seed" : [args.seed],
                 "dataset" : [args.dataset],
                 "dat_per_cls" : [args.dat_per_cls],
                 "corrupt_option" : [corr],
                 "severity" : [args.severity],
-                "Test Accuracy" : [0.0],
-                "Test NLL" : [0.0],
-                "Test Ece" : [0.0],
-                "OOD Accuracy" : [0.0],
-                "OOD NLL" : [0.0],
-                "OOD ECE" : [0.0],
-                "Test Accuracy ts" : [0.0],
-                "Test NLL ts" : [0.0],
-                "Test Ece ts" : [0.0],
+                "OOD Accuracy" : [bma_accuracy],
+                "OOD NLL" : [bma_nll],
+                "OOD ECE" : [bma_ece],
                 })
-
-    
-result_df["BMA Accuracy"] = 0.0
-result_df["BMA NLL"] = 0.0
-result_df["BMA ECE"] = 0.0
-result_df["BMA Accuracy ts"] = 0.0
-result_df["BMA NLL ts"] = 0.0
-result_df["BMA ECE ts"] = 0.0
-result_df["temperature"] = 0.0
-result_df["BMA OOD Accuracy"] = bma_accuracy
-result_df["BMA OOD NLL"] = bma_nll
-result_df["BMA OOD ECE"] = bma_ece
 
 save_to_csv_accumulated(result_df, args.save_path)

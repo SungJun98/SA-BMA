@@ -790,30 +790,32 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
     print(tabulate.tabulate(table, tablefmt="simple"))
     
     ## Adjust temperature scaling on bma logits
-    bma_logits_ts = torch.tensor(bma_logits) / temperature.cpu()
-    bma_predictions_ts = F.softmax(bma_logits_ts, dim=1).detach().numpy()
+    if temperature is not None:
+        bma_logits_ts = torch.tensor(bma_logits) / temperature.cpu()
+        bma_predictions_ts = F.softmax(bma_logits_ts, dim=1).detach().numpy()
+        
+        bma_accuracy_ts = np.mean(np.argmax(bma_predictions_ts, axis=1) == bma_targets) * 100
+        bma_nll_ts = -np.mean(np.log(bma_predictions_ts[np.arange(bma_predictions_ts.shape[0]), bma_targets] + args.eps))
+        bma_unc_ts = calibration_curve(bma_predictions_ts, bma_targets, args.num_bins)
+        bma_ece_ts = bma_unc_ts['ece']
     
-    bma_accuracy_ts = np.mean(np.argmax(bma_predictions_ts, axis=1) == bma_targets) * 100
-    bma_nll_ts = -np.mean(np.log(bma_predictions_ts[np.arange(bma_predictions_ts.shape[0]), bma_targets] + args.eps))
-    bma_unc_ts = calibration_curve(bma_predictions_ts, bma_targets, args.num_bins)
-    bma_ece_ts = bma_unc_ts['ece']
     
-    
-    print(f"4) Calibrated BMA Results:")
-    table = [["Num BMA models", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
-            [args.bma_num_models, format(bma_accuracy_ts, '.4f'), format(bma_nll_ts, '.4f'), format(bma_ece_ts, '.4f'), format(temperature.item(), '.4f')]]
-    print(tabulate.tabulate(table, tablefmt="simple"))
+        print(f"4) Calibrated BMA Results:")
+        table = [["Num BMA models", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
+                [args.bma_num_models, format(bma_accuracy_ts, '.4f'), format(bma_nll_ts, '.4f'), format(bma_ece_ts, '.4f'), format(temperature.item(), '.4f')]]
+        print(tabulate.tabulate(table, tablefmt="simple"))
     
     if not args.ignore_wandb:
         wandb.run.summary['bma accuracy'] = bma_accuracy
         wandb.run.summary['bma nll'] = bma_nll
         wandb.run.summary['bma ece'] = bma_ece
-    
-        wandb.run.summary['bma accuracy w/ ts'] = bma_accuracy_ts
-        wandb.run.summary['bma nll w/ ts'] = bma_nll_ts
-        wandb.run.summary['bma ece w/ ts'] = bma_ece_ts
-        wandb.run.summary['bma temperature'] = temperature.item()
-    
+
+        if temperature is not None:
+            wandb.run.summary['bma accuracy w/ ts'] = bma_accuracy_ts
+            wandb.run.summary['bma nll w/ ts'] = bma_nll_ts
+            wandb.run.summary['bma ece w/ ts'] = bma_ece_ts
+            wandb.run.summary['bma temperature'] = temperature.item()
+        
     # if not bma_save_path is not None:    
     #     save_reliability_diagram(args.method, args.optim, args.save_path, bma_res['unc'], True)
     
