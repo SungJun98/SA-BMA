@@ -15,7 +15,7 @@ for warmup_t in 10 20
 do
 for noise_scale in 1e-2 1e-3 1e-4
 do
-CUDA_VISIBLE_DEVICES=2 python3 run_baseline.py --method=dnn --optim=bsam --rho=${rho} --dataset=cifar100 --use_validation --dat_per_cls=10 \
+CUDA_VISIBLE_DEVICES=0 python3 run_baseline.py --method=dnn --optim=bsam --rho=${rho} --dataset=cifar100 --use_validation --dat_per_cls=10 \
 --model=vitb16-i1k --pre_trained  --lr_init=${lr_init} --epochs=150 --wd=${wd} --noise_scale=${noise_scale} \
 --scheduler=cos_decay --no_amp --warmup_t=${warmup_t}
 done
