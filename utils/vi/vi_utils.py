@@ -30,6 +30,17 @@ def get_vi_variance_vector(model):
     return flatten(var_list)
 
 
+def get_s_vector(optimizer):
+    """
+    Get (Diagonal) Variance Parameters in Variatioanl Inference model
+    """
+    var_list = []
+    for group in optimizer.param_groups:
+        for p in group["params"]:
+            var_list.append(optimizer.state[p]["s"].cpu())
+    return flatten(var_list)
+
+
 def make_ll_vi(args, model):
     from bayesian_torch.models.dnn_to_bnn import dnn_to_bnn
     bayesian_last_layer = torch.nn.Sequential(list(model.children())[-1])
@@ -62,7 +73,10 @@ def save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_sc
     mean = get_vi_mean_vector(model)
     torch.save(mean,f'{args.save_path}/{args.method}-{args.optim}_best_val_mean.pt')
     
-    variance = get_vi_variance_vector(model)
+    if args.optim == "bsam":
+        variance = get_s_vector(optimizer)
+    else:
+        variance = get_vi_variance_vector(model)
     torch.save(variance, f'{args.save_path}/{args.method}-{args.optim}_best_val_variance.pt')
     
     return mean, variance

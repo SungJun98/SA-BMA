@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from utils.sam import sam, sam_utils
-from utils.bsam import bsam
+from utils.bsam import bsam, bsam_utils
 from utils.swag import swag_utils
 from utils.vi import vi_utils
 from utils import temperature_scaling as ts
@@ -678,7 +678,7 @@ def load_best_model(args, model, swag_model, num_classes):
         swag_model.load_state_dict(checkpoint["state_dict"])
         model = swag_model
         
-    elif args.method in ["vi", "ll_vi"]:
+    elif args.method in ["vi", "ll_vi"] or args.optim=="bsam":
         model = get_backbone(args.model, num_classes, args.device, args.pre_trained)
         if args.method == "ll_vi":
             vi_utils.make_ll_vi(args, model)
@@ -741,6 +741,8 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
             bma_res = swag_utils.bma_swag(tr_loader, val_loader, te_loader, model, num_classes, criterion, bma_temperature, args.bma_num_models, bma_save_path, args.eps, args.batch_norm, num_bins=args.num_bins)
         elif args.method in ["vi", "ll_vi"]:
             bma_res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
+        elif args.optim in ["bsam"]:
+            bma_res = bsam_utils.bma_bsam(args, val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
         else:
             raise NotImplementedError("Add code for Bayesian Model Averaging for this method")
         

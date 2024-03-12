@@ -130,43 +130,43 @@ parser.add_argument("--warmup_lr_init", type=float, default=1e-7,
                 help="Linear warmup initial learning rate. (Cosine Annealing Warmup Restarts)")
 #----------------------------------------------------------------
 
-## SWAG ---------------------------------------------------------
-parser.add_argument("--swa_start", type=int, default=161, help="Start epoch of SWAG")
-parser.add_argument("--swa_lr", type=float, default=0.05, help="Learning rate for SWAG")
-parser.add_argument("--diag_only", action="store_true", default=False, help="Calculate only diagonal covariance")
-parser.add_argument("--swa_c_epochs", type=int, default=1, help="Cycle to calculate SWAG statistics")
-parser.add_argument("--max_num_models", type=int, default=3, help="Number of models to get SWAG statistics")
+# ## SWAG ---------------------------------------------------------
+# parser.add_argument("--swa_start", type=int, default=161, help="Start epoch of SWAG")
+# parser.add_argument("--swa_lr", type=float, default=0.05, help="Learning rate for SWAG")
+# parser.add_argument("--diag_only", action="store_true", default=False, help="Calculate only diagonal covariance")
+# parser.add_argument("--swa_c_epochs", type=int, default=1, help="Cycle to calculate SWAG statistics")
+# parser.add_argument("--max_num_models", type=int, default=3, help="Number of models to get SWAG statistics")
 
-parser.add_argument("--swag_resume", type=str, default=None,
-    help="path to load saved swag model to resume training (default: None)",)
-#----------------------------------------------------------------
+# parser.add_argument("--swag_resume", type=str, default=None,
+#     help="path to load saved swag model to resume training (default: None)",)
+# #----------------------------------------------------------------
 
-## VI ---------------------------------------------------------
-parser.add_argument("--vi_prior_mu", type=float, default=0.0,
-                help="Set prior mean for variational ineference (Default: 0.0)")
-parser.add_argument("--vi_prior_sigma", type=float, default=1.0,
-                help="Set prior variance for variational inference (Default: 1.0)")
-parser.add_argument("--vi_posterior_mu_init", type=float, default=0.0,
-                help="Set posterior mean initialization for variatoinal inference (Default: 0.0)")
-parser.add_argument("--vi_posterior_rho_init", type=float, default=-3.0,
-                help="Set perturbation on posterior mean for variational inference (Default: -3.0)")
-parser.add_argument("--vi_type", type=str, default="Reparameterization", choices=["Reparameterization", "Flipout"],
-                help="Set type of variational inference (Default: Reparameterization)")
-parser.add_argument("--vi_moped_delta", type=float, default=0.2,
-                help="Set initial perturbation factor for weight in MOPED framework (Default: 0.2)")
-parser.add_argument("--kl_beta", type=float, default=1.0,
-                help="Hyperparameter to adjust kld term on vi loss function (Default: 1.0)")
-#----------------------------------------------------------------
+# ## VI ---------------------------------------------------------
+# parser.add_argument("--vi_prior_mu", type=float, default=0.0,
+#                 help="Set prior mean for variational ineference (Default: 0.0)")
+# parser.add_argument("--vi_prior_sigma", type=float, default=1.0,
+#                 help="Set prior variance for variational inference (Default: 1.0)")
+# parser.add_argument("--vi_posterior_mu_init", type=float, default=0.0,
+#                 help="Set posterior mean initialization for variatoinal inference (Default: 0.0)")
+# parser.add_argument("--vi_posterior_rho_init", type=float, default=-3.0,
+#                 help="Set perturbation on posterior mean for variational inference (Default: -3.0)")
+# parser.add_argument("--vi_type", type=str, default="Reparameterization", choices=["Reparameterization", "Flipout"],
+#                 help="Set type of variational inference (Default: Reparameterization)")
+# parser.add_argument("--vi_moped_delta", type=float, default=0.2,
+#                 help="Set initial perturbation factor for weight in MOPED framework (Default: 0.2)")
+# parser.add_argument("--kl_beta", type=float, default=1.0,
+#                 help="Hyperparameter to adjust kld term on vi loss function (Default: 1.0)")
+# #----------------------------------------------------------------
 
-## LA -----------------------------------------------------------
-parser.add_argument("--la_pt_model", type=str, default=None,
-    help="path to load pre-trained DNN model on downstream task (Default: None)",)
-#----------------------------------------------------------------
+# ## LA -----------------------------------------------------------
+# parser.add_argument("--la_pt_model", type=str, default=None,
+#     help="path to load pre-trained DNN model on downstream task (Default: None)",)
+# #----------------------------------------------------------------
 
 ## bma or metrics -----------------------------------------------
 parser.add_argument("--val_mc_num", type=int, default=1, help="number of MC sample in validation phase")
 parser.add_argument("--eps", type=float, default=1e-8, help="small float to calculate nll")
-parser.add_argument("--bma_num_models", type=int, default=32, help="Number of models for bma")
+parser.add_argument("--bma_num_models", type=int, default=30, help="Number of models for bma")
 parser.add_argument("--num_bins", type=int, default=15, help="bin number for ece")
 parser.add_argument("--no_save_bma", action='store_true', default=False,
             help="Deactivate saving model samples in BMA")
@@ -206,7 +206,7 @@ print("-"*30)
 #------------------------------------------------------------------
 
 # Set BMA and Save Setting-----------------------------------------
-if args.method == 'dnn' and args.optim != 'bsam':
+if args.method == 'dnn':
     args.bma_num_models = 1
 
 args.save_path = utils.set_save_path(args)
@@ -241,59 +241,59 @@ print("-"*30)
 
 # Define Model-----------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
-if args.linear_probe or args.method in ["last_swag", "last_vi"]:
-    utils.freeze_fe(model)
+# if args.linear_probe or args.method in ["last_swag", "last_vi"]:
+#     utils.freeze_fe(model)
 
 
-swag_model=None
-if args.method == "swag":
-    swag_model = swag.SWAG(copy.deepcopy(model),
-                        no_cov_mat=args.diag_only,
-                        max_num_models=args.max_num_models,
-                        last_layer=False).to(args.device)
-    print("Preparing SWAG model")
-elif args.method == "ll_swag":
-    swag_model = swag.SWAG(copy.deepcopy(model),
-                        no_cov_mat=args.diag_only,
-                        max_num_models=args.max_num_models,
-                        last_layer=True).to(args.device)
-    print("Preparing Last-SWAG model")
-elif args.method == "vi":
-    from bayesian_torch.models.dnn_to_bnn import dnn_to_bnn
-    const_bnn_prior_parameters = {
-        "prior_mu": args.vi_prior_mu,
-        "prior_sigma": args.vi_prior_sigma,
-        "posterior_mu_init": args.vi_posterior_mu_init,
-        "posterior_rho_init": args.vi_posterior_rho_init,
-        "type": args.vi_type,
-        "moped_enable": True,
-        "moped_delta": args.vi_moped_delta,
-    }
-    dnn_to_bnn(model, const_bnn_prior_parameters)
-    model.to(args.device)
-    print(f"Preparing Model for {args.vi_type} VI with MOPED ")
+# swag_model=None
+# if args.method == "swag":
+#     swag_model = swag.SWAG(copy.deepcopy(model),
+#                         no_cov_mat=args.diag_only,
+#                         max_num_models=args.max_num_models,
+#                         last_layer=False).to(args.device)
+#     print("Preparing SWAG model")
+# elif args.method == "ll_swag":
+#     swag_model = swag.SWAG(copy.deepcopy(model),
+#                         no_cov_mat=args.diag_only,
+#                         max_num_models=args.max_num_models,
+#                         last_layer=True).to(args.device)
+#     print("Preparing Last-SWAG model")
+# elif args.method == "vi":
+#     from bayesian_torch.models.dnn_to_bnn import dnn_to_bnn
+#     const_bnn_prior_parameters = {
+#         "prior_mu": args.vi_prior_mu,
+#         "prior_sigma": args.vi_prior_sigma,
+#         "posterior_mu_init": args.vi_posterior_mu_init,
+#         "posterior_rho_init": args.vi_posterior_rho_init,
+#         "type": args.vi_type,
+#         "moped_enable": True,
+#         "moped_delta": args.vi_moped_delta,
+#     }
+#     dnn_to_bnn(model, const_bnn_prior_parameters)
+#     model.to(args.device)
+#     print(f"Preparing Model for {args.vi_type} VI with MOPED ")
 
-elif args.method == "ll_vi":
-    vi_utils.make_last_vi(args, model)
-    print(f"Preparing Model for last-layer {args.vi_type} VI with MOPED ")
+# elif args.method == "ll_vi":
+#     vi_utils.make_last_vi(args, model)
+#     print(f"Preparing Model for last-layer {args.vi_type} VI with MOPED ")
     
-elif args.method == "la":
-    model.load_state_dict(args.la_pt_model)
-    from laplace import Laplace
-    from laplace.curvature import AsdlGGN
-    la = Laplace(model, 'classification',
-            subset_of_weights='all',
-            hessian_structure='diag',
-            backend=AsdlGGN)
-    la.fit(tr_loader)
+# elif args.method == "la":
+#     model.load_state_dict(args.la_pt_model)
+#     from laplace import Laplace
+#     from laplace.curvature import AsdlGGN
+#     la = Laplace(model, 'classification',
+#             subset_of_weights='all',
+#             hessian_structure='diag',
+#             backend=AsdlGGN)
+#     la.fit(tr_loader)
 
-elif args.method == "ll_la":
-    model.load_state_dict(args.la_pt_model)
-    from laplace import Laplace
-    la = Laplace(model, 'classification',
-             subset_of_weights='last_layer',
-             hessian_structure='diag')
-    la.fit(tr_loader)
+# elif args.method == "ll_la":
+#     model.load_state_dict(args.la_pt_model)
+#     from laplace import Laplace
+#     la = Laplace(model, 'classification',
+#              subset_of_weights='last_layer',
+#              hessian_structure='diag')
+#     la.fit(tr_loader)
 
 print("-"*30)
 #-------------------------------------------------------------------
@@ -484,7 +484,7 @@ if args.method not in ["la", "ll_la"]:
 
                 # save state_dict
                 os.makedirs(args.save_path, exist_ok=True)
-                if args.method in ["vi", "ll_vi"] or args.optim=="bsam":
+                if args.method in ["vi", "ll_vi"]:
                     mean, variance = vi_utils.save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
                 elif args.method == "dnn":
                     utils.save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
@@ -536,14 +536,11 @@ if not args.ignore_wandb:
     wandb.run.summary['test nll'] = res['nll']
     wandb.run.summary["test ece"]  = res['ece']
 
+    
 
 #### Bayesian Model Averaging
-if args.method in ["swag", "ll_swag", "vi", "ll_vi"] or args.optim=="bsam":
-    utils.set_seed(args.seed)
-    bma_save_path = f"{args.save_path}/bma_models"
-    os.makedirs(bma_save_path, exist_ok=True) 
-    print(f"Start Bayesian Model Averaging with {args.bma_num_models} samples")
-    utils.bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature)
-else:
-    pass
-
+utils.set_seed(args.seed)
+bma_save_path = f"{args.save_path}/bma_models"
+os.makedirs(bma_save_path, exist_ok=True) 
+print(f"Start Bayesian Model Averaging with {args.bma_num_models} samples")
+utils.bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature)

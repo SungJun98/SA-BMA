@@ -1,8 +1,9 @@
+# conda activate /data1/lsj9862/miniconda3/envs/bsam
 for seed in 0 # 1 2
 do
 CUDA_VISIBLE_DEVICES=2 python3 run_baseline.py --method=dnn --optim=bsam --dataset=cifar100 --use_validation --dat_per_cls=10 \
---model=resnet18 --pre_trained --lr_init=5e-1 --wd=1e-4 --epochs=100 --seed=${seed} --ignore_wandb --rho=0.001 \
---scheduler=cos_decay --lr_min=1e-8 --warmup_t=20 --warmup_lr_init=1e-7 --no_amp --noise_scale=1e-5
+--model=resnet18 --pre_trained --lr_init=1 --wd=1e-2 --epochs=150 --seed=${seed} --ignore_wandb --rho=0.01 \
+--scheduler=cos_decay --lr_min=1e-8 --warmup_t=10 --warmup_lr_init=1e-7 --no_amp --noise_scale=1e-2 --momentum=0.95 --tol=100
 done
 
 # ------------------------------
