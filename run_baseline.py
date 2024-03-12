@@ -168,6 +168,8 @@ parser.add_argument("--val_mc_num", type=int, default=1, help="number of MC samp
 parser.add_argument("--eps", type=float, default=1e-8, help="small float to calculate nll")
 parser.add_argument("--bma_num_models", type=int, default=32, help="Number of models for bma")
 parser.add_argument("--num_bins", type=int, default=15, help="bin number for ece")
+parser.add_argument("--no_bma", action='store_true', default=False,
+            help="skip BMA (just for debug / sweep, time-saving)")
 parser.add_argument("--no_save_bma", action='store_true', default=False,
             help="Deactivate saving model samples in BMA")
 #----------------------------------------------------------------
@@ -539,6 +541,8 @@ if not args.ignore_wandb:
 
 #### Bayesian Model Averaging
 if args.method in ["swag", "ll_swag", "vi", "ll_vi"] or args.optim=="bsam":
+    if no_bma:
+        pass
     utils.set_seed(args.seed)
     bma_save_path = f"{args.save_path}/bma_models"
     os.makedirs(bma_save_path, exist_ok=True) 
