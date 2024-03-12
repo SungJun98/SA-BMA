@@ -742,7 +742,7 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
         elif args.method in ["vi", "ll_vi"]:
             bma_res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
         elif args.optim in ["bsam"]:
-            bma_res = bsam_utils.bma_bsam(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
+            bma_res = bsam_utils.bma_bsam(args, val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, bma_temperature, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
         else:
             raise NotImplementedError("Add code for Bayesian Model Averaging for this method")
         

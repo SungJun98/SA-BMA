@@ -6,7 +6,7 @@ import utils.utils as utils
 from bayesian_torch.models.dnn_to_bnn import get_kl_loss
 from utils import temperature_scaling as ts
 
-def bma_bsam(val_loader, te_loader, mean, variance, model, method, criterion, num_classes, temperature=None, bma_num_models=32,  bma_save_path=None, num_bins=15, eps=1e-8):
+def bma_bsam(args, val_loader, te_loader, mean, variance, model, method, criterion, num_classes, temperature=None, bma_num_models=32,  bma_save_path=None, num_bins=15, eps=1e-8):
     '''
     run bayesian model averaging in test step
     '''
@@ -18,7 +18,8 @@ def bma_bsam(val_loader, te_loader, mean, variance, model, method, criterion, nu
     tr_layer = "full_layer"
     tr_layer_name = None
     
-        
+    Ndata = num_classes * args.dat_per_cls
+
     bma_logits = np.zeros((len(te_loader.dataset), num_classes))
     bma_predictions = np.zeros((len(te_loader.dataset), num_classes))
     with torch.no_grad():
@@ -26,7 +27,7 @@ def bma_bsam(val_loader, te_loader, mean, variance, model, method, criterion, nu
             if i == 0:
                sample = mean
             else:
-                sample = mean + variance * torch.randn_like(variance, requires_grad=False)
+                sample = mean + args.noise_scale * torch.sqrt(1.0 / (Ndata * variance)) * torch.randn_like(variance, requires_grad=False)
             sample = utils.unflatten_like_size(sample, model_shape)
             sample = utils.list_to_state_dict(model, sample, tr_layer, tr_layer_name)
             model.load_state_dict(sample, strict=False)
