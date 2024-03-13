@@ -4,10 +4,10 @@ class bSAM(torch.optim.Optimizer):
     def __init__(self, params, Ndata, lr=1e-3, betas=(0.9, 0.999), 
                  rho=0.05, s_init=1, damping=0.1, weight_decay=0,
                  noise_scale=1e-4, **kwargs): 
-        defaults = dict(Ndata=Ndata, rho=rho, betas=betas, s_init=s_init,
+        defaults = dict(Ndata=Ndata, rho=rho, betas=betas, s_init=s_init, delta=weight_decay,
                         damping=damping, lr=lr, noise_scale=noise_scale, **kwargs)
         super(bSAM, self).__init__(params, defaults) 
-        self.gamma = weight_decay
+        self.gamma = damping
         for group in self.param_groups:
             s_init = group["s_init"]
             for p in group["params"]:
@@ -80,8 +80,8 @@ class bSAM(torch.optim.Optimizer):
                 beta1, beta2 = group["betas"]
 
                 # Decay the first and second moment running average coefficient
-                self.state[p]["gm"].mul_(beta1).add_(p.grad+group['damping']*p, alpha=1-beta1)
-                self.state[p]["s"].mul_(beta2).add_(gs+group['damping']+self.gamma)
+                self.state[p]["gm"].mul_(beta1).add_(p.grad+group['delta']*p, alpha=1-beta1)
+                self.state[p]["s"].mul_(beta2).add_(gs+group['delta']+self.gamma)
 
                 gm = self.state[p]["gm"]
                 s = self.state[p]["s"]
