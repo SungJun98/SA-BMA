@@ -81,7 +81,7 @@ parser.add_argument(
     "--model",
     type=str, default='resnet18', required=True,
     choices=['resnet18', 'resnet50', 'resnet101',
-            'resnet18-noBN', "vitb16-i21k"],
+            'resnet18-noBN', "vitb16-i1k", "vitb16-i21k"],
     help="model name (default : resnet18)")
 
 parser.add_argument(
@@ -193,7 +193,7 @@ if args.method == 'ptl':
 ## Test ------------------------------------------------------------------------------------------------------
 ##### Get test nll, Entropy, ece, Reliability Diagram on best model
 ## Load Distributional shifted data
-if args.model == 'vitb16-i21k':
+if args.model in ['vitb16-i1k', 'vitb16-i21k']:
     is_backbone_vit = True
 else:
     is_backbone_vit = False
@@ -206,7 +206,7 @@ if args.dataset == 'cifar10':
                             num_workers=args.num_workers,
                             is_vit=is_backbone_vit)
 elif args.dataset == 'cifar100':
-        ood_loader = data.corrupted_cifar100(data_path=data_path_ood,
+    ood_loader = data.corrupted_cifar100(data_path=data_path_ood,
                             corrupt_option=args.corrupt_option,
                             severity=args.severity,
                             batch_size=args.batch_size, 
@@ -245,8 +245,11 @@ elif args.method == 'dnn':
                 new_key = key.replace('backbone.', '')
                 checkpoint[new_key] = checkpoint.pop(key)
             elif 'classifier.' in key:
-                if 'vit' in args.model:
+                if 'vitb16-i21k' in args.model:
                     new_key = key.replace('classifier', 'head')
+                    checkpoint[new_key] = checkpoint.pop(key)
+                elif 'vitb16-i1k' in args.model:
+                    new_key = key.replace('classifier', 'heads.head')
                     checkpoint[new_key] = checkpoint.pop(key)
                 elif 'resnet' in args.model:
                     new_key = key.replace('classifier', 'fc')
@@ -318,7 +321,9 @@ if args.corrupt_option == ['brightness.npy','contrast.npy','defocus_blur.npy','e
     corr = 'all'
 else:
     corr = args.corrupt_option
-        
+  
+if method == 'ptl':
+    args.method = 'ptl'      
 
 result_df = pd.DataFrame({"method" : [args.method],
                 "optim" : [args.optim],
@@ -331,10 +336,5 @@ result_df = pd.DataFrame({"method" : [args.method],
                 "OOD NLL" : [res['nll']],
                 "OOD ECE" : [res['ece']],
                 })
-
-
-if method == 'ptl':
-    args.method = 'ptl'
-
-    
+   
 save_to_csv_accumulated(result_df, args.save_path)

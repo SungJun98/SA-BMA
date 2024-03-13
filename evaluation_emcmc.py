@@ -81,7 +81,7 @@ parser.add_argument(
     "--model",
     type=str, default='resnet18', required=True,
     choices=['resnet18', 'resnet50', 'resnet101',
-            'resnet18-noBN', "vitb16-i21k"],
+            'resnet18-noBN', "vitb16-i1k", "vitb16-i21k"],
     help="model name (default : resnet18)")
 
 parser.add_argument(

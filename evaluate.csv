@@ -1,2 +1,0 @@
-method,optim,seed,dataset,dat_per_cls,corrupt_option,severity,OOD Accuracy,OOD NLL,OOD ECE
-dnn,sgd,0,cifar10,10,all,1,11.73,2.425945,0.07743834840451416
