@@ -380,6 +380,7 @@ if args.method not in ["la", "ll_la"]:
 
 
     best_val_loss=9999 ; best_val_acc=0 ; best_epoch=0 ; cnt=0; swag_cnt = 0; best_swag_val_loss=9999
+    args.epochs = 400
     for epoch in range(start_epoch, int(args.epochs)+1):
         time_ep = time.time()
 
@@ -541,7 +542,7 @@ if not args.ignore_wandb:
 
 #### Bayesian Model Averaging
 if args.method in ["swag", "ll_swag", "vi", "ll_vi"] or args.optim=="bsam":
-    if no_bma:
+    if args.no_bma:
         pass
     utils.set_seed(args.seed)
     bma_save_path = f"{args.save_path}/bma_models"
