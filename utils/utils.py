@@ -228,7 +228,7 @@ def get_optimizer(args, model, num_classes=10):
             args.dat_per_cls = 5000 if args.dataset == 'cifar10' else 500
         optimizer = bsam.bSAM(optim_param, Ndata=num_classes * args.dat_per_cls, lr=args.lr_init, 
                             betas=(args.momentum, args.beta2), weight_decay=args.wd, rho=args.rho,
-                            noise_scale=args.noise_scale)
+                            noise_scale=args.noise_scale, s_init=args.s_init, damping=args.damping)
         
     return optimizer
 
