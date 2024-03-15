@@ -228,8 +228,8 @@ class CIFAR10_C(torch.utils.data.Dataset):
         return self.transform(img),target
 
 
-def corrupted_cifar10(data_path='/data1/lsj9862/data', corrupt_option=corrupt_types, severity=1, batch_size=1024, num_workers=4, is_vit=False):
-    if is_vit:
+def corrupted_cifar10(data_path='/data1/lsj9862/data', corrupt_option=corrupt_types, severity=1, batch_size=1024, num_workers=4, resize=True):
+    if resize:
         tfs = [
             transforms.ToTensor(),
             transforms.Resize(224),
@@ -283,8 +283,8 @@ class CIFAR100_C(torch.utils.data.Dataset):
         return self.transform(img),target
 
 
-def corrupted_cifar100(data_path='/data1/lsj9862/data', corrupt_option=corrupt_types, severity=1, batch_size=1024, num_workers=4, is_vit=False):
-    if is_vit:
+def corrupted_cifar100(data_path='/data1/lsj9862/data', corrupt_option=corrupt_types, severity=1, batch_size=1024, num_workers=4, resize=True):
+    if resize:
         tfs = [
             transforms.ToTensor(),
             transforms.Resize(224),
