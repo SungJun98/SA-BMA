@@ -26,7 +26,7 @@ parser.add_argument(
 parser.add_argument(
     "--data_path",
     type=str,
-    default='/data1/lsj9862/data/cifar10',
+    default='/data1/lsj9862/data/',
     help="path to datasets location (default: None)",)
 
 parser.add_argument("--batch_size", type=int, default = 256,
@@ -151,12 +151,12 @@ else:
 
 ## Define Model--------------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
-last_layer_name = None
-if args.last_layer:
-    # Get last layer name
-    for name, mod in model.named_modules():
-        model = mod
-        last_layer_name = name
+# last_layer_name = None
+# if args.last_layer:
+#     # Get last layer name
+#     for name, mod in model.named_modules():
+#         model = mod
+#         last_layer_name = name
 #----------------------------------------------------------------------------
 
 ## Load Model ---------------------------------------------------------------

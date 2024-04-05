@@ -225,7 +225,7 @@ print("-"*30)
 
 # Define Model-----------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
-if args.linear_probe or args.method in ["last_swag", "last_vi"]:
+if args.linear_probe:
     utils.freeze_fe(model)
 
 swag_model=None
@@ -236,6 +236,7 @@ if args.method == "swag":
                         last_layer=False).to(args.device)
     print("Preparing SWAG model")
 elif args.method == "ll_swag":
+    assert args.resume is not None, "You should put pre-trained DNN model to start ll_swag"
     swag_model = swag.SWAG(copy.deepcopy(model),
                         no_cov_mat=args.diag_only,
                         max_num_models=args.max_num_models,
@@ -304,36 +305,28 @@ print("-"*30)
 ## Resume ---------------------------------------------------------------------------
 start_epoch = 1
 
-if not args.pre_trained and args.resume is not None:
+if args.resume is not None:
     print(f"Resume training from {args.resume}")
     checkpoint = torch.load(args.resume)
     model.load_state_dict(checkpoint["state_dict"])
     if args.method == 'll_swag':
         swag_model.base.load_state_dict(checkpoint["state_dict"], strict=False)
-    utils.freeze_fe(model)
-        
-else:
-    if args.resume is not None:
-        print(f"Resume training from {args.resume}")
-        checkpoint = torch.load(args.resume)
-        model.load_state_dict(checkpoint["state_dict"])
+        utils.freeze_fe(model)
 
-    if args.method == "swag" and args.swag_resume is not None:
-        print(f"Resume swag training from {args.swag_resume}")
-        checkpoint = torch.load(args.swag_resume)
-        start_epoch = checkpoint["epoch"]
-        optimizer.load_state_dict(checkpoint["optimizer"])
-        # if args.scheduler != "swag_lr":
-        #     scheduler = scheduler.state_dict()
-        swag_model = swag.SWAG(copy.deepcopy(model), no_cov_mat=args.diag_only, max_num_models=args.max_num_models).to(args.device) 
-        swag_model.load_state_dict(checkpoint["state_dict"])
+if args.method == "swag" and args.swag_resume is not None:
+    print(f"Resume swag training from {args.swag_resume}")
+    checkpoint = torch.load(args.swag_resume)
+    start_epoch = checkpoint["epoch"]
+    optimizer.load_state_dict(checkpoint["optimizer"])
+    # if args.scheduler != "swag_lr":
+    #     scheduler = scheduler.state_dict()
+    swag_model = swag.SWAG(copy.deepcopy(model), no_cov_mat=args.diag_only, max_num_models=args.max_num_models).to(args.device) 
+    swag_model.load_state_dict(checkpoint["state_dict"])
 #------------------------------------------------------------------------------------
 
 
 ## Set AMP --------------------------------------------------------------------------
 scaler, first_step_scaler, second_step_scaler = utils.get_scaler(args)
-if args.resume:
-    raise ValueError("Add code to load scalar from resume")
 print("-"*30)
 #------------------------------------------------------------------------------------
 
@@ -477,11 +470,11 @@ if args.method not in ["la", "ll_la"]:
             break
         elif swag_cnt == args.tol and args.method in ['swag', 'll_swag']:
             break
-
+        
         if args.scheduler in ["cos_decay", "step_lr"]:
             scheduler.step(epoch)
 
-else:
+else:   
     ## Save Mean, Cov Values
     la_utils.get_la_mean_vector(model)
     la_utils.get_la_variance_vector(la)

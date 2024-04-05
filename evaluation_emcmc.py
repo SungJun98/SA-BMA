@@ -175,10 +175,10 @@ print("-"*30)
 ## Test ------------------------------------------------------------------------------------------------------
 ##### Get test nll, Entropy, ece, Reliability Diagram on best model
 ## Load Distributional shifted data
-if args.model == 'vitb16-i21k':
-    is_backbone_vit = True
-else:
-    is_backbone_vit = False
+# if args.model == 'vitb16-i21k':
+#     is_backbone_vit = True
+# else:
+#     is_backbone_vit = False
 
 if args.dataset == 'cifar10':
     ood_loader = data.corrupted_cifar10(data_path=data_path_ood,
@@ -186,14 +186,15 @@ if args.dataset == 'cifar10':
                             severity=args.severity,
                             batch_size=args.batch_size, 
                             num_workers=args.num_workers,
-                            is_vit=is_backbone_vit)
+                            resize=(not args.no_aug))
 elif args.dataset == 'cifar100':
         ood_loader = data.corrupted_cifar100(data_path=data_path_ood,
                             corrupt_option=args.corrupt_option,
                             severity=args.severity,
                             batch_size=args.batch_size, 
                             num_workers=args.num_workers,
-                            is_vit=is_backbone_vit)
+                            resize=(not args.no_aug))
+
 
 
 ### Load Best Model
