@@ -89,6 +89,13 @@ def set_wandb_runname(args):
     '''
 
     method = args.method
+    if args.method == 'sabma':
+        if args.tr_layer == 'll':
+            method = 'll_' + method
+            
+        if args.diag_only:
+            method = 'diag_' + method
+        
 
     ### pre-trained / linear_probe / scratch
     if args.pre_trained:

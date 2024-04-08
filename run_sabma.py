@@ -32,7 +32,7 @@ parser.add_argument("--resume", type=str, default=None,
     help="path to load saved model to resume training (default: None)",)
 
 
-parser.add_argument("--tr_layer", type=str, default="nl_ll", choices=["last_layer", "full_layer", "last_block", "nl_ll"],
+parser.add_argument("--tr_layer", type=str, default="nl_ll", choices=["ll", "full", "last_block", "nl_ll"],
             help="Choose layer which would be trained with our method (Default : nl_ll)")
 
 parser.add_argument("--tol", type=int, default=50,
@@ -65,7 +65,7 @@ parser.add_argument("--dat_per_cls", type=int, default=-1,
 #----------------------------------------------------------------
 
 ## Model ---------------------------------------------------------
-parser.add_argument(
+parser.add_argument( 
     "--model",
     type=str, default='resnet18', required=True,
     choices=['resnet18', 'resnet50', 'resnet101',
