@@ -1,5 +1,7 @@
 import numpy as np
 import torch
+import torch.nn.functional as F
+
 from ..swag.swag_utils import predict, flatten
 import utils.utils as utils
 
@@ -55,6 +57,47 @@ def sample_la(mean, var, seed=None):
     return sample
     
 
+def eval_la(loader, model, criterion, device, num_bins=15, eps=1e-8):
+    '''
+    get loss, accuracy, nll and ece for every eval step
+    '''
+    loss_sum = 0.0
+    num_objects_total = len(loader.dataset)
+
+    preds = list()
+    targets = list()
+
+    offset = 0
+    with torch.no_grad():
+        for _, (input, target) in enumerate(loader):
+            input, target = input.to(device), target.to(device)
+            pred = model(input)
+            # pred = model.predictive(input, pred_type='glm', link_approx='probit', n_samples=100)
+            loss = criterion(pred, target)
+            loss_sum += loss.item() * input.size(0)
+            
+            preds.append(F.softmax(pred, dim=1).cpu().numpy())
+            targets.append(target.cpu().numpy())
+            offset += input.size(0)
+    
+    preds = np.vstack(preds)
+    targets = np.concatenate(targets)
+
+    accuracy = np.mean(np.argmax(preds, axis=1) == targets)
+    nll = -np.mean(np.log(preds[np.arange(preds.shape[0]), targets] + eps))
+    unc = utils.calibration_curve(preds, targets, num_bins)
+        
+    return {
+        "loss" : loss_sum / num_objects_total,
+        "predictions" : preds,
+        "targets" : targets,
+        "accuracy" : accuracy * 100.0,
+        "nll" : nll,
+        "ece" : unc['ece'],
+        "unc" : unc
+    }
+
+
 def bma_la(te_loader, mean, var, model, la, tr_layer="last_layer", bma_num_models=30, num_classes=10, bma_save_path=None, eps=1e-8):
     model_shape = list()
     for p in model.parameters():
@@ -68,7 +111,6 @@ def bma_la(te_loader, mean, var, model, la, tr_layer="last_layer", bma_num_model
     else:
         pass
     
-    ## in case of last layer LA (Need to fix for last block LA)
     for name, _ in model.named_modules():
         tr_layer_name = name
     

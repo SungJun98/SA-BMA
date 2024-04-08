@@ -50,7 +50,7 @@ class SABMA(torch.nn.Module):
                 classifier_param.extend(torch.flatten(param))
         classifier_param = torch.tensor(classifier_param)
         self.classifier_param_num = len(classifier_param)
-    
+
         
         ## w_mean
         # random initialization classifier
@@ -107,44 +107,85 @@ class SABMA(torch.nn.Module):
         for name, p in backbone.named_parameters():
             p.requires_grad = False
             
-            # resnet
-            if isinstance(backbone, torchvision.models.ResNet):   
-                if ('bn' in name) or ('fc' in name):
-                    self.tr_param_shape[name] = p.shape
-                    self.tr_param_num += p.shape.numel()
-                    self.tr_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
+            if self.tr_layer == 'nl_ll':
+                # resnet
+                if isinstance(backbone, torchvision.models.ResNet):   
+                    if ('bn' in name) or ('fc' in name):
+                        self.tr_param_shape[name] = p.shape
+                        self.tr_param_num += p.shape.numel()
+                        self.tr_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
+                    else:
+                        self.frz_param_shape[name] = p.shape
+                        self.frz_param_num += p.shape.numel()
+                        self.frz_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
+                    self.full_param_shape[name] = p.shape
+                    self.full_param_num += p.shape.numel()      
+                    
+                # Vit pre-trained on ImageNet 1K
+                elif isinstance(backbone, torchvision.models.VisionTransformer):
+                    if ('ln' in name) or ('head' in name):
+                        self.tr_param_shape[name] = p.shape
+                        self.tr_param_num += p.shape.numel()
+                        self.tr_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))
+                    else:
+                        self.frz_param_shape[name] = p.shape
+                        self.frz_param_num += p.shape.numel()
+                        self.frz_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
+                    self.full_param_shape[name] = p.shape
+                    self.full_param_num += p.shape.numel()
+                    
+                # Vit pre-trained on ImageNet 21K
                 else:
-                    self.frz_param_shape[name] = p.shape
-                    self.frz_param_num += p.shape.numel()
-                    self.frz_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
-                self.full_param_shape[name] = p.shape
-                self.full_param_num += p.shape.numel()      
-                
-            # Vit pre-trained on ImageNet 1K
-            elif isinstance(backbone, torchvision.models.VisionTransformer):
-                if ('ln' in name) or ('head' in name):
-                    self.tr_param_shape[name] = p.shape
-                    self.tr_param_num += p.shape.numel()
-                    self.tr_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))
+                    if ('norm' in name) or ('head' in name):
+                        self.tr_param_shape[name] = p.shape
+                        self.tr_param_num += p.shape.numel()
+                        self.tr_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))
+                    else:
+                        self.frz_param_shape[name] = p.shape
+                        self.frz_param_num += p.shape.numel()
+                        self.frz_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
+                    self.full_param_shape[name] = p.shape
+                    self.full_param_num += p.shape.numel()
+
+            elif self.tr_layer == 'll':
+                # resnet
+                if isinstance(backbone, torchvision.models.ResNet):   
+                    if ('fc' in name):
+                        self.tr_param_shape[name] = p.shape
+                        self.tr_param_num += p.shape.numel()
+                        self.tr_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
+                    else:
+                        self.frz_param_shape[name] = p.shape
+                        self.frz_param_num += p.shape.numel()
+                        self.frz_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
+                    self.full_param_shape[name] = p.shape
+                    self.full_param_num += p.shape.numel()      
+                    
+                # Vit pre-trained on ImageNet 1K
+                elif isinstance(backbone, torchvision.models.VisionTransformer):
+                    if ('head' in name):
+                        self.tr_param_shape[name] = p.shape
+                        self.tr_param_num += p.shape.numel()
+                        self.tr_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))
+                    else:
+                        self.frz_param_shape[name] = p.shape
+                        self.frz_param_num += p.shape.numel()
+                        self.frz_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
+                    self.full_param_shape[name] = p.shape
+                    self.full_param_num += p.shape.numel()
+                    
+                # Vit pre-trained on ImageNet 21K
                 else:
-                    self.frz_param_shape[name] = p.shape
-                    self.frz_param_num += p.shape.numel()
-                    self.frz_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
-                self.full_param_shape[name] = p.shape
-                self.full_param_num += p.shape.numel()
-                
-            # Vit pre-trained on ImageNet 21K
-            else:
-                if ('norm' in name) or ('head' in name):
-                    self.tr_param_shape[name] = p.shape
-                    self.tr_param_num += p.shape.numel()
-                    self.tr_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))
-                else:
-                    self.frz_param_shape[name] = p.shape
-                    self.frz_param_num += p.shape.numel()
-                    self.frz_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
-                self.full_param_shape[name] = p.shape
-                self.full_param_num += p.shape.numel()
+                    if ('head' in name):
+                        self.tr_param_shape[name] = p.shape
+                        self.tr_param_num += p.shape.numel()
+                        self.tr_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))
+                    else:
+                        self.frz_param_shape[name] = p.shape
+                        self.frz_param_num += p.shape.numel()
+                        self.frz_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
+                    self.full_param_shape[name] = p.shape
+                    self.full_param_num += p.shape.numel()
     
         self.tr_param_idx = torch.tensor([i for start, end in self.tr_param_idx for i in range(start, end)])
         self.frz_param_idx = torch.tensor([i for start, end in self.frz_param_idx for i in range(start, end)])
@@ -165,7 +206,7 @@ class SABMA(torch.nn.Module):
         assert self.frz_log_std.numel() + self.bnn_param['log_std'].numel() == self.full_param_num, "division of variance parameters was not right!"
         assert self.frz_cov_sqrt.numel() + self.bnn_param['cov_sqrt'].numel() == self.full_param_num * self.low_rank,  "division of covariance parameters was not right!"
         
-        if self.tr_layer == 'last_layer':
+        if self.tr_layer == 'll':
             print("Prior cannot be defined")
         elif self.tr_layer == 'nl_ll':
             self.register_buffer("prior_mean", self.bnn_param['mean'].detach().clone()[:-self.classifier_param_num])
@@ -241,21 +282,32 @@ class SABMA(torch.nn.Module):
         '''
         calculate prior log_grad
         '''
-        if self.tr_layer != 'nl_ll':
-            raise NotImplementedError("Need to fix indexing except training normalization and last layer")
+        if self.tr_layer == 'll':
+            if not self.diag_only:    
+                cov_mat_lt = RootLazyTensor(self.bnn_param['cov_sqrt'].t())
+                var_lt = DiagLazyTensor(torch.exp(self.bnn_param['log_std']))
+                covar = AddedDiagLazyTensor(var_lt, cov_mat_lt).add_jitter(1e-10)   
+            else:
+                covar = DiagLazyTensor(torch.exp(self.bnn_param['log_std']))
+            mean = self.bnn_param['mean']
         
-        if not self.diag_only:    
-            cov_mat_lt = RootLazyTensor(self.bnn_param['cov_sqrt'][:,:-self.classifier_param_num].t())
-            var_lt = DiagLazyTensor(torch.exp(self.bnn_param['log_std'][:-self.classifier_param_num]))
-            covar = AddedDiagLazyTensor(var_lt, cov_mat_lt).add_jitter(1e-10)   
+        elif self.tr_layer == 'nl_ll':
+            if not self.diag_only:    
+                cov_mat_lt = RootLazyTensor(self.bnn_param['cov_sqrt'][:,:-self.classifier_param_num].t())
+                var_lt = DiagLazyTensor(torch.exp(self.bnn_param['log_std'][:-self.classifier_param_num]))
+                covar = AddedDiagLazyTensor(var_lt, cov_mat_lt).add_jitter(1e-10)   
+            else:
+                covar = DiagLazyTensor(torch.exp(self.bnn_param['log_std'][:-self.classifier_param_num]))
+            mean = self.bnn_param['mean'][:-self.classifier_param_num]
+    
         else:
-            covar = DiagLazyTensor(torch.exp(self.bnn_param['log_std'][:-self.classifier_param_num]))
+            raise NotImplementedError()
         
-        qdist = MultivariateNormal(self.bnn_param['mean'][:-self.classifier_param_num], covar)
+        qdist = MultivariateNormal(mean, covar)
         posterior_sample = qdist.rsample()
         with gpytorch.settings.num_trace_samples(1) and gpytorch.settings.max_cg_iterations(25):
             posterior_log_prob =  qdist.log_prob(posterior_sample)
-        
+
         return posterior_log_prob
 
 
@@ -341,9 +393,6 @@ class SABMA(torch.nn.Module):
     
     
     def load_state_dict(self, state_dict, strict=True):
-        '''
-        load하는거 만들어놓기
-        '''
         super(SABMA, self).load_state_dict(state_dict, strict)
 
 #####################################################################################################################

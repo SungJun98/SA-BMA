@@ -3,7 +3,7 @@ import random
 import torch
 import torchvision
 from torch.utils.data import random_split
-from torchvision.datasets import CIFAR10, CIFAR100, ImageNet
+from torchvision.datasets import CIFAR10, CIFAR100, ImageFolder
 import torchvision.transforms as transforms
 
 from timm.data.transforms_factory import create_transform
@@ -27,6 +27,7 @@ class ExtractedDataSet(Dataset):
         y = self.y[idx]
         return x, y
 """
+
 
 def create_transform_v2(data_name='cifar10', aug=True, scale=None, ratio=None,
                     hflip=0.5, vflip=0, color_jitter=0.4, aa=None,
@@ -108,14 +109,26 @@ def create_dataset(data_name='cifar10', data_path='/data1/lsj9862/data/cifar10',
         
         
     elif data_name == 'imagenet':
-        import pickle
-        with open(f'{data_path}/{dat_per_cls}shot/tr_loader_seed{seed}.pkl', 'rb') as f:
-            tr_data = pickle.load(f)
-        with open(f'{data_path}/{dat_per_cls}shot/val_loader_seed{seed}.pkl', 'rb') as f:
-            val_data = pickle.load(f)
-        with open(f'{data_path}/{dat_per_cls}shot/te_loader_seed{seed}.pkl', 'rb') as f:
-            te_data = pickle.load(f)
-        num_classes = 1000
+        data_path_ = os.path.join(data_path, 'images')
+        if dat_per_cls < 0:
+            train_dir = os.path.join(data_path_, 'train')
+            val_dir = os.path.join(data_path_, 'val')
+            normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                        std=[0.229, 0.224, 0.225])
+
+            tr_data = ImageFolder(
+                                train_dir,
+                                transform=transform_train)
+
+            te_data = ImageFolder(
+                                val_dir,
+                                transform=transform_test)
+            
+            val_data = te_data
+            num_classes = 1000
+        
+        else:
+            raise NotImplementedError("No code for few-shot ImageNet")
 
     return tr_data, val_data, te_data, num_classes
 
@@ -159,13 +172,23 @@ def create_loader(data_name='cifar10',
             print("[Warning] You are going to run models on the test set.")
     
     elif data_name in ['imagenet']:
-        if dat_per_cls < 0:
-            raise NotImplementedError("No data for full-shot ImageNet")
-        else:
-            tr_loader = tr_data
-            val_loader = val_data
-            te_loader = te_data
+        tr_loader = DataLoader(tr_data,
+                            batch_size=batch_size,
+                            shuffle=True,
+                            num_workers=num_workers,
+                            pin_memory=True)
         
+        val_loader = DataLoader(val_data,
+                            batch_size=batch_size,
+                            shuffle=False,
+                            num_workers=num_workers,
+                            pin_memory=True)
+        
+        te_loader = DataLoader(te_data,
+                            batch_size=batch_size,
+                            shuffle=False,
+                            num_workers=num_workers,
+                            pin_memory=True)
         
     return tr_loader, val_loader, te_loader
 

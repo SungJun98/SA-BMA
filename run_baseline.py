@@ -262,7 +262,11 @@ elif args.method == "ll_vi":
     print(f"Preparing Model for last-layer {args.vi_type} VI with MOPED ")
     
 elif args.method == "la":
-    model.load_state_dict(args.la_pt_model)
+    if not args.pre_trained:
+        pt_model = torch.load(args.la_pt_model)['state_dict']
+        model.load_state_dict(pt_model)
+    else:
+        print("Preparing fitting LA on public pre-trained model")
     from laplace import Laplace
     from laplace.curvature import AsdlGGN
     la = Laplace(model, 'classification',
@@ -270,14 +274,22 @@ elif args.method == "la":
             hessian_structure='diag',
             backend=AsdlGGN)
     la.fit(tr_loader)
+    la.optimize_prior_precision(method='marglik')
+    print(f"Successfully fitting the LA in model")
 
 elif args.method == "ll_la":
-    model.load_state_dict(args.la_pt_model)
+    if not args.pre_trained:
+        pt_model = torch.load(args.la_pt_model)['state_dict']
+        model.load_state_dict(pt_model)
+    else:
+        print("Fit LA on public pre-trained model")
     from laplace import Laplace
     la = Laplace(model, 'classification',
              subset_of_weights='last_layer',
              hessian_structure='diag')
     la.fit(tr_loader)
+    la.optimize_prior_precision(method='marglik')
+    print(f"Successfully fitting the last-layer LA in model")
 
 print("-"*30)
 #-------------------------------------------------------------------
@@ -486,8 +498,13 @@ else:
 ##### Get test nll, Entropy, ece, Reliability Diagram on best model
 ## Load Distributional shifted data
 ### Load Best Model
-model, mean, variance, best_epoch = utils.load_best_model(args, model, swag_model, num_classes)
-
+if args.method not in ["la", "ll_la"]:
+    model, mean, variance, best_epoch = utils.load_best_model(args, model, swag_model, num_classes)
+elif args.method in ["la", "ll_la"]:
+    model = la
+    mean = None
+    variance = None
+    best_epoch = 0
 
 #### MAP
 ## Unscaled Results
@@ -498,12 +515,15 @@ table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece"],
         [best_epoch, format(res['accuracy'], '.2f'), format(res['nll'], '.4f'), format(res['ece'], '.4f')]]
 print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
 
-## Temperature Scaled Results
-res_ts, temperature = utils.ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, variance, criterion)
-print(f"2) Scaled Results:")
-table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
-        [best_epoch, format(res_ts['accuracy'], '.2f'), format(res_ts['nll'],'.4f'), format(res_ts['ece'], '.4f'), format(temperature.item(), '.4f')]]
-print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
+if args.method not in ["la", "ll_la"]:
+    ## Temperature Scaled Results
+    res_ts, temperature = utils.ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, variance, criterion)
+    print(f"2) Scaled Results:")
+    table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
+            [best_epoch, format(res_ts['accuracy'], '.2f'), format(res_ts['nll'],'.4f'), format(res_ts['ece'], '.4f'), format(temperature.item(), '.4f')]]
+    print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
+else:
+    res_ts ={"accuracy":-9999, "nll":-9999, "ece":-9999}
 
 
 if not args.ignore_wandb:
@@ -514,7 +534,7 @@ if not args.ignore_wandb:
     wandb.run.summary['test accuracy w/ ts'] = res_ts['accuracy']
     wandb.run.summary['test nll w/ ts'] = res_ts['nll']
     wandb.run.summary["test ece w/ ts"]  = res_ts['ece']
-    
+
 
 
 #### Bayesian Model Averaging

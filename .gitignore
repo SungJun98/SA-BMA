@@ -11,3 +11,4 @@ tmp.py
 .png
 num_bma_plot
 sh
+*.sh

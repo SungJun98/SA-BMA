@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from utils.sam import sam, sam_utils
 from utils.swag import swag_utils
 from utils.vi import vi_utils
+from utils.la import la_utils
 from utils import temperature_scaling as ts
 
 from utils.models import resnet_noBN
@@ -735,6 +736,8 @@ def no_ts_map_estimation(args, te_loader, num_classes, model, mean, variance, cr
         res = eval(te_loader, model, criterion, args.device)
     elif args.method in ["vi", "ll_vi"]:
         res = vi_utils.bma_vi(None, te_loader, mean, variance, model, args.method, criterion, num_classes, temperature=None, bma_num_models=1,  bma_save_path=None, num_bins=args.num_bins, eps=args.eps)  
+    elif args.method in ["la", "ll_la"]:
+        res = la_utils.eval_la(te_loader, model, criterion, args.device)
     else:
         res = eval(te_loader, model, criterion, args.device)
     
@@ -758,7 +761,8 @@ def ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, var
         res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, temperature='local', bma_num_models=1,  bma_save_path=None, num_bins=args.num_bins, eps=args.eps)
         temperature = res["temperature"]
     else:
-        raise NotImplementedError("Need Code for temperature scaling on this method")
+        pass
+        print("No Code for temperature scaling on this method")
 
     if save:
         save_reliability_diagram(args.method, args.optim, args.save_path, res['unc'], False)
