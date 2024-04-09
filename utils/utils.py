@@ -18,6 +18,7 @@ from utils import temperature_scaling as ts
 from utils.models import resnet_noBN
 import torchvision.models as torch_models
 import timm
+from time import time
 
 
 ## ------------------------------------------------------------------------------------
@@ -544,6 +545,7 @@ def train_bsam(dataloader, model, criterion, optimizer, device):
         X, y = X.to(device), y.to(device)
         optimizer.zero_grad()
 
+        start_ep = time()
         ## noisy sample : p + e
         optimizer.add_noise(zero_grad=True)
         
@@ -558,6 +560,10 @@ def train_bsam(dataloader, model, criterion, optimizer, device):
         loss = criterion(pred, y)        
         loss.backward() # gradient of "p + eps"
         optimizer.second_step(zero_grad=True)
+
+        end_ep = time()
+        sec = (end_ep - start_ep)
+        # print(f"1Epoch time : {sec} sec")
 
         correct += (pred.argmax(1) == y).type(torch.float).sum().item()
         loss_sum += loss.data.item() * X.size(0)
