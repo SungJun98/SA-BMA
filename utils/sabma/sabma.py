@@ -84,7 +84,7 @@ class SABMA(torch.nn.Module):
                     # w_cov_sqrt[:, -len(classifier_param):] = 1e-2*torch.rand((w_cov_sqrt.size(0), len(classifier_param)))
                     w_cov_sqrt[:, -len(classifier_param):] = alpha**0.5*torch.zeros((w_cov_sqrt.size(0), len(classifier_param)))
                 else:
-                    # w_cov_sqrt = torch.cat((w_cov_sqrt, 1e-2*torch.rand((w_cov_sqrt.size(0), len(classifier_param)))), dim=1)
+                    w_cov_sqrt = w_cov_sqrt[:self.low_rank, :]
                     w_cov_sqrt = torch.cat((w_cov_sqrt, alpha**0.5*torch.zeros((w_cov_sqrt.size(0), len(classifier_param)))), dim=1)
                 
                 self.frz_low_rank = w_cov_sqrt.size(0)

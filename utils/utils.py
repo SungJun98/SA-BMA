@@ -68,7 +68,7 @@ def set_save_path(args):
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
     elif args.method in ["vi", "ll_vi"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}_{args.kl_beta}"
-    elif args.method in ["sabtl"]:
+    elif args.method in ["sabma"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.momentum}_{args.low_rank}"
     else:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.momentum}"
@@ -122,7 +122,7 @@ def set_wandb_runname(args):
         run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
     elif args.method in ["vi", "ll_vi"]:
         run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}"
-    elif args.method in ["sabtl"]:
+    elif args.method in ["sabma"]:
         run_name_ = f"{run_name_}/{args.lr_init}_{args.wd}_{args.momentum}_{args.low_rank}"
     else:
         run_name_ = f"{run_name_}/{args.lr_init}_{args.wd}_{args.momentum}"

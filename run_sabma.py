@@ -130,7 +130,7 @@ parser.add_argument("--pretrained_set", type=str, default='source', choices=['so
 
 parser.add_argument("--diag_only", action="store_true", default=False, help="Consider only diagonal variance")
 
-parser.add_argument("--low_rank", type=int, default=-1, help="Low-rank component")
+parser.add_argument("--low_rank", type=int, default=-1, help="Low-rank component. -1 follows the rank of prior")
 
 parser.add_argument("--var_scale", type=float, default=1, help="Scaling prior variance")
 
