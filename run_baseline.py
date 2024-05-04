@@ -258,7 +258,7 @@ elif args.method == "vi":
     print(f"Preparing Model for {args.vi_type} VI with MOPED ")
 
 elif args.method == "ll_vi":
-    vi_utils.make_last_vi(args, model)
+    vi_utils.make_ll_vi(args, model)
     print(f"Preparing Model for last-layer {args.vi_type} VI with MOPED ")
     
 elif args.method == "la":

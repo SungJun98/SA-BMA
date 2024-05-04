@@ -231,14 +231,11 @@ def bma_vi(val_loader, te_loader, mean, variance, model, method, criterion, num_
     for p in model.parameters():
         model_shape.append(p.shape)
         
-    if "last_layer" in method:
+    if "ll_" in method:
         tr_layer = "last_layer"
         model_shape = model_shape[-2:]
         for name, _ in model.named_modules():
             tr_layer_name = name
-    elif "last_block" in method:
-        tr_layer = "last_block"
-        raise NotImplementedError("Add code for last block vi")
     else:
         tr_layer = "full_layer"
         tr_layer_name = None

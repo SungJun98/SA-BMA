@@ -1,8 +1,10 @@
 from collections import OrderedDict
+import os.path as osp
 
 import torch, torchvision
 import torch.nn as nn
 import utils.utils as utils
+import utils.vi.vi_utils as vi_utils
 import utils.sabma.sabma_utils as sabma_utils
 
 import gpytorch
@@ -14,50 +16,43 @@ class SABMA(torch.nn.Module):
     def __init__(
         self,
         backbone,
-        src_bnn = 'swag',
+        args,
         w_mean = None,
-        diag_only = False,
         w_var = None,
-        var_scale = 1,
-        low_rank = -1,
         w_cov_sqrt = None,
-        cov_scale = 1,
         var_clamp = 1e-16,
-        tr_layer="nl_ll",
-        pretrained_set = 'source',
-        alpha=1e-4
     ):
 
         super(SABMA, self).__init__()
         
         self.var_clamp = var_clamp
-        self.diag_only = diag_only
-        self.low_rank = low_rank
-        self.tr_layer = tr_layer
+        self.diag_only = args.diag_only
+        self.low_rank = args.low_rank
+        self.tr_layer = args.tr_layer
         
         self.backbone = backbone
-        self.src_bnn = src_bnn
+        self.src_bnn = args.src_bnn
+        
         
         classifier_param = list()
-        if isinstance(backbone, torchvision.models.ResNet):
-            for param in backbone.fc.parameters():
+        if isinstance(self.backbone, torchvision.models.ResNet):
+            for param in self.backbone.fc.parameters():
                 classifier_param.extend(torch.flatten(param))
-        elif isinstance(backbone, torchvision.models.VisionTransformer):
-            for param in backbone.heads.head.parameters():
+        elif isinstance(self.backbone, torchvision.models.VisionTransformer):
+            for param in self.backbone.heads.head.parameters():
                 classifier_param.extend(torch.flatten(param))
         else:    
-            for param in backbone.head.parameters():
-                classifier_param.extend(torch.flatten(param))
+            for param in self.backbone.head.parameters():
+                classifier_param.extend(torch.flatten(param))        
         classifier_param = torch.tensor(classifier_param)
         self.classifier_param_num = len(classifier_param)
 
-        
         ## w_mean
         # random initialization classifier
-        if pretrained_set == 'downstream':
+        if args.pretrained_set == 'downstream':
             w_mean[-len(classifier_param):] = classifier_param
-        elif pretrained_set == 'source':
-            # w_mean = torch.cat((w_mean, classifier_param))
+        elif args.pretrained_set == 'source':
+            # swag/vi parameter trained on source task does not containt classifier parameters
             w_mean = torch.cat((w_mean, torch.zeros_like(classifier_param)))
         else:
             raise NotImplementedError("Choose the pretrained_set between 'source' and 'downstream'")
@@ -65,27 +60,30 @@ class SABMA(torch.nn.Module):
         ## diagonal variance (as form of log standard deviation)
         # random initialization classifier
         w_var = torch.clamp(w_var, self.var_clamp)
-        if pretrained_set == 'downstream':
-            # w_var[-len(classifier_param):] = 1e-2*torch.rand(len(classifier_param))
-            w_var[-len(classifier_param):] = alpha*torch.ones(len(classifier_param))
-        elif pretrained_set == 'source':
-            # w_var = torch.cat((w_var, 1e-2*torch.rand(len(classifier_param))))
-            w_var = torch.cat((w_var, alpha*torch.ones(len(classifier_param))))
+        if args.pretrained_set == 'downstream':
+            w_var[-len(classifier_param):] = args.alpha * torch.ones(len(classifier_param))
+        elif args.pretrained_set == 'source':
+            if self.src_bnn == "vi":
+                w_var = w_var**2 # w_var of VI is std
+            # swag/vi parameter trained on source task does not containt classifier parameters
+            w_var = torch.cat((w_var, args.alpha*torch.ones(len(classifier_param))))
+                
         
         ## low-ranked covariance matrix
-        if src_bnn == 'swag':
+        if self.src_bnn == 'swag':
             if not self.diag_only:
                 if w_cov_sqrt is not None:
                     if type(w_cov_sqrt) == list:
                         # cat blockwise covmat list as full matrix
                         w_cov_sqrt = torch.cat(w_cov_sqrt, dim=1)
                 w_cov_sqrt = w_cov_sqrt # * cov_scale
-                if pretrained_set == 'downstream':
+                if args.pretrained_set == 'downstream':
                     # w_cov_sqrt[:, -len(classifier_param):] = 1e-2*torch.rand((w_cov_sqrt.size(0), len(classifier_param)))
-                    w_cov_sqrt[:, -len(classifier_param):] = alpha**0.5*torch.zeros((w_cov_sqrt.size(0), len(classifier_param)))
+                    w_cov_sqrt[:, -len(classifier_param):] = args.alpha**0.5 * torch.zeros((w_cov_sqrt.size(0), len(classifier_param)))
                 else:
-                    w_cov_sqrt = w_cov_sqrt[:self.low_rank, :]
-                    w_cov_sqrt = torch.cat((w_cov_sqrt, alpha**0.5*torch.zeros((w_cov_sqrt.size(0), len(classifier_param)))), dim=1)
+                    if self.low_rank > 0:
+                        w_cov_sqrt = w_cov_sqrt[:self.low_rank, :]
+                    w_cov_sqrt = torch.cat((w_cov_sqrt, args.alpha**0.5*torch.zeros((w_cov_sqrt.size(0), len(classifier_param)))), dim=1)
                 
                 self.frz_low_rank = w_cov_sqrt.size(0)
                 if self.low_rank < 0:
@@ -96,7 +94,6 @@ class SABMA(torch.nn.Module):
                 print("[Warning] No correlation between parameters")
         ## -----------------------------------------------------------
         
-        
         ## calculate the number of params and shape of each layer, set trainable params, and get indices of them
         self.bnn_param = nn.ParameterDict()
         
@@ -104,12 +101,12 @@ class SABMA(torch.nn.Module):
         self.tr_param_shape = OrderedDict(); self.tr_param_num = 0
         self.frz_param_shape = OrderedDict(); self.frz_param_num = 0
         self.tr_param_idx = list(); self.frz_param_idx = list()
-        for name, p in backbone.named_parameters():
+        for name, p in self.backbone.named_parameters():
             p.requires_grad = False
             
             if self.tr_layer == 'nl_ll':
                 # resnet
-                if isinstance(backbone, torchvision.models.ResNet):   
+                if isinstance(self.backbone, torchvision.models.ResNet):   
                     if ('bn' in name) or ('fc' in name):
                         self.tr_param_shape[name] = p.shape
                         self.tr_param_num += p.shape.numel()
@@ -122,7 +119,7 @@ class SABMA(torch.nn.Module):
                     self.full_param_num += p.shape.numel()      
                     
                 # Vit pre-trained on ImageNet 1K
-                elif isinstance(backbone, torchvision.models.VisionTransformer):
+                elif isinstance(self.backbone, torchvision.models.VisionTransformer):
                     if ('ln' in name) or ('head' in name):
                         self.tr_param_shape[name] = p.shape
                         self.tr_param_num += p.shape.numel()
@@ -149,7 +146,7 @@ class SABMA(torch.nn.Module):
 
             elif self.tr_layer == 'll':
                 # resnet
-                if isinstance(backbone, torchvision.models.ResNet):   
+                if isinstance(self.backbone, torchvision.models.ResNet):   
                     if ('fc' in name):
                         self.tr_param_shape[name] = p.shape
                         self.tr_param_num += p.shape.numel()
@@ -162,7 +159,7 @@ class SABMA(torch.nn.Module):
                     self.full_param_num += p.shape.numel()      
                     
                 # Vit pre-trained on ImageNet 1K
-                elif isinstance(backbone, torchvision.models.VisionTransformer):
+                elif isinstance(self.backbone, torchvision.models.VisionTransformer):
                     if ('head' in name):
                         self.tr_param_shape[name] = p.shape
                         self.tr_param_num += p.shape.numel()
@@ -186,21 +183,21 @@ class SABMA(torch.nn.Module):
                         self.frz_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
                     self.full_param_shape[name] = p.shape
                     self.full_param_num += p.shape.numel()
-    
+
         self.tr_param_idx = torch.tensor([i for start, end in self.tr_param_idx for i in range(start, end)])
         self.frz_param_idx = torch.tensor([i for start, end in self.frz_param_idx for i in range(start, end)])
         
-        self.register_buffer("frz_mean", w_mean[self.frz_param_idx])
+        self.register_buffer("frz_mean", torch.index_select(w_mean, dim=0, index=self.frz_param_idx))
         self.bnn_param.update({"mean" :
                 nn.Parameter(torch.index_select(w_mean, dim=0, index=self.tr_param_idx))})
 
-        self.register_buffer("frz_log_std", 0.5 * torch.log(w_var[self.frz_param_idx] * var_scale))
+        self.register_buffer("frz_log_std", 0.5 * torch.log(torch.index_select(w_var, dim=0, index=self.frz_param_idx) * args.var_scale))
         self.bnn_param.update({"log_std" :
-                nn.Parameter(0.5*torch.log(torch.index_select(w_var, dim=0, index=self.tr_param_idx) * var_scale))})
+                nn.Parameter(0.5*torch.log(torch.index_select(w_var, dim=0, index=self.tr_param_idx) * args.var_scale))})
         if not self.diag_only:
-            self.register_buffer("frz_cov_sqrt", w_cov_sqrt[:, self.frz_param_idx] * cov_scale)
+            self.register_buffer("frz_cov_sqrt", torch.index_select(w_cov_sqrt, dim=1, index=self.frz_param_idx) * args.cov_scale)
             self.bnn_param.update({"cov_sqrt" :
-                    nn.Parameter(torch.index_select(w_cov_sqrt, dim=1, index=self.tr_param_idx))[:self.low_rank, :] * cov_scale})    
+                    nn.Parameter(torch.index_select(w_cov_sqrt, dim=1, index=self.tr_param_idx))[:self.low_rank, :] * args.cov_scale})    
 
         assert self.frz_mean.numel() + self.bnn_param['mean'].numel() == self.full_param_num, "division of mean parameters was not right!"
         assert self.frz_log_std.numel() + self.bnn_param['log_std'].numel() == self.full_param_num, "division of variance parameters was not right!"
@@ -216,11 +213,19 @@ class SABMA(torch.nn.Module):
                 self.register_buffer("prior_cov_sqrt", self.bnn_param['cov_sqrt'].detach().clone()[:, :-self.classifier_param_num])
         else:
             raise NotImplementedError("No code for prior except last layer and normalization layer + last layer setting")
+        
+        
+        if self.src_bnn == 'vi':
+            w_mean = utils.unflatten_like_size(w_mean, self.full_param_shape.values())
+            state_dict = utils.list_to_state_dict(self.backbone, w_mean, tr_layer='full_layer', last_layer_name=None)
+            self.backbone.load_state_dict(state_dict, strict=False)
         # -----------------------------------------------------------------------------------------------------    
 
 
     def forward(self, params, input):
+        # if self.src_bnn == 'swag':
         return nn.utils.stateless.functional_call(self.backbone, params, input)
+
     
     
     
@@ -230,7 +235,7 @@ class SABMA(torch.nn.Module):
         '''
         if sample_param == 'frz':
             ## freezed params only
-            z_1 = torch.randn_like(self.frz_mean, requires_grad=False)
+            z_1 = z_scale * torch.randn_like(self.frz_mean, requires_grad=False)
             rand_sample = torch.exp(self.frz_log_std) * z_1
             if not self.diag_only:
                 z_2 = self.frz_cov_sqrt.new_empty((self.frz_low_rank, ), requires_grad=False).normal_(z_scale)
@@ -245,7 +250,7 @@ class SABMA(torch.nn.Module):
             
         elif sample_param == 'tr':
             # trainable params only
-            z_1 = torch.randn_like(self.bnn_param['mean'], requires_grad=False)
+            z_1 = z_scale * torch.randn_like(self.bnn_param['mean'], requires_grad=False)
             rand_sample = torch.exp(self.bnn_param['log_std']) * z_1
             if not self.diag_only:
                 z_2 = self.bnn_param['cov_sqrt'].new_empty((self.low_rank, ), requires_grad=False).normal_(z_scale)

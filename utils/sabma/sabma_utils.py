@@ -202,7 +202,7 @@ def train_sabma_sabma(dataloader, sabma_model, criterion, optimizer, device, fir
         _, log_grad = sabma_model.log_grad(tr_params)
         
         # Change weight sample shape to input model
-        params = format_weights(tr_params, frz_params, sabma_model)
+        params = format_weights(tr_params, frz_params, sabma_model)            
         
         if first_step_scaler is not None:
             ## first forward & backward
@@ -248,7 +248,6 @@ def train_sabma_sabma(dataloader, sabma_model, criterion, optimizer, device, fir
             loss_sum += loss.data.item() * X.size(0)
             num_objects_current += X.size(0)
             
-            # print(f"Batch : {batch} / Tr loss : {loss:.4f} / KL loss : {kld_loss:.4f} / Pred NaN : {torch.sum(torch.isnan(pred))/100} ")
         else:
             ## first forward & backward
             pred = sabma_model(params, X)
@@ -330,6 +329,7 @@ def bma_sabma(te_loader, sabma_model, bma_num_models,
     '''
     sabma_logits = np.zeros((len(te_loader.dataset), num_classes))
     sabma_predictions = np.zeros((len(te_loader.dataset), num_classes))
+    sabma_model.backbone.eval()
     with torch.no_grad():
         for i in range(bma_num_models):
             # if i == 0:
@@ -339,7 +339,7 @@ def bma_sabma(te_loader, sabma_model, bma_num_models,
             tr_params, _, _  = sabma_model.sample(z_scale=1.0, sample_param='tr')
             frz_params, _, _  = sabma_model.sample(z_scale=1.0, sample_param='frz')
             params = format_weights(tr_params, frz_params, sabma_model)
-                
+            
             # save sampled weight for bma
             if (bma_save_path is not None) and (not validation):
                 torch.save(params, f'{bma_save_path}/bma_model-{i}.pt')

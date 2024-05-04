@@ -9,6 +9,7 @@ import pickle, wandb
 
 import utils.utils as utils
 from utils import temperature_scaling as ts
+from utils.vi import vi_utils
 from utils.swag import swag, swag_utils
 from utils.sabma import sabma, sabma_utils
 import utils.data.data as data
@@ -136,7 +137,7 @@ parser.add_argument("--var_scale", type=float, default=1, help="Scaling prior va
 
 parser.add_argument("--cov_scale", type=float, default=1, help="Scaling prior covariance")
 
-parser.add_argument("--prior_path", type=str, required=True, default=None,
+parser.add_argument("--prior_path", type=str, default=None,
     help="path to load saved swag model for transfer learning (default: None)")
 
 parser.add_argument("--alpha", type=float, default=1e-2, help="Scale of variance initialized with classifier")
@@ -206,33 +207,47 @@ print("-"*30)
 
 # Define Model------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
-# checkpoint = torch.load(f"{args.prior_path}/{args.model}_model.pt")
-# if args.src_bnn == 'swag':
-#     model.load_state_dict(checkpoint)
-# elif args.src_bnn == "vi":
-#     bn_state_dict = {key: value for key, value in checkpoint["state_dict"].items() if 'bn' in key}
-#     model.load_state_dict(bn_state_dict, strict=False)
+## 주석처리 in opt1
+# if  args.src_bnn == 'vi':
+#     checkpoint = torch.load(os.path.join(args.prior_path, f"{args.model}_model.pt"))
+#     vi_utils.load_vi(model, checkpoint)
+"""# ### 1) torchvision 모델에 moped 적용해서 bnn으로 만들고 sabma 적용하는 방안
+if args.src_bnn == "vi":
+    from bayesian_torch.models.dnn_to_bnn import dnn_to_bnn
+    const_bnn_prior_parameters = {
+        "prior_mu": 0.0,
+        "prior_sigma": 1.0,
+        "posterior_mu_init": 0.0,
+        "posterior_rho_init": -5.0,
+        "type": "Reparameterization", # "Flipout"
+        "moped_enable": True,
+        "moped_delta": 0.05,
+    }
+    dnn_to_bnn(model, const_bnn_prior_parameters)
+    print(f"Preparing Model for VI with MOPED ")
+    
+    torch.save(model, '/home/lsj9862/SA-BTL/vi_prior/opt1/resnet18_model.pt')
+    w_mean = vi_utils.get_vi_mean_vector(model)
+    w_mean = w_mean.detach().clone()
+    torch.save(w_mean, '/home/lsj9862/SA-BTL/vi_prior/opt1/resnet18_mean.pt')
+    w_var = vi_utils.get_vi_variance_vector(model)
+    w_var = w_var.detach().clone()
+    torch.save(w_var, '/home/lsj9862/SA-BTL/vi_prior/opt1/resnet18_variance.pt')
+"""
 
+if args.prior_path is not None:
+    w_mean = torch.load(f"{args.prior_path}/{args.model}_mean.pt").detach()
+    w_var = torch.load(f"{args.prior_path}/{args.model}_variance.pt").detach()
+    if not args.diag_only:
+        w_covmat = torch.load(f"{args.prior_path}/{args.model}_covmat.pt")
+    else:
+        w_covmat=None
 
-
-w_mean = torch.load(f"{args.prior_path}/{args.model}_mean.pt")
-w_var = torch.load(f"{args.prior_path}/{args.model}_variance.pt")
-if not args.diag_only:
-    w_covmat = torch.load(f"{args.prior_path}/{args.model}_covmat.pt")
-else:
-    w_covmat=None
 sabma_model = sabma.SABMA(copy.deepcopy(model),
-                        src_bnn=args.src_bnn,
+                        args,
                         w_mean = w_mean,
-                        diag_only=args.diag_only,
-                        w_var=w_var,
-                        var_scale=args.var_scale,
-                        low_rank=args.low_rank,
-                        w_cov_sqrt=w_covmat,
-                        cov_scale=args.cov_scale,
-                        tr_layer=args.tr_layer,
-                        pretrained_set = 'source',
-                        alpha=args.alpha
+                        w_var = w_var,
+                        w_cov_sqrt = w_covmat,
                         ).to(args.device)
 if not args.ignore_wandb:
     wandb.config.update({"low_rank_true" : sabma_model.low_rank})
@@ -395,6 +410,8 @@ sabma_model.load_state_dict(checkpoint["state_dict"])
 sabma_model.to(args.device)
 
 
+
+
 ### Get temperature
 val_res = sabma_utils.bma_sabma(val_loader, sabma_model, 1,
                     num_classes, criterion, args.device,
@@ -417,6 +434,7 @@ bma_res = sabma_utils.bma_sabma(te_loader, sabma_model, args.bma_num_models,
                     num_classes, criterion, args.device,
                     bma_save_path=bma_save_path, eps=args.eps, num_bins=args.num_bins,
                     validation=False, tr_layer=args.tr_layer)
+
 bma_logits = bma_res["logits"]
 bma_predictions = bma_res["predictions"]
 bma_targets = bma_res["targets"]
@@ -453,6 +471,7 @@ table = [tab_name, tab_contents]
 print(tabulate.tabulate(table, tablefmt="simple"))
 print("-"*30)
 
+"""
 print("[BMA w/ TS Results]\n")
 tab_name = ["# of Models", "BMA Accuracy", "BMA NLL", "BMA ECE", "BMA Temperature"]
 tab_contents = [args.bma_num_models, format(bma_accuracy_ts, '.2f'), format(bma_nll_ts, '.4f'), format(bma_ece_ts, '.4f'), format(bma_temperature.item(), '.4f')]
@@ -484,7 +503,7 @@ unc = utils.calibration_curve(res['predictions'], res['targets'], args.num_bins)
 te_ece = unc["ece"]
 
 if not args.ignore_wandb:
-    wandb.run.summary['Best epoch'] = checkpoint["epoch"]
+    # wandb.run.summary['Best epoch'] = checkpoint["epoch"] ## 임시
     # Acc
     wandb.run.summary['test accuracy'] = res['accuracy']
     # nll
@@ -498,7 +517,6 @@ table = [tab_name, tab_contents]
 print(tabulate.tabulate(table, tablefmt="simple"))
 print("-"*30)
 
-
 # Save ece for reliability diagram
 os.makedirs(f'{args.save_path}/unc_result', exist_ok=True)
 with open(f"{args.save_path}/unc_result/{args.method}-{args.optim}_uncertainty.pkl", 'wb') as f:
@@ -506,3 +524,4 @@ with open(f"{args.save_path}/unc_result/{args.method}-{args.optim}_uncertainty.p
 
 # Save Reliability Diagram 
 utils.save_reliability_diagram(args.method, args.optim, args.save_path, unc, False)
+"""
