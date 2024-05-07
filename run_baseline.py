@@ -243,6 +243,8 @@ elif args.method == "ll_swag":
                         last_layer=True).to(args.device)
     print("Preparing Last-SWAG model")
 elif args.method == "vi":
+    if args.model == 'vitb16-i1k':
+        model = vi_utils.enable_vit16i1k(model)
     from bayesian_torch.models.dnn_to_bnn import dnn_to_bnn
     const_bnn_prior_parameters = {
         "prior_mu": args.vi_prior_mu,
@@ -258,6 +260,8 @@ elif args.method == "vi":
     print(f"Preparing Model for {args.vi_type} VI with MOPED ")
 
 elif args.method == "ll_vi":
+    if args.model == 'vitb16-i1k':
+        model = vi_utils.enable_vit16i1k(model)
     vi_utils.make_ll_vi(args, model)
     print(f"Preparing Model for last-layer {args.vi_type} VI with MOPED ")
     

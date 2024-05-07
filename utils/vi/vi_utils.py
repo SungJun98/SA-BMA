@@ -5,6 +5,7 @@ import utils.sam.sam_utils as sam_utils
 import utils.utils as utils
 from bayesian_torch.models.dnn_to_bnn import get_kl_loss
 from utils import temperature_scaling as ts
+import torchvision
 
 def get_vi_mean_vector(model):
     """
@@ -43,7 +44,27 @@ def make_ll_vi(args, model):
         "moped_delta": args.vi_moped_delta,
     }
     dnn_to_bnn(bayesian_last_layer, const_bnn_prior_parameters)
-    model.head = bayesian_last_layer.to(args.device)
+    if 'resnet' in args.model:
+        model.fc = bayesian_last_layer.to(args.device)
+    elif 'vitb16-i1k' == args.model:
+        raise NotImplementedError("Please check the name(module) of last layer and correct this code")
+        model.head = bayesian_last_layer.to(args.device)
+    else:
+        raise NotImplementedError()
+
+
+def enable_vit16i1k(model):
+    for idx in range(len(model.encoder.layers)):
+        in_features = model.encoder.layers[idx].self_attention.out_proj.in_features
+        out_features = model.encoder.layers[idx].self_attention.out_proj.out_features
+        weight = model.encoder.layers[idx].self_attention.out_proj.weight
+        bias = model.encoder.layers[idx].self_attention.out_proj.bias
+        model.encoder.layers[idx].self_attention.out_proj = torch.nn.Linear(in_features=in_features, out_features=out_features)
+        model.encoder.layers[idx].self_attention.out_proj.weight = weight
+        model.encoder.layers[idx].self_attention.out_proj.bias = bias
+        
+    return model
+
 
 
 def load_vi(model, checkpoint):   

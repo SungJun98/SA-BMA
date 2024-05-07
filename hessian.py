@@ -53,6 +53,9 @@ parser.add_argument(
 parser.add_argument("--swag_load_path", type=str, default=None,
     help="path to load saved swag model (default: None)",)
 
+parser.add_argument("--bsam_load_path", type=str, default=None,
+    help="path to load saved bsam model (default: None)",)
+
 parser.add_argument("--vi_load_path", type=str, default=None,
     help="path to load saved vi model (default: None)",)
 
@@ -169,7 +172,10 @@ if args.swag_load_path is not None:
     """
     # Get bma weights list
     bma_load_paths = sorted(os.listdir(args.swag_load_path))
-    
+
+elif args.bsam_load_path is not None:
+    bma_load_paths = sorted(os.listdir(args.bsam_load_path))
+
 elif args.sabma_load_path is not None:
     bma_load_paths = sorted(os.listdir(args.sabma_load_path))
     model_path = args.sabma_load_path.split("/")[:-2]
@@ -209,7 +215,10 @@ model.to(args.device)
 ## Set save path ---------------------------------------------------------------
 if args.swag_load_path is not None:
     save_path = f"{args.swag_load_path}/performance"
-    
+
+elif args.bsam_load_path is not None:
+    save_path = f"{args.bsam_load_path}/performance"
+
 elif args.sabma_load_path is not None:
     save_path = f"{args.sabma_load_path}/performance"
 
@@ -236,7 +245,7 @@ print(f"Save path : {save_path}")
 criterion = torch.nn.CrossEntropyLoss()
 
 ## Calculate Hessian ------------------------------------------------------------
-if (args.swag_load_path is not None) or (args.vi_load_path is not None) or (args.sabma_load_path is not None) or (args.emcmc_load_path is not None):
+if (args.swag_load_path is not None) or (args.bsam_load_path is not None) or (args.vi_load_path is not None) or (args.sabma_load_path is not None) or (args.emcmc_load_path is not None):
     model_num_list = list(); acc_list = list(); ece_list = list(); nll_list = list()
     tr_cum_eigenval_list = list() ; tr_max_eigenval_list = list()
     for path in bma_load_paths:
@@ -252,6 +261,9 @@ if (args.swag_load_path is not None) or (args.vi_load_path is not None) or (args
             bma_sample = torch.load(f"{args.swag_load_path}/{path}")
             model = load_swag_model_to_base_model(model, bma_sample)
             # model = torch.load(f"{args.swag_load_path}/{path}")
+        elif args.bsam_load_path is not None:
+            bma_sample = torch.load(f"{args.bsam_load_path}/{path}")
+            model = bma_sample
         elif args.vi_load_path is not None:
             bma_sample = torch.load(f"{args.vi_load_path}/{path}")
             model = bma_sample
@@ -269,7 +281,7 @@ if (args.swag_load_path is not None) or (args.vi_load_path is not None) or (args
             
         if (args.swag_load_path) is not None or (args.vi_load_path is not None):
             res = utils.eval(te_loader, bma_sample, criterion, args.device)
-        elif (args.sabma_load_path is not None) or (args.emcmc_load_path is not None):
+        elif (args.bsam_load_path) or (args.sabma_load_path is not None) or (args.emcmc_load_path is not None):
             res = utils.eval(te_loader, model, criterion, args.device)
         for p in model.parameters():
             p.requires_grad_(True)
