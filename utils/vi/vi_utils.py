@@ -53,17 +53,17 @@ def make_ll_vi(args, model):
         raise NotImplementedError()
 
 
-def enable_vit16i1k(model):
-    for idx in range(len(model.encoder.layers)):
-        in_features = model.encoder.layers[idx].self_attention.out_proj.in_features
-        out_features = model.encoder.layers[idx].self_attention.out_proj.out_features
-        weight = model.encoder.layers[idx].self_attention.out_proj.weight
-        bias = model.encoder.layers[idx].self_attention.out_proj.bias
-        model.encoder.layers[idx].self_attention.out_proj = torch.nn.Linear(in_features=in_features, out_features=out_features)
-        model.encoder.layers[idx].self_attention.out_proj.weight = weight
-        model.encoder.layers[idx].self_attention.out_proj.bias = bias
+# def enable_vit16i1k(model):
+#     for idx in range(len(model.encoder.layers)):
+#         in_features = model.encoder.layers[idx].self_attention.out_proj.in_features
+#         out_features = model.encoder.layers[idx].self_attention.out_proj.out_features
+#         weight = model.encoder.layers[idx].self_attention.out_proj.weight
+#         bias = model.encoder.layers[idx].self_attention.out_proj.bias
+#         model.encoder.layers[idx].self_attention.out_proj = torch.nn.Linear(in_features=in_features, out_features=out_features)
+#         model.encoder.layers[idx].self_attention.out_proj.weight = weight
+#         model.encoder.layers[idx].self_attention.out_proj.bias = bias
         
-    return model
+#     return model
 
 
 

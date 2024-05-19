@@ -50,7 +50,8 @@ class SABMA(torch.nn.Module):
         ## w_mean
         # random initialization classifier
         if args.pretrained_set == 'downstream':
-            w_mean[-len(classifier_param):] = classifier_param
+            pass
+            # w_mean[-len(classifier_param):] = classifier_param
         elif args.pretrained_set == 'source':
             # swag/vi parameter trained on source task does not containt classifier parameters
             w_mean = torch.cat((w_mean, torch.zeros_like(classifier_param)))
@@ -61,7 +62,8 @@ class SABMA(torch.nn.Module):
         # random initialization classifier
         w_var = torch.clamp(w_var, self.var_clamp)
         if args.pretrained_set == 'downstream':
-            w_var[-len(classifier_param):] = args.alpha * torch.ones(len(classifier_param))
+            # w_var[-len(classifier_param):] = args.alpha * torch.ones(len(classifier_param))
+            pass
         elif args.pretrained_set == 'source':
             if self.src_bnn == "vi":
                 w_var = w_var**2 # w_var of VI is std
@@ -76,7 +78,6 @@ class SABMA(torch.nn.Module):
                     if type(w_cov_sqrt) == list:
                         # cat blockwise covmat list as full matrix
                         w_cov_sqrt = torch.cat(w_cov_sqrt, dim=1)
-                w_cov_sqrt = w_cov_sqrt # * cov_scale
                 if args.pretrained_set == 'downstream':
                     # w_cov_sqrt[:, -len(classifier_param):] = 1e-2*torch.rand((w_cov_sqrt.size(0), len(classifier_param)))
                     w_cov_sqrt[:, -len(classifier_param):] = args.alpha**0.5 * torch.zeros((w_cov_sqrt.size(0), len(classifier_param)))

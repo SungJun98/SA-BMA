@@ -126,7 +126,7 @@ parser.add_argument("--warmup_lr_init", type=float, default=1e-7,
 parser.add_argument("--src_bnn", type=str, default="swag", choices=["swag", "la", "vi"],
         help="Type of pre-trained BNN model")
 
-parser.add_argument("--pretrained_set", type=str, default='source', choices=['source', 'down'],
+parser.add_argument("--pretrained_set", type=str, default='source', choices=['source', 'downstream'],
         help="Trained set to make prior (Default: source)")
 
 parser.add_argument("--diag_only", action="store_true", default=False, help="Consider only diagonal variance")
@@ -207,11 +207,12 @@ print("-"*30)
 
 # Define Model------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
+"""
 ## 주석처리 in opt1
 # if  args.src_bnn == 'vi':
 #     checkpoint = torch.load(os.path.join(args.prior_path, f"{args.model}_model.pt"))
 #     vi_utils.load_vi(model, checkpoint)
-"""# ### 1) torchvision 모델에 moped 적용해서 bnn으로 만들고 sabma 적용하는 방안
+# ### 1) torchvision 모델에 moped 적용해서 bnn으로 만들고 sabma 적용하는 방안
 if args.src_bnn == "vi":
     from bayesian_torch.models.dnn_to_bnn import dnn_to_bnn
     const_bnn_prior_parameters = {
@@ -226,14 +227,18 @@ if args.src_bnn == "vi":
     dnn_to_bnn(model, const_bnn_prior_parameters)
     print(f"Preparing Model for VI with MOPED ")
     
-    torch.save(model, '/home/lsj9862/SA-BTL/vi_prior/opt1/resnet18_model.pt')
+    torch.save(model, '/home/lsj9862/SA-BTL/vi_prior/opt1/vitb16-i1k_model.pt')
     w_mean = vi_utils.get_vi_mean_vector(model)
     w_mean = w_mean.detach().clone()
-    torch.save(w_mean, '/home/lsj9862/SA-BTL/vi_prior/opt1/resnet18_mean.pt')
+    torch.save(w_mean, '/home/lsj9862/SA-BTL/vi_prior/opt1/vitb16-i1k_mean.pt')
     w_var = vi_utils.get_vi_variance_vector(model)
     w_var = w_var.detach().clone()
-    torch.save(w_var, '/home/lsj9862/SA-BTL/vi_prior/opt1/resnet18_variance.pt')
+    torch.save(w_var, '/home/lsj9862/SA-BTL/vi_prior/opt1/vitb16-i1k_variance.pt')
 """
+if args.model_path is not None:
+    checkpoint = torch.load(args.model_path)
+    # model.load_state_dict(checkpoint['state_dict'])
+
 
 if args.prior_path is not None:
     w_mean = torch.load(f"{args.prior_path}/{args.model}_mean.pt").detach()
@@ -294,6 +299,7 @@ start_epoch = 1
 scaler, first_step_scaler, second_step_scaler = utils.get_scaler(args)
 print("-"*30)
 #------------------------------------------------------------------------------------
+
 
 ## Training -------------------------------------------------------------------------
 print(f"Start training sabma with {args.optim} optimizer from {start_epoch} epoch!")

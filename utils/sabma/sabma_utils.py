@@ -195,7 +195,7 @@ def train_sabma_sabma(dataloader, sabma_model, criterion, optimizer, device, fir
         X, y = X.to(device), y.to(device)
         
         # Sample weight
-        tr_params, z_1, z_2 = sabma_model.sample(z_scale = 1.0, sample_param='tr')    
+        tr_params, z_1, z_2 = sabma_model.sample(z_scale = 1.0, sample_param='tr')
         frz_params, _, _ = sabma_model.sample(z_scale = 1.0, sample_param='frz')
 
         # compute log probability and gradient of log probability w.r.t. model parameters
