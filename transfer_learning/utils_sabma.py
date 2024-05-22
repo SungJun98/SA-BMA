@@ -1,0 +1,497 @@
+from collections import OrderedDict
+import os.path as osp
+
+import torch, torchvision
+import torch.nn as nn
+
+import gpytorch
+from gpytorch.lazy import RootLazyTensor, DiagLazyTensor, AddedDiagLazyTensor
+from gpytorch.distributions import MultivariateNormal
+
+
+class SABMA(torch.nn.Module):
+    def __init__(
+        self,
+        backbone,
+        cfg,
+        w_mean = None,
+        w_var = None,
+        w_cov_sqrt = None,
+        var_clamp = 1e-16,
+    ):
+
+        super(SABMA, self).__init__()
+        
+        self.var_clamp = var_clamp
+        self.diag_only = cfg.SABMA.DIAG_ONLY
+        self.low_rank = cfg.SABMA.LOW_RANK
+        self.tr_layer = cfg.SABMA.TR_LAYER
+        
+        self.backbone = backbone
+        self.src_bnn = cfg.SABMA.SRC_BNN
+        
+        self.pretrained_set = cfg.SABMA.PRETRAINED_SET
+        self.alpha = cfg.SABMA.ALPHA
+        
+        classifier_param = list()
+        if cfg.MODEL.BACKBONE.NAME == 'resnet50':
+            for param in self.backbone.classifier.parameters():
+                classifier_param.extend(torch.flatten(param))
+        classifier_param = torch.tensor(classifier_param)
+        self.classifier_param_num = len(classifier_param)
+
+        ## w_mean
+        # random initialization classifier
+        if self.pretrained_set == 'downstream':
+            pass            
+        elif self.pretrained_set == 'source':
+            # swag/vi parameter trained on source task does not containt classifier parameters
+            w_mean = torch.cat((w_mean, torch.zeros_like(classifier_param)))
+        else:
+            raise NotImplementedError("Choose the pretrained_set between 'source' and 'downstream'")
+        
+        ## diagonal variance (as form of log standard deviation)
+        # random initialization classifier
+        w_var = torch.clamp(w_var, self.var_clamp)
+        if self.pretrained_set == 'downstream':
+            pass
+        elif self.pretrained_set == 'source':
+            if self.src_bnn == "vi":
+                w_var = w_var**2 # w_var of VI is std
+            # swag/vi parameter trained on source task does not containt classifier parameters
+            w_var = torch.cat((w_var, self.alpha*torch.ones(len(classifier_param))))
+                
+        
+        ## low-ranked covariance matrix
+        if self.src_bnn == 'swag':
+            if not self.diag_only:
+                if w_cov_sqrt is not None:
+                    if type(w_cov_sqrt) == list:
+                        # cat blockwise covmat list as full matrix
+                        w_cov_sqrt = torch.cat(w_cov_sqrt, dim=1)
+                if self.pretrained_set == 'downstream':
+                    w_cov_sqrt[:, -len(classifier_param):] = self.alpha**0.5 * torch.zeros((w_cov_sqrt.size(0), len(classifier_param)))
+                else:
+                    if self.low_rank > 0:
+                        w_cov_sqrt = w_cov_sqrt[:self.low_rank, :]
+                    w_cov_sqrt = torch.cat((w_cov_sqrt, self.alpha**0.5*torch.zeros((w_cov_sqrt.size(0), len(classifier_param)))), dim=1)
+                
+                self.frz_low_rank = w_cov_sqrt.size(0)
+                if self.low_rank < 0:
+                    self.low_rank = self.frz_low_rank
+                elif self.low_rank != self.frz_low_rank:
+                    raise NotImplementedError("No code for different low rank between freezed and trained parameters")
+            else:
+                print("[Warning] No correlation between parameters")
+        ## -----------------------------------------------------------
+        
+        ## calculate the number of params and shape of each layer, set trainable params, and get indices of them
+        self.bnn_param = nn.ParameterDict()
+        
+        self.full_param_shape = OrderedDict(); self.full_param_num = 0
+        self.tr_param_shape = OrderedDict(); self.tr_param_num = 0
+        self.frz_param_shape = OrderedDict(); self.frz_param_num = 0
+        self.tr_param_idx = list(); self.frz_param_idx = list()
+        for name, p in self.backbone.named_parameters():
+            p.requires_grad = False
+            
+            if self.tr_layer == 'nl_ll':
+                # resnet
+                if cfg.MODEL.BACKBONE.NAME == 'resnet50':   
+                    if ('bn' in name) or ('classifier' in name):
+                        self.tr_param_shape[name] = p.shape
+                        self.tr_param_num += p.shape.numel()
+                        self.tr_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
+                    else:
+                        self.frz_param_shape[name] = p.shape
+                        self.frz_param_num += p.shape.numel()
+                        self.frz_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
+                    self.full_param_shape[name] = p.shape
+                    self.full_param_num += p.shape.numel()      
+                    
+            elif self.tr_layer == 'll':
+                # resnet
+                if cfg.MODEL.BACKBONE.NAME == 'resnet50': 
+                    if (name in 'classifier'):
+                        self.tr_param_shape[name] = p.shape
+                        self.tr_param_num += p.shape.numel()
+                        self.tr_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
+                    else:
+                        self.frz_param_shape[name] = p.shape
+                        self.frz_param_num += p.shape.numel()
+                        self.frz_param_idx.append((self.full_param_num, self.full_param_num + p.shape.numel()))    
+                    self.full_param_shape[name] = p.shape
+                    self.full_param_num += p.shape.numel()      
+
+        self.tr_param_idx = torch.tensor([i for start, end in self.tr_param_idx for i in range(start, end)])
+        self.frz_param_idx = torch.tensor([i for start, end in self.frz_param_idx for i in range(start, end)])
+        
+        self.register_buffer("frz_mean", torch.index_select(w_mean, dim=0, index=self.frz_param_idx))
+        self.bnn_param.update({"mean" :
+                nn.Parameter(torch.index_select(w_mean, dim=0, index=self.tr_param_idx))})
+
+        self.register_buffer("frz_log_std", 0.5 * torch.log(torch.index_select(w_var, dim=0, index=self.frz_param_idx)))
+        self.bnn_param.update({"log_std" :
+                nn.Parameter(0.5*torch.log(torch.index_select(w_var, dim=0, index=self.tr_param_idx)))})
+        if not self.diag_only:
+            self.register_buffer("frz_cov_sqrt", torch.index_select(w_cov_sqrt, dim=1, index=self.frz_param_idx))
+            self.bnn_param.update({"cov_sqrt" :
+                    nn.Parameter(torch.index_select(w_cov_sqrt, dim=1, index=self.tr_param_idx))[:self.low_rank, :]})    
+
+        assert self.frz_mean.numel() + self.bnn_param['mean'].numel() == self.full_param_num, "division of mean parameters was not right!"
+        assert self.frz_log_std.numel() + self.bnn_param['log_std'].numel() == self.full_param_num, "division of variance parameters was not right!"
+        if not self.diag_only:
+            assert self.frz_cov_sqrt.numel() + self.bnn_param['cov_sqrt'].numel() == self.full_param_num * self.low_rank,  "division of covariance parameters was not right!"
+        
+        if self.tr_layer == 'll':
+            print("Prior cannot be defined")
+        elif self.tr_layer == 'nl_ll':
+            self.register_buffer("prior_mean", self.bnn_param['mean'].detach().clone()[:-self.classifier_param_num])
+            self.register_buffer("prior_log_std", self.bnn_param['log_std'].detach().clone()[:-self.classifier_param_num])
+            if not self.diag_only:
+                self.register_buffer("prior_cov_sqrt", self.bnn_param['cov_sqrt'].detach().clone()[:, :-self.classifier_param_num])
+        else:
+            raise NotImplementedError("No code for prior except last layer and normalization layer + last layer setting")
+        
+        
+        if self.src_bnn == 'vi':
+            w_mean = unflatten_like_size(w_mean, self.full_param_shape.values())
+            state_dict = list_to_state_dict_2(self.backbone, w_mean, tr_layer='full_layer', last_layer_name=None)
+            self.backbone.load_state_dict(state_dict, strict=False)
+        # -----------------------------------------------------------------------------------------------------    
+
+
+    def forward(self, params, input):
+        return nn.utils.stateless.functional_call(self.backbone, params, input)
+
+    
+    
+    
+    def sample(self, z_scale=1.0, sample_param='tr'):
+        '''
+        Sample weight from bnn params
+        '''
+        if sample_param == 'frz':
+            ## freezed params only
+            z_1 = z_scale * torch.randn_like(self.frz_mean, requires_grad=False)
+            rand_sample = torch.exp(self.frz_log_std) * z_1
+            if not self.diag_only:
+                z_2 = self.frz_cov_sqrt.new_empty((self.frz_low_rank, ), requires_grad=False).normal_(z_scale)
+                cov_sample = self.frz_cov_sqrt.t().matmul(z_2)
+                if self.low_rank > 1:
+                    cov_sample /= (self.frz_low_rank - 1)**0.5
+                rand_sample = 0.5**0.5 * (rand_sample + cov_sample)    
+            else:
+                z_2 = None
+            
+            sample = self.frz_mean + rand_sample
+            
+        elif sample_param == 'tr':
+            # trainable params only
+            z_1 = z_scale * torch.randn_like(self.bnn_param['mean'], requires_grad=False)
+            rand_sample = torch.exp(self.bnn_param['log_std']) * z_1
+            if not self.diag_only:
+                z_2 = self.bnn_param['cov_sqrt'].new_empty((self.low_rank, ), requires_grad=False).normal_(z_scale)
+                cov_sample = self.bnn_param['cov_sqrt'].t().matmul(z_2)
+                if self.low_rank > 1:
+                    cov_sample /= (self.low_rank - 1)**0.5
+                rand_sample = 0.5**0.5 * (rand_sample + cov_sample)    
+            else:
+                z_2 = None
+            
+            sample = self.bnn_param['mean'] + rand_sample
+        
+        else:
+            raise NotImplementedError("No code for other sampling methods except training params only and frezzed params only")
+        
+        return sample, z_1, z_2
+        
+        
+    def prior_log_prob(self):
+        '''
+        calculate prior log_grad
+        '''
+        if self.tr_layer != 'll':
+            if not self.diag_only:
+                cov_mat_lt = RootLazyTensor(self.prior_cov_sqrt.t())
+                var_lt = DiagLazyTensor(torch.exp(self.prior_log_std))
+                covar = AddedDiagLazyTensor(var_lt, cov_mat_lt).add_jitter(1e-10)
+            else:
+                covar = DiagLazyTensor(torch.exp(self.prior_log_std))
+            qdist = MultivariateNormal(self.prior_mean, covar)
+            prior_sample = qdist.rsample()
+            with gpytorch.settings.num_trace_samples(1) and gpytorch.settings.max_cg_iterations(25):
+                prior_log_prob =  qdist.log_prob(prior_sample)
+        else:
+            prior_log_prob = 0.0
+                
+        return prior_log_prob
+
+
+    def posterior_log_prob(self):
+        '''
+        calculate prior log_grad
+        '''
+        if self.tr_layer == 'll':
+            if not self.diag_only:    
+                cov_mat_lt = RootLazyTensor(self.bnn_param['cov_sqrt'].t())
+                var_lt = DiagLazyTensor(torch.exp(self.bnn_param['log_std']))
+                covar = AddedDiagLazyTensor(var_lt, cov_mat_lt).add_jitter(1e-10)   
+            else:
+                covar = DiagLazyTensor(torch.exp(self.bnn_param['log_std']))
+            mean = self.bnn_param['mean']
+        
+        elif self.tr_layer == 'nl_ll':
+            if not self.diag_only:    
+                cov_mat_lt = RootLazyTensor(self.bnn_param['cov_sqrt'][:,:-self.classifier_param_num].t())
+                var_lt = DiagLazyTensor(torch.exp(self.bnn_param['log_std'][:-self.classifier_param_num]))
+                covar = AddedDiagLazyTensor(var_lt, cov_mat_lt).add_jitter(1e-10)   
+            else:
+                covar = DiagLazyTensor(torch.exp(self.bnn_param['log_std'][:-self.classifier_param_num]))
+            mean = self.bnn_param['mean'][:-self.classifier_param_num]
+    
+        else:
+            raise NotImplementedError()
+        
+        qdist = MultivariateNormal(mean, covar)
+        posterior_sample = qdist.rsample()
+        with gpytorch.settings.num_trace_samples(1) and gpytorch.settings.max_cg_iterations(25):
+            posterior_log_prob =  qdist.log_prob(posterior_sample)
+
+        return posterior_log_prob
+
+
+    def log_grad(self, params):
+        '''
+        Compute gradient of log probability w.r.t bnn params
+        '''
+        if not self.diag_only:
+            cov_mat_lt = RootLazyTensor(self.bnn_param['cov_sqrt'].t())
+            var_lt = DiagLazyTensor(torch.exp(self.bnn_param['log_std']))
+            covar = AddedDiagLazyTensor(var_lt, cov_mat_lt).add_jitter(1e-10)
+        else:
+            covar = DiagLazyTensor(torch.exp(self.bnn_param['log_std']))
+        qdist = MultivariateNormal(self.bnn_param['mean'], covar)
+        with gpytorch.settings.num_trace_samples(1) and gpytorch.settings.max_cg_iterations(25):
+            log_prob =  qdist.log_prob(params)      
+
+        # gradient of log probability w.r.t. mean
+        mean_log_grad = covar.inv_matmul((params - self.bnn_param['mean']))    ## calculate derivative manually (gpytorch version)
+        
+        # gradient of log probability w.r.t. diagonal variance
+        std_log_grad = torch.autograd.grad(log_prob, self.bnn_param['log_std'], retain_graph=True)[0]
+        
+        # gradient of log probability w.r.t. low-rank covariance
+        if not self.diag_only:
+            cov_log_grad = torch.autograd.grad(log_prob, self.bnn_param['cov_sqrt'], retain_graph=True)[0]
+            cov_log_grad = torch.flatten(cov_log_grad)
+            
+            return log_prob, [mean_log_grad, std_log_grad, cov_log_grad]   
+        else:
+            return log_prob, [mean_log_grad, std_log_grad]
+    
+    
+        
+    def get_mean_vector(self, unflatten=False):
+        '''
+        Save mean vector
+        '''
+        if self.tr_layer != 'full_layer':
+            mean_param = torch.zeros(self.full_param_num)
+            mean_param[self.tr_param_idx] = self.bnn_param['mean'].cpu()
+            mean_param[self.frz_param_idx] = self.frz_mean.cpu()
+        else:
+            mean_param = self.bnn_param['mean'].cpu()
+            
+        if unflatten:
+            return unflatten_like_size(mean_param, self.full_param_shape.values())
+        else:
+            return mean_param
+
+
+    def get_variance_vector(self, unflatten=False):
+        '''
+        Save variance vector (Not std)
+        '''
+        if self.tr_layer != 'full_layer':
+            var_param = torch.zeros(self.full_param_num)
+            var_param[self.tr_param_idx] = self.bnn_param['log_std'].cpu()
+            var_param[self.frz_param_idx] = self.frz_log_std.cpu()
+        else:
+            var_param = self.bnn_param['log_std'].cpu()
+        var_param = torch.exp(2*var_param)
+        
+        if unflatten:
+            return unflatten_like_size(var_param, self.full_param_shape.values())
+        else:
+            return var_param
+
+
+    def get_covariance_matrix(self):
+        '''
+        Save covariance vector
+        '''
+        if self.diag_only:
+            return None
+        else:
+            if self.tr_layer != 'full_layer':
+                cov_param = torch.zeros((self.low_rank, self.full_param_num))
+                cov_param[:, self.tr_param_idx] = self.bnn_param['cov_sqrt'].cpu()
+                cov_param[:, self.frz_param_idx] = self.frz_cov_sqrt.cpu()
+            else:
+                cov_param = self.bnn_param['cov_sqrt'].cpu()
+            return cov_param
+                   
+    
+    
+    def load_state_dict(self, state_dict, strict=True):
+        super(SABMA, self).load_state_dict(state_dict, strict)
+
+#####################################################################################################################
+
+
+
+
+
+## BSAM
+class SABMA_optim(torch.optim.Optimizer):
+    def __init__(self, params, base_optimizer, rho=0.05, **kwargs):
+        assert rho >= 0.0, f"Invalid rho, should be non-negative: {rho}"
+
+        defaults = dict(rho=rho, **kwargs)
+        super(SABMA_optim, self).__init__(params, defaults)
+
+        self.base_optimizer = base_optimizer(self.param_groups, **kwargs)
+        self.param_groups = self.base_optimizer.param_groups
+        self.defaults.update(self.base_optimizer.defaults)
+
+        self.shared_device = self.param_groups[0]["params"][0].device
+
+
+    @torch.no_grad()
+    def first_step(self, log_grad, zero_grad=False):
+        for group in self.param_groups:
+            for idx, p in enumerate(group["params"]):
+                if p.grad is None: continue
+                self.state[p]["old_p"] = p.data.clone()
+                                    
+                ## Calculate perturbation --------------------------------------
+                Delta_p = group["rho"] / (log_grad[idx].norm(p=2).to(self.shared_device) + 1e-12)   # add small value for numericaly stability
+                Delta_p = Delta_p * log_grad[idx]
+                if idx == 2:
+                    Delta_p = Delta_p.reshape((-1, log_grad[0].size(0)))
+                # --------------------------------------------------------------------------- 
+                                        
+                ## theta + Delta_theta
+                p.add_(Delta_p) # climb to the local maximum "w + e(w)"
+                # ---------------------------------------------------------------------------
+            if zero_grad: self.zero_grad()
+
+
+    def second_sample(self, z_1, z_2, sabma_model):
+        '''
+        Sample from perturbated bnn parameters with pre-selected z_1, z_2
+        '''
+
+        # diagonal variance
+        rand_sample = (torch.exp(self.param_groups[0]['params'][1])) * z_1
+        
+        # covariance
+        if not sabma_model.diag_only:
+            cov_sample = (self.param_groups[0]['params'][2].t().matmul(z_2[:sabma_model.low_rank]))
+            if sabma_model.low_rank > 1:
+                cov_sample /= (sabma_model.low_rank - 1)**0.5
+            rand_sample = 0.5**0.5 * (rand_sample + cov_sample)
+        sample = self.param_groups[0]['params'][0] + rand_sample
+    
+        return sample
+
+
+    @torch.no_grad()
+    def second_step(self, zero_grad=False, amp=True):
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is None: continue
+                p.data = self.state[p]["old_p"]
+
+        self.base_optimizer.step()  # do the actual "sharpness-aware" update
+
+        if zero_grad: self.zero_grad()
+
+
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        self.base_optimizer.step(closure)
+    
+
+
+
+
+import numpy as np
+import pickle, os, collections
+import matplotlib.pyplot as plt
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+def unflatten_like_size(vector, likeTensorSize):
+    """
+    Takes a flat torch.tensor and unflattens it to a list of torch.tensors
+    Input
+     - vector : flattened parameters
+     - likeTensorSize : list of torch.Size
+    """
+    outList = []
+    i = 0
+    for layer_size in likeTensorSize:
+        n = layer_size.numel()
+        outList.append(vector[i : i + n].view(layer_size))
+        i += n
+
+    return outList
+
+
+
+def list_to_state_dict(sabma_model, tr_sample, frz_sample):
+    '''
+    Change sample list to state dict
+    '''
+    ordDict = collections.OrderedDict()
+    tr_idx = 0; frz_idx = 0
+    for name in sabma_model.full_param_shape.keys():
+        if name in sabma_model.tr_param_shape.keys():
+            ordDict[name] = tr_sample[tr_idx]
+            tr_idx += 1
+        elif name in sabma_model.frz_param_shape.keys():
+            ordDict[name] = frz_sample[frz_idx]
+            frz_idx += 1
+    assert tr_idx == len(sabma_model.tr_param_shape.keys()), "Check the process to convert trainable parameter sample to state dict"
+    assert frz_idx == len(sabma_model.frz_param_shape.keys()), "Check the process to convert freezed parameter sample to state dict"
+
+    return ordDict
+
+
+def format_weights(tr_sample, frz_sample, sabma_model):
+    '''
+    Format sampled vector to state dict
+    '''  
+    tr_sample = unflatten_like_size(tr_sample, sabma_model.tr_param_shape.values())
+    frz_sample = unflatten_like_size(frz_sample, sabma_model.frz_param_shape.values())
+    state_dict = list_to_state_dict(sabma_model, tr_sample, frz_sample)
+    return state_dict
+
+
+# parameter list to state_dict(ordered Dict)
+def list_to_state_dict_2(model, sample_list, tr_layer="full_layer", last_layer_name="classifier"):
+    '''
+    Change sample list to state dict
+    '''
+    ordDict = collections.OrderedDict()
+    if tr_layer == "last_layer":
+        ordDict[f"{last_layer_name}.weight"] = sample_list[0]
+        ordDict[f"{last_layer_name}.bias"] = sample_list[1]
+    else:        
+        for sample, (name, param) in zip(sample_list, model.named_parameters()):
+            ordDict[name] = sample
+    return ordDict

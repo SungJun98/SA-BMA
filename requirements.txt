@@ -28,3 +28,4 @@ future
 ftfy
 regex
 wilds==1.2.2
+protobuf==3.20.*
