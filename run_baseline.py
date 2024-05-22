@@ -34,6 +34,10 @@ parser.add_argument("--print_epoch", type=int, default=10, help="Printing epoch"
 
 parser.add_argument("--ignore_wandb", action="store_true", default=False, help="Deactivate wandb")
 
+parser.add_argument("--wd_project", default=None, type=str, help="name of wandb project")
+parser.add_argument("--wd_entity", default=None, type=str, help="entity of wandb")
+
+
 parser.add_argument("--resume", type=str, default=None,
     help="path to load saved model to resume training (default: None)",)
 
@@ -179,7 +183,7 @@ args = parser.parse_args()
 #----------------------------------------------------------------
 
 if not args.ignore_wandb:
-    wandb.init(project="SA-BTL", entity=None)
+    wandb.init(project=args.wd_preoject, entity=args.wd_entity)
 
 # Set Device and Seed--------------------------------------------
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

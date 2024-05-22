@@ -113,7 +113,7 @@ def bma_la(te_loader, mean, var, model, la, tr_layer="last_layer", bma_num_model
                 "Ensemble %d/%d. Accuracy: %.2f%% NLL: %.4f"
                 % (i + 1, bma_num_models, ens_accuracy * 100, ens_nll)
             )
-        """
+
         bma_predictions /= bma_num_models
 
         bma_accuracy = np.mean(np.argmax(bma_predictions, axis=1) == targets)
@@ -126,4 +126,4 @@ def bma_la(te_loader, mean, var, model, la, tr_layer="last_layer", bma_num_model
             "targets" : targets,
             "bma_accuracy" : bma_accuracy,
             "nll" : bma_nll
-    }"""
+    }

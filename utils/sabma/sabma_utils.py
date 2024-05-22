@@ -59,129 +59,6 @@ def format_weights(tr_sample, frz_sample, sabma_model):
     return state_dict
 
 
-def train_sabma_sgd(dataloader, sabma_model, criterion, optimizer, device, scaler):
-    loss_sum = 0.0
-    correct = 0.0
-    num_objects_current = 0
-    raise NotImplementedError("Needed to update code")
-    sabma_model.backbone.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
-           
-        # Sample weight
-        params, _, _ = sabma_model.sample(1.0)
-        
-        # Change weight sample shape to input model
-        params = utils.format_weights(params, sabma_model)
-
-        if scaler is not None:
-            with torch.cuda.amp.autocast():
-                pred = sabma_model(params, X)
-                loss = criterion(pred, y)
-            scaler.scale(loss).backward()
-            
-            # # gradient clipping (useless....)
-            # scaler.unscale_(optimizer)
-            # torch.nn.utils.clip_grad_norm_(sabma_model.bnn_param.log_std, 0.05) # max_norm=0.1
-
-            scaler.step(optimizer)  # optimizer.step()
-            scaler.update()
-            optimizer.zero_grad()
-        else:
-            pred = sabma_model(params, X)
-            loss = criterion(pred, y)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            
-        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-        loss_sum += loss.data.item() * X.size(0)
-        num_objects_current += X.size(0)
-        
-    return{
-        "loss" : loss_sum / num_objects_current,
-        "accuracy" : correct / num_objects_current * 100.0,
-    }
-
-
-
-
-def train_sabma_sam(dataloader, sabma_model, criterion, optimizer, device, first_step_scaler, second_step_scaler):
-    loss_sum = 0.0
-    correct = 0.0
-    num_objects_current = 0
-    raise NotImplementedError("Needed to update code")
-    sabma_model.backbone.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
-           
-        # Sample weight
-        params, z_1, z_2 = sabma_model.sample(1.0)        
-        # Change weight sample shape to input model
-        params = utils.format_weights(params, sabma_model)
-
-        if first_step_scaler is not None:
-            ## first forward & backward
-            with torch.cuda.amp.autocast():
-                pred = sabma_model(params, X)
-                loss = criterion(pred, y)        
-            first_step_scaler.scale(loss).backward()
-            first_step_scaler.unscale_(optimizer)
-            
-            optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
-            
-            inf_grad_cnt = sum(v.item() for v in optimizer_state["found_inf_per_device"].values())      # Check if any gradients are inf/nan
-            if inf_grad_cnt == 0:
-                # if valid graident, apply sam_first_step
-                optimizer.first_step(zero_grad=True)
-                sam_first_step_applied = True
-            else:
-                # if invalid graident, skip sam and revert to single optimization step
-                optimizer.zero_grad()
-                sam_first_step_applied = False  
-            first_step_scaler.update()
-
-            ## second forward-backward pass
-            params = optimizer.second_sample(z_1, z_2, sabma_model)
-            with torch.cuda.amp.autocast():
-                pred = sabma_model(params, X)
-                loss = criterion(pred, y)
-            second_step_scaler.scale(loss).backward()
-            
-            if sam_first_step_applied:
-                optimizer.second_step()  
-            second_step_scaler.step(optimizer)
-            second_step_scaler.update()
-
-            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-            loss_sum += loss.data.item() * X.size(0)
-            num_objects_current += X.size(0)
-            
-        else:
-            ## first forward & backward
-            pred = sabma_model(params, X)
-            loss = criterion(pred, y)        
-            loss.backward()
-            optimizer.first_step(zero_grad=True, amp=False)
-                      
-            ## second forward-backward pass
-            params = optimizer.second_sample(z_1, z_2, sabma_model)
-            params = utils.format_weights(params, sabma_model)
-            
-            pred = sabma_model(params, X)
-            loss = criterion(pred, y)
-            loss.backward()
-            optimizer.second_step(zero_grad=True, amp=False)  
-            
-            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-            loss_sum += loss.data.item() * X.size(0)
-            num_objects_current += X.size(0)
-
-    return{
-        "loss" : loss_sum / num_objects_current,
-        "accuracy" : correct / num_objects_current * 100.0,
-    }
-
 
 
 def train_sabma_sabma(dataloader, sabma_model, criterion, optimizer, device, first_step_scaler, second_step_scaler, kl_eta=1.0):
@@ -335,10 +212,6 @@ def bma_sabma(te_loader, sabma_model, bma_num_models,
         ood_sabma_predictions =np.zeros((len(ood_loader.dataset), num_classes))
     with torch.no_grad():
         for i in range(bma_num_models):
-            # if i == 0:
-            #     tr_params, _, _ = sabma_model.sample(z_scale=1.0, sample_param='tr')
-            #     frz_params, _, _ = sabma_model.sample(z_scale=1.0, sample_param='frz')
-            # else:
             tr_params, _, _  = sabma_model.sample(z_scale=1.0, sample_param='tr')
             frz_params, _, _  = sabma_model.sample(z_scale=1.0, sample_param='frz')
             params = format_weights(tr_params, frz_params, sabma_model)
@@ -368,9 +241,6 @@ def bma_sabma(te_loader, sabma_model, bma_num_models,
 
         sabma_logits /= bma_num_models
         sabma_predictions /= bma_num_models
-        
-        if ood_loader is not None:
-            ood_sabma_predictions /= bma_num_models
 
         sabma_loss = criterion(torch.tensor(sabma_predictions), torch.tensor(res['targets'])).item()
         sabma_accuracy = np.mean(np.argmax(sabma_predictions, axis=1) == res["targets"]) * 100
@@ -378,11 +248,6 @@ def bma_sabma(te_loader, sabma_model, bma_num_models,
         unc = utils.calibration_curve(sabma_predictions, res["targets"], num_bins)
         sabma_ece = unc['ece']
         
-        if ood_loader is not None:
-            ood_sabma_accuracy = np.mean(np.argmax(ood_sabma_predictions, axis=1) == ood_res["targets"]) * 100
-            ood_sabma_nll = -np.mean(np.log(ood_sabma_predictions[np.arange(ood_sabma_predictions.shape[0]), ood_res["targets"]] + eps))
-            ood_sabma_unc = utils.calibration_curve(ood_sabma_predictions, ood_res["targets"], num_bins)
-            ood_sabma_ece = ood_sabma_unc['ece']
         
     if not validation:
         print(f"bma Accuracy using {bma_num_models} model : {sabma_accuracy:.2f}% / NLL : {sabma_nll:.4f}")
@@ -395,12 +260,6 @@ def bma_sabma(te_loader, sabma_model, bma_num_models,
             "accuracy" : sabma_accuracy,
             "nll" : sabma_nll,
             "ece" : sabma_ece,
-            "ood_predictions" : ood_sabma_predictions,
-            "ood_targets" : ood_res["targets"],
-            "ood_accuracy" : ood_sabma_accuracy,
-            "ood_nll" : ood_sabma_nll,
-            "ood_unc" : ood_sabma_unc,
-            "ood_ece" : ood_sabma_ece
             }
     else:
         return {"logits" : sabma_logits,

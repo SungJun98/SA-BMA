@@ -110,7 +110,7 @@ class SAM(torch.optim.Optimizer):
 
 
 
-"""
+
 ## FisherSAM
 class FSAM(torch.optim.Optimizer):
     def __init__(self, params, base_optimizer, rho=0.05, **kwargs):
@@ -154,4 +154,3 @@ class FSAM(torch.optim.Optimizer):
     @torch.no_grad()
     def step(self, closure=None):
         self.base_optimizer.step(closure)
-"""

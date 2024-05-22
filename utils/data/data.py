@@ -10,23 +10,6 @@ from timm.data.transforms_factory import create_transform
 
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 
-"""
-class ExtractedDataSet(Dataset): 
-    '''
-    Class for Feature Extracted data
-    '''
-    def __init__(self, feature, target):
-        self.x = feature
-        self.y = target
-            
-    def __len__(self): 
-        return len(self.x)
-
-    def __getitem__(self, idx): 
-        x = self.x[idx]
-        y = self.y[idx]
-        return x, y
-"""
 
 def create_transform_v2(data_name='cifar10', aug=True, scale=None, ratio=None,
                     hflip=0.5, vflip=0, color_jitter=0.4, aa=None,

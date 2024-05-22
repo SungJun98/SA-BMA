@@ -34,7 +34,6 @@ class bSAM(torch.optim.Optimizer):
          
     @torch.no_grad()
     def first_step(self, zero_grad=False):
-        # 본 함수 실행 시점에서 p.grad 는 p + e의 grad
         self.noisy_grad = [p.grad for group in self.param_groups for p in group['params']]
 
         for group in self.param_groups: 

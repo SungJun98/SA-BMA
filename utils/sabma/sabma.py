@@ -325,9 +325,6 @@ class SABMA(torch.nn.Module):
     
     
     def load_state_dict(self, state_dict, strict=True):
-        '''
-        load하는거 만들어놓기
-        '''
         super(SABMA, self).load_state_dict(state_dict, strict)
 
 #####################################################################################################################
@@ -374,21 +371,6 @@ class SABMA_optim(torch.optim.Optimizer):
                 
         else:
             raise NotImplementedError("Need to be fixed")
-            """
-            for group in self.param_groups:
-                for idx, p in enumerate(group["params"]):
-                    if p.grad is None: continue
-                    self.state[p]["old_p"] = p.data.clone()
-                    ## Calculate perturbation Delta_theta --------------------------------------
-                    # Delta_p = group["rho"] * log_grad[idx].to('cuda') * p.grad
-                    # Delta_p = Delta_p / (torch.sqrt(p.grad * log_grad[idx].to('cuda') * p.grad) + 1e-12) # add small value for numericaly stability
-                    # ---------------------------------------------------------------------------                        
-                    ## theta + Delta_theta
-                    p.add_(Delta_p)  # climb to the local maximum "w + e(w)"
-                    # ---------------------------------------------------------------------------
-                    del Delta_p
-            if zero_grad: self.zero_grad()
-            """
 
 
     def second_sample(self, z_1, z_2, sabma_model):
@@ -435,9 +417,3 @@ class SABMA_optim(torch.optim.Optimizer):
     def step(self, closure=None):
         self.base_optimizer.step(closure)
     
-
-    '''
-    def load_state_dict(self, state_dict):
-        super().load_state_dict(state_dict)
-        self.base_optimizer.param_groups = self.param_groups
-    '''
