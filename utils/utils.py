@@ -170,6 +170,46 @@ def get_dataset(dataset='cifar10',
 
 
 
+def get_dataset_dassl(args):
+    from my_dassl.data import DataManager
+    from my_dassl.config import get_cfg_default
+    
+    import my_dassl.datasets.oxford_pets
+    import my_dassl.datasets.oxford_flowers
+    import my_dassl.datasets.fgvc_aircraft
+    import my_dassl.datasets.dtd
+    import my_dassl.datasets.eurosat
+    import my_dassl.datasets.stanford_cars
+    import my_dassl.datasets.food101
+    import my_dassl.datasets.sun397
+    import my_dassl.datasets.caltech101
+    import my_dassl.datasets.ucf101
+    import my_dassl.datasets.imagenet
+    import my_dassl.datasets.svhn
+    import my_dassl.datasets.resisc45
+    import my_dassl.datasets.clevr
+
+    import my_dassl.datasets.locmnist
+    
+    cfg = get_cfg_default()
+    
+    dataset_config_file = f'./my_dassl/datasets/config/{args.dataset}.yaml'
+    cfg.SEED = args.seed
+    cfg.merge_from_file(dataset_config_file)
+    cfg.DATASET.ROOT = args.data_path
+    cfg.DATASET.NUM_SHOTS = args.dat_per_cls
+    cfg.DATASET.SUBSAMPLE_CLASSES = "all"
+    
+    dm = DataManager(cfg)
+    tr_loader = dm.train_loader_x
+    val_loader = dm.val_loader
+    te_loader = dm.test_loader
+    num_classes = dm.num_classes
+    
+    return tr_loader, val_loader, te_loader, num_classes
+
+
+
 def get_backbone(model_name, num_classes, device, pre_trained=True):
     '''
     Define Backbone Model
@@ -425,8 +465,12 @@ def train_sgd(dataloader, model, criterion, optimizer, device, scaler):
     num_batches = len(dataloader)
 
     model.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
+    for batch_idx, batch in enumerate(dataloader):
+        try:
+            X = batch["img"].to(device)
+            y = batch["label"].to(device)
+        except:
+            X, y = batch[0].to(device), batch[1].to(device)
 
         if scaler is not None:
             with torch.cuda.amp.autocast():
@@ -463,8 +507,12 @@ def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler
     num_batches = len(dataloader)
 
     model.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
+    for batch_idx, batch in enumerate(dataloader):
+        try:
+            X = batch["img"].to(device)
+            y = batch["label"].to(device)
+        except:
+            X, y = batch[0].to(device), batch[1].to(device)
         optimizer.zero_grad()
 
         if first_step_scaler is not None:
@@ -542,8 +590,12 @@ def train_fsam(dataloader, model, criterion, optimizer, device, first_step_scale
     num_batches = len(dataloader)
 
     model.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
+    for batch_idx, batch in enumerate(dataloader):
+        try:
+            X = batch["img"].to(device)
+            y = batch["label"].to(device)
+        except:
+            X, y = batch[0].to(device), batch[1].to(device)
         optimizer.zero_grad()
 
         if first_step_scaler is not None:
@@ -623,8 +675,13 @@ def eval(loader, model, criterion, device, num_bins=15, eps=1e-8):
     model.eval()
     offset = 0
     with torch.no_grad():
-        for _, (input, target) in enumerate(loader):
-            input, target = input.to(device), target.to(device)
+        for batch_idx, batch in enumerate(loader):
+            try:
+                input = batch["img"].to(device)
+                target = batch["label"].to(device)
+            except:
+                input, target = batch[0].to(device), batch[1].to(device)
+        
             pred = model(input)
             loss = criterion(pred, target)
             loss_sum += loss.item() * input.size(0)
@@ -836,24 +893,3 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
     #     save_reliability_diagram(args.method, args.optim, args.save_path, bma_res['unc'], True)
     
     return bma_res, bma_accuracy, bma_nll, bma_ece, bma_accuracy_ts, bma_nll_ts, bma_ece_ts, temperature.item()
-
-
-
-def topk_accuracy(output, target, topk=(1,5)):
-    """Compute the top-k accuracy for the specified values of k"""
-    with torch.no_grad():
-        output = torch.tensor(output).float()
-        target = torch.tensor(target).float()
-        
-        maxk = max(topk)
-        batch_size = target.size(0)
-
-        _, pred = output.topk(maxk, 1, True, True)
-        pred = pred.t()
-        correct = pred.eq(target.view(1, -1).expand_as(pred))
-
-        topk_acc = []
-        for k in topk:
-            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
-            topk_acc.append(correct_k.mul_(100.0 / batch_size))
-        return topk_acc

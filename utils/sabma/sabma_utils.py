@@ -65,8 +65,12 @@ def train_sabma_sgd(dataloader, sabma_model, criterion, optimizer, device, scale
     num_objects_current = 0
     raise NotImplementedError("Needed to update code")
     sabma_model.backbone.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
+    for batch_idx, batch in enumerate(dataloader):
+        try:
+            X = batch["img"].to(device)
+            y = batch["label"].to(device)
+        except:
+            X, y = batch[0].to(device), batch[1].to(device)
            
         # Sample weight
         params, _, _ = sabma_model.sample(1.0)
@@ -112,8 +116,12 @@ def train_sabma_sam(dataloader, sabma_model, criterion, optimizer, device, first
     num_objects_current = 0
     raise NotImplementedError("Needed to update code")
     sabma_model.backbone.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
+    for batch_idx, batch in enumerate(dataloader):
+        try:
+            X = batch["img"].to(device)
+            y = batch["label"].to(device)
+        except:
+            X, y = batch[0].to(device), batch[1].to(device)
            
         # Sample weight
         params, z_1, z_2 = sabma_model.sample(1.0)        
@@ -191,8 +199,12 @@ def train_sabma_sabma(dataloader, sabma_model, criterion, optimizer, device, fir
     
     sabma_model.train()
     sabma_model.backbone.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
+    for batch_idx, batch in enumerate(dataloader):
+        try:
+            X = batch["img"].to(device)
+            y = batch["label"].to(device)
+        except:
+            X, y = batch[0].to(device), batch[1].to(device)
         
         # Sample weight
         tr_params, z_1, z_2 = sabma_model.sample(z_scale = 1.0, sample_param='tr')
@@ -289,8 +301,13 @@ def eval_sabma(loader, sabma_model, params, criterion, device, num_bins=15, eps=
     sabma_model.backbone.eval()
     offset = 0
     with torch.no_grad():
-        for _, (input, target) in enumerate(loader):
-            input, target = input.to(device), target.to(device)
+        for batch_idx, batch in enumerate(loader):
+            try:
+                input = batch["img"].to(device)
+                target = batch["label"].to(device)
+            except:
+                input, target = batch[0].to(device), batch[1].to(device)
+        
             pred = sabma_model(params, input)
             loss = criterion(pred, target)
             loss_sum += loss.item() * input.size(0)

@@ -163,8 +163,15 @@ class CONVNET(TrainerX):
             self.before_epoch()
             self.run_epoch()
             self.after_epoch()
+            
+            # ### REMOVE ###############
+            # if (self.epoch + 1) == 130 and self.cfg.METHOD == 'swag':
+            #     self.test(method='swag')
+            # ##########################
+            
             if self.tolerance == self.cfg.TOLERANCE:
                 break
+            
         self.after_train() 
 
 
@@ -307,15 +314,14 @@ class CONVNET(TrainerX):
         output = self.model(image)
         loss = F.cross_entropy(output, label)
         
-        if ((self.epoch + 1) > self.cfg.SWAG.SWA_START) and ((self.epoch + 1 - self.cfg.SWAG.SWA_START) % self.cfg.SWAG.SWA_C_EPOCHS == 0):
-            self.swag_model.collect_model(self.model)
-            self.swag_model.sample(0.0)
-            swag.bn_update(self.train_loader_x, self.swag_model)
-
         loss.backward()
         self.optim.step()
+        
+        if ((self.epoch + 1) >= self.cfg.SWAG.SWA_START) and ((self.epoch + 1 - self.cfg.SWAG.SWA_START) % self.cfg.SWAG.SWA_C_EPOCHS == 0):
+            self.swag_model.collect_model(self.model)
+            self.swag_model.sample(0.0, cov=(not self.cfg.SWAG.DIAG_ONLY))
+            swag.bn_update(self.train_loader_x, self.swag_model) 
 
-        # dnn test
         loss_summary = {
             "loss": loss.item(),
             "acc_train": compute_accuracy(output, label)[0].item(),
@@ -324,26 +330,8 @@ class CONVNET(TrainerX):
             wandb.log({'tr_loss (batch)': loss_summary["loss"],
                     'tr_acc (batch)' : loss_summary["acc_train"]})
         
-        # swag test
-        with torch.no_grad():
-            if ((self.epoch +1) > self.cfg.SWAG.SWA_START):
-                swag_output = self.swag_model(image)
-                swag_loss = F.cross_entropy(output, label)
-
-                loss_summary['swag_loss'] = swag_loss.item()
-                loss_summary['swag_acc_train'] = compute_accuracy(swag_output, label)[0].item()
-            else:
-                loss_summary['swag_loss'] = 0.0
-                loss_summary['swag_acc_train'] = 0.0
-        
-        if self.cfg.use_wandb:
-            wandb.log({'swag_tr_loss (batch)': loss_summary["swag_loss"],
-                    'swag_tr_acc (batch)' : loss_summary["swag_acc_train"]})
-
         if (self.batch_idx + 1) == self.num_batches:
             self.update_lr()
-        
-        # torch.cuda.empty_cache()
     
         return loss_summary
 
@@ -376,7 +364,7 @@ class CONVNET(TrainerX):
         output = self.sabma_model(params_, image)
         loss = F.cross_entropy(output, label)
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.sabma_model.bnn_param.values(), 1.0)
+        # torch.nn.utils.clip_grad_norm_(self.sabma_model.bnn_param.values(), 1.0)
         self.optim.second_step(zero_grad=True)
         
         loss_summary = {
@@ -417,7 +405,7 @@ class CONVNET(TrainerX):
         if self.cfg.METHOD == 'dnn':
             curr_result = 0.0
             if self.cfg.TEST.FINAL_MODEL == "best_val":
-                curr_result = self.test(split="val")
+                curr_result = self.test(method='dnn', split="val")
                 is_best = curr_result > self.best_result                
                 if is_best:
                     self.best_result = curr_result
@@ -436,15 +424,14 @@ class CONVNET(TrainerX):
                     self.save_model(self.epoch, self.output_dir)
         
         ## swag validation and save best model
-        elif self.cfg.METHOD == 'swag':
-            if (self.epoch + 1) < self.cfg.SWAG.SWA_START:
-                curr_result = self.test(split="val")
-                self.best_epoch = 0
-            else:
-                curr_result = self.test(split="val")
-                is_best = curr_result > self.best_result
+        elif self.cfg.METHOD == 'swag':            
+            curr_result = self.test(method='dnn', split="val")
+            self.best_epoch = 0
+            if (self.epoch + 1) >= self.cfg.SWAG.SWA_START:
+                curr_result_swag = self.test(method='swag', split="val")
+                is_best = curr_result_swag > self.best_result
                 if is_best:
-                    self.best_result = curr_result
+                    self.best_result = curr_result_swag
                     self.best_epoch = self.epoch
                     self.save_model(
                         self.epoch,
@@ -454,12 +441,15 @@ class CONVNET(TrainerX):
                     self.tolerance = 0
                 else:
                     self.tolerance +=1
-           
+
+                if self.cfg.use_wandb:
+                    wandb.log({'swag_val_acc':curr_result_swag})
+            
         ## vi validation and save best model
         elif self.cfg.METHOD == 'vi':
             curr_result = 0.0
             if self.cfg.TEST.FINAL_MODEL == "best_val":
-                curr_result = self.test(split='val')
+                curr_result = self.test(method='vi', split='val')
                 is_best = curr_result > self.best_result                
                 if is_best:
                     self.best_result = curr_result
@@ -504,7 +494,7 @@ class CONVNET(TrainerX):
             
 
     @torch.no_grad()
-    def test(self, split=None):
+    def test(self, method, split=None):
         """A generic testing pipeline."""
         self.set_model_mode("eval")
         self.evaluator.reset()
@@ -521,14 +511,11 @@ class CONVNET(TrainerX):
         print(f"Evaluate on the *{split}* set")
         for batch_idx, batch in enumerate(tqdm(data_loader)):
             input, label = self.parse_batch_test(batch)
-            if self.cfg.METHOD in ['dnn', 'vi']:
+            if method in ['dnn', 'vi']:
                 output = self.model_inference(input)
-            elif self.cfg.METHOD == 'swag':
-                if (self.epoch+1 <= self.cfg.SWAG.SWA_START):
-                    output = self.model_inference(input)
-                else:
-                    self.swag_model.sample(0.0)
-                    output = self.swag_model(input)
+            elif method == 'swag':    
+                self.swag_model.sample(0.0, cov=(not self.cfg.SWAG.DIAG_ONLY))
+                output = self.swag_model(input)
                 
             self.evaluator.process(output, label)
 
@@ -568,7 +555,7 @@ class CONVNET(TrainerX):
             for idx in range(bma_num_models):
                 # sample model
                 if self.cfg.METHOD == "swag":
-                    self.swag_model.sample(1.0)
+                    self.swag_model.sample(1.0, cov=(not self.cfg.SWAG.DIAG_ONLY))
                     swag.bn_update(self.train_loader_x, self.swag_model)    
                 elif self.cfg.METHOD == "sabma":
                     # Sample weight
@@ -613,7 +600,6 @@ class CONVNET(TrainerX):
             if self.cfg.use_wandb:
                 wandb.run.summary['test bma acc'] = results['bma_accuracy']
                 wandb.run.summary['best epoch'] = self.best_epoch
-
         else:
             print(f"Valid Acc : {bma_accuracy:.4f}")
             
@@ -670,6 +656,7 @@ class CONVNET(TrainerX):
         
         
     def load_swag_model(self, checkpoint):
+        import pdb;pdb.set_trace()
         checkpoint = torch.load(checkpoint)
         self.swag_model.load_state_dict(checkpoint)
         print("Successfully load swag model")

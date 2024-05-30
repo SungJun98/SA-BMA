@@ -97,8 +97,12 @@ def predict(loader, model, temperature=None):
     
     offset = 0
     with torch.no_grad():
-        for input, target in loader:
-            input = input.to("cuda")
+        for batch_idx, batch in enumerate(loader):
+            try:
+                input = batch["img"].to("cuda")
+                target = batch["label"].to("cuda")
+            except:
+                input, target = batch[0].to("cuda"), batch[1].to("cuda")
             output = model(input)
 
             batch_size = input.size(0)
@@ -170,8 +174,11 @@ def bn_update(loader, model, verbose=False, subset=None, **kwargs):
             loader = itertools.islice(loader, num_batches)
         if verbose:
             loader = tqdm.tqdm(loader, total=num_batches)
-        for input, _ in loader:
-            input = input.cuda(non_blocking=True)
+        for batch in loader:
+            try:
+                input = batch["img"].to("cuda")
+            except:
+                input = batch[0].to("cuda")
             input_var = torch.autograd.Variable(input)
             b = input_var.data.size(0)
 

@@ -43,7 +43,8 @@ parser.add_argument("--ignore_wandb", action="store_true", default=False, help="
 
 ## Data ---------------------------------------------------------
 parser.add_argument(
-    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", 'imagenet'],
+    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100",
+                                        "eurosat", "dtd", "oxford_flowers", "oxford_pets", "food101", "ucf101", 'fgvc_aircraft'],
                     help="dataset name")
 
 parser.add_argument(
@@ -186,8 +187,9 @@ if not args.ignore_wandb:
 #----------------------------------------------------------------
 
 # Load Data --------------------------------------------------------
-args.data_path = os.path.join(args.data_path, args.dataset)
-tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
+if args.dataset in ['cifar10', 'cifar100']:
+    args.data_path = os.path.join(args.data_path, args.dataset)
+    tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
                                                         data_path=args.data_path,
                                                         dat_per_cls=args.dat_per_cls,
                                                         use_validation=args.use_validation,
@@ -196,6 +198,9 @@ tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.d
                                                         seed=args.seed,
                                                         aug=args.aug,
                                                         )
+elif args.dataset in ["eurosat", "dtd", "oxford_flowers", "oxford_pets", "food101", "ucf101", 'fgvc_aircraft']:
+    tr_loader, val_loader, te_loader, num_classes = utils.get_dataset_dassl(args)
+
 
 if args.dat_per_cls >= 0:
     print(f"Load Data : {args.dataset}-{args.dat_per_cls}shot")

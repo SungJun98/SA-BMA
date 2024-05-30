@@ -180,9 +180,7 @@ def main(args):
         trainer.load_model(args.model_dir)
         trainer.test()
     elif cfg.METHOD == 'swag':
-        # trainer.load_model(args.model_dir)
         trainer.load_swag_model(osp.join(args.model_dir, 'swag_model.pt'))
-        # trainer.test()
         trainer.bma()
     elif cfg.METHOD == 'vi':
         trainer.load_model(args.model_dir)

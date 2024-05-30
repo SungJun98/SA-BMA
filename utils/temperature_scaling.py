@@ -50,8 +50,14 @@ class ModelWithTemperature(nn.Module):
             logits_list = []
             labels_list = []
             with torch.no_grad():
-                for input, label in valid_loader:
-                    input = input.cuda()
+                for batch in valid_loader:
+                    try:
+                        input = batch["img"].to("cuda")
+                        label = batch["label"].to("cuda")
+                    except:
+                        input = batch[0].to("cuda")
+                        label = batch[1].to("cuda")
+                        
                     logits = self.model(input)
                     logits_list.append(logits)
                     labels_list.append(label)

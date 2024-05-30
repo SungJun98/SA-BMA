@@ -98,8 +98,12 @@ def train_vi_sgd(dataloader, model, criterion, optimizer, device, scaler, batch_
     num_batches = len(dataloader)
 
     model.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
+    for batch_idx, batch in enumerate(dataloader):
+        try:
+            X = batch["img"].to(device)
+            y = batch["label"].to(device)
+        except:
+            X, y = batch[0].to(device), batch[1].to(device)
 
         if scaler is not None:
             with torch.cuda.amp.autocast():
@@ -139,8 +143,12 @@ def train_vi_sam(dataloader, model, criterion, optimizer, device, first_step_sca
     num_batches = len(dataloader)
 
     model.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
+    for batch_idx, batch in enumerate(dataloader):
+        try:
+            X = batch["img"].to(device)
+            y = batch["label"].to(device)
+        except:
+            X, y = batch[0].to(device), batch[1].to(device)
         optimizer.zero_grad()
 
         if first_step_scaler is not None:

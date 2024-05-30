@@ -45,7 +45,8 @@ parser.add_argument("--tol", type=int, default=30,
 
 ## Data ---------------------------------------------------------
 parser.add_argument(
-    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "imagenet"],
+    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100",
+                                        "eurosat", "dtd", "oxford_flowers", "oxford_pets", "food101", "ucf101", 'fgvc_aircraft'],
                     help="dataset name")
 
 parser.add_argument(
@@ -160,7 +161,7 @@ parser.add_argument("--val_mc_num", type=int, default=1, help="number of MC samp
 parser.add_argument("--eps", type=float, default=1e-8, help="small float to calculate nll")
 parser.add_argument("--bma_num_models", type=int, default=30, help="Number of models for bma")
 parser.add_argument("--num_bins", type=int, default=15, help="bin number for ece")
-parser.add_argument("--no_save_bma", action='store_true', default=False,
+parser.add_argument("--no_save_bma", action='store_true', default=True, ## change to default=False to save bma models
             help="Deactivate saving model samples in BMA")
 #----------------------------------------------------------------
 
@@ -205,8 +206,9 @@ if not args.ignore_wandb:
 #------------------------------------------------------------------
 
 # Load Data --------------------------------------------------------
-args.data_path = os.path.join(args.data_path, args.dataset)
-tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
+if args.dataset in ['cifar10', 'cifar100']:
+    args.data_path = os.path.join(args.data_path, args.dataset)
+    tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
                                                         data_path=args.data_path,
                                                         dat_per_cls=args.dat_per_cls,
                                                         use_validation=args.use_validation,
@@ -215,6 +217,9 @@ tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.d
                                                         seed=args.seed,
                                                         aug=args.aug,
                                                         )
+elif args.dataset in ["eurosat", "dtd", "oxford_flowers", "oxford_pets", "food101", "ucf101", 'fgvc_aircraft']:
+    tr_loader, val_loader, te_loader, num_classes = utils.get_dataset_dassl(args)
+
 
 if args.dat_per_cls >= 0:
     print(f"Load Data : {args.dataset}-{args.dat_per_cls}shot")
@@ -378,7 +383,7 @@ if args.method not in ["la", "ll_la"]:
             swag_utils.adjust_learning_rate(optimizer, lr)
         else:
             lr = optimizer.param_groups[0]['lr']
-        
+
         ## train
         if args.method in ["vi", "ll_vi"]:
             if args.optim in ["sgd", "adam"]:
@@ -403,7 +408,6 @@ if args.method not in ["la", "ll_la"]:
 
         ## swag valid
         if (args.method in ["swag", "ll_swag"]) and ((epoch + 1) > args.swa_start) and ((epoch + 1 - args.swa_start) % args.swa_c_epochs == 0):
-
             swag_model.collect_model(model)
             swag_model.sample(0.0)
             
@@ -551,4 +555,3 @@ if args.method in ["swag", "ll_swag", "vi", "ll_vi"]:
     utils.bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, variance, criterion, bma_save_path, temperature)
 else:
     pass
-
