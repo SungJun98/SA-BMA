@@ -1,0 +1,16 @@
+torch==1.13.0
+torchvision==0.14.1
+einops
+pytorch-lightning==1.5.0
+torchmetrics==1.3.0.post0
+lightning-bolts==0.3.4
+tqdm
+wandb
+scipy
+timm
+dill
+scipy
+lightning-bolts
+einops
+ray
+pandas
