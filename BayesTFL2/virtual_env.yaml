@@ -1,4 +1,4 @@
-name: bpret
+name: {env_name}
 channels:
   - defaults
   - conda-forge
@@ -161,4 +161,4 @@ dependencies:
       - yacs==0.1.8
       - yarl==1.9.4
       - zipp==3.17.0
-prefix: /home/emforce77/anaconda3/envs/bpret
+prefix: /{your}/{path}/anaconda3/envs/{env_name}

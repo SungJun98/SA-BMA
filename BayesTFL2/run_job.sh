@@ -1,16 +1,16 @@
 #!/bin/bash
 
 # Define variables
-PROJECT_DIR="/home/emforce77/BayesTFL2"
+PROJECT_DIR="./BayesTFL2"
 CUDA_DEVICES="1"
 
 WANDB_NAME="revise_code"
 WANDB_PROJECT="vit_new_cifar10_10"
-WANDB_ENTITY="jeyoon-yeom2"
-WANDB_KEY="5fa718be15445b057cb99ef97f3da69012635ac0"
-PRIOR_PATH="/home/emforce77/BayesTFL2/resnet50/resnet50_torchvision" #"/home/emforce77/BayesTFL2/resnet50/resnet50_torchvision" /home/emforce77/BayesTFL2/240205_232323/swag_model1
+WANDB_ENTITY=""
+WANDB_KEY=""
+PRIOR_PATH=""
 
-# 데이터셋 조절
+# dataset
 TRAIN_DATASET="dtd"
 VAL_DATASET="dtd"
 NUM_LABELS="47"
@@ -19,13 +19,13 @@ ENCODER="resnet50" #vit_base  resnet50
 T_DATASET="dtd"
 SEED="0"
 
-T_DATA_PATH="/home/emforce77/BayesTFL2/data"
+T_DATA_PATH=""
 T_DATA_PER_CLS="16"
 
-# 하이퍼 파라미터
-LR="0.1"
-WEIGHT_DECAY="0.0001"
-PRIOR_SCALE="1000000"
+# hyperparameters
+LR="1e-1"
+WEIGHT_DECAY="5e-4"
+PRIOR_SCALE="1e6"
 EPOCHS="240"
 
 # control sampling
@@ -40,7 +40,7 @@ SAVE_CHECKPOINTS="--save_checkpoints"
 PYTORCH_PRETRAIN="--pytorch_pretrain"
 IS_SGLD="--is_sgld"
 BMA="True"
-DATA_DIR="/home/emforce77/BayesianTransferLearning-main"
+DATA_DIR=""
 
 # Navigate to project directory
 cd $PROJECT_DIR
