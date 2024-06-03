@@ -207,14 +207,6 @@ print("-"*30)
 
 # Define Model------------------------------------------------------
 model = utils.get_backbone(args.model, num_classes, args.device, args.pre_trained)
-# checkpoint = torch.load(f"{args.prior_path}/{args.model}_model.pt")
-# if args.src_bnn == 'swag':
-#     model.load_state_dict(checkpoint)
-# elif args.src_bnn == "vi":
-#     bn_state_dict = {key: value for key, value in checkpoint["state_dict"].items() if 'bn' in key}
-#     model.load_state_dict(bn_state_dict, strict=False)
-
-
 
 w_mean = torch.load(f"{args.prior_path}/{args.model}_mean.pt")
 w_var = torch.load(f"{args.prior_path}/{args.model}_variance.pt")

@@ -318,10 +318,6 @@ print("-"*30)
 
 
 ## Resume ---------------------------------------------------------------------------
-"""
-get_resume로 정리
-"""
-
 start_epoch = 1
 
 if not args.pre_trained and args.resume is not None:
