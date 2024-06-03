@@ -8,3 +8,5 @@ tmp.py
 *.csv
 *.pyc
 *.cpython-39.pyc
+sh
+.sh
