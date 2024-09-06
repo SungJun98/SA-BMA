@@ -14,8 +14,9 @@ from utils.swag import swag_utils
 from utils.vi import vi_utils
 from utils.la import la_utils
 from utils import temperature_scaling as ts
+from utils.bsam import bsam, bsam_utils
 
-from utils.models import resnet_noBN
+from utils.models import resnet_noBN, mlp, vit_light, simple_vit
 import torchvision.models as torch_models
 import timm
 
@@ -68,14 +69,19 @@ def set_save_path(args):
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
     elif args.method in ["vi", "ll_vi"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}_{args.kl_beta}"
+    elif args.method in ['mcmc', 'emcmc']:
+        save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.n_cycle}_{args.temp}_{args.eta}"
     elif args.method in ["sabma"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.momentum}_{args.low_rank}"
     else:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.momentum}"
         
-    if args.optim not in ["sgd", "adam"]:
+    if args.optim in ["sam", "fsam", "bsam"]:
         save_path_ = f"{save_path_}_{args.rho}"
-        
+        if args.optim in ["fsam"]:
+            save_path_ = f"{save_path_}_{args.eta}"
+        elif args.optim in ["bsam"]:
+            save_path_ = f"{save_path_}_{args.beta2}_{args.damping}_{args.noise_scale}_{args.s_init}"
     if args.optim in ["sabma"]:
         save_path_ = f"{save_path_}_{args.kl_eta}_{args.alpha}"
     
@@ -122,13 +128,19 @@ def set_wandb_runname(args):
         run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
     elif args.method in ["vi", "ll_vi"]:
         run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}"
+    elif args.method in ['mcmc', 'emcmc']:    
+        run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.n_cycle}_{args.temp}_{args.eta}"
     elif args.method in ["sabma"]:
         run_name_ = f"{run_name_}/{args.lr_init}_{args.wd}_{args.momentum}_{args.low_rank}"
     else:
         run_name_ = f"{run_name_}/{args.lr_init}_{args.wd}_{args.momentum}"
         
-    if args.optim not in ["sgd", "adam"]:
+    if args.optim in ["sam", "fsam", "bsam"]:
         run_name_ = f"{run_name_}_{args.rho}"
+        if args.optim in ["fsam"]:
+            run_name_ = f"{run_name_}_{args.eta}"
+        elif args.optim in ["bsam"]:
+            run_name_ = f"{run_name_}_{args.beta2}_{args.damping}_{args.noise_scale}_{args.s_init}"
     
     if args.optim in ["sabma"]:
         run_name_ = f"{run_name_}_{args.kl_eta}_{args.alpha}"
@@ -137,20 +149,21 @@ def set_wandb_runname(args):
 
 
 def get_dataset(dataset='cifar10',
-                data_path='/mlainas/lsj9862/data/cifar10',
+                data_path='/data1/lsj9862/data/cifar10',
                 dat_per_cls=-1,
                 use_validation=True, 
                 batch_size=256,
                 num_workers=4,
                 seed=0,
                 aug=True,
+                model_name='resnet18'
                 ):
     
     import utils.data.data as data
     
     ## Define Transform
-    transform_train, transform_test = data.create_transform_v2(data_name=dataset, aug=aug)
-    
+    transform_train, transform_test = data.create_transform_v2(data_name=dataset, aug=aug, model_name=model_name)
+        
     ## Load Data
     tr_data, val_data, te_data, num_classes = data.create_dataset(data_name=dataset, data_path=data_path,
                                         use_validation=use_validation,
@@ -164,7 +177,6 @@ def get_dataset(dataset='cifar10',
                                             use_validation=use_validation,
                                             batch_size=batch_size, num_workers=num_workers, dat_per_cls=dat_per_cls,
                                             )
-        
 
     return tr_loader, val_loader, te_loader, num_classes
 
@@ -224,14 +236,23 @@ def get_backbone(model_name, num_classes, device, pre_trained=True):
     elif model_name == "resnet18-noBN":
         model = resnet_noBN.resnet18(num_classes=num_classes)
     
-    ## ViT-B/16-ImageNet21K
+    ## ViT-B/16 pre-trained on ImageNet21K
     elif model_name == "vitb16-i21k":
         model = timm.create_model('vit_base_patch16_224_in21k', pretrained=pre_trained)
         model.head = torch.nn.Linear(768, num_classes)
     
+    ## ViT-B/16 pre-trained on ImageNet11K
     elif model_name == 'vitb16-i1k':
-        model = torch_models.vit_b_16(weights='IMAGENET1K_V1')
-        model.heads.head = torch.nn.Linear(768, num_classes)
+        if pre_trained == True:
+            model = torch_models.vit_b_16(weights='IMAGENET1K_V1')
+            model.heads.head = torch.nn.Linear(768, num_classes)
+        else:
+            model = vit_light.ViT_light(num_classes=num_classes)
+            print("[Warning] You load light version of ViT-B/16 for scratch training")
+    
+    ## mlp
+    elif model_name == 'mlp':
+        model = mlp.MLP(input_size=784, hidden_size=32, output_size=10) ## for MNIST
     
     else:
         raise NotImplementedError("No code for the backbone")
@@ -244,7 +265,7 @@ def get_backbone(model_name, num_classes, device, pre_trained=True):
     return model
 
 
-def get_optimizer(args, model):
+def get_optimizer(args, model, num_classes=10):
     '''
     Define optimizer
     '''
@@ -273,6 +294,13 @@ def get_optimizer(args, model):
         optimizer = sam.FSAM(optim_param, base_optimizer, rho=args.rho, eta=args.eta, lr=args.lr_init, momentum=args.momentum,
                         weight_decay=args.wd)
         
+    elif args.optim == "bsam":
+        if args.dat_per_cls < 0:
+            args.dat_per_cls = 5000 if args.dataset == 'cifar10' else 500
+        optimizer = bsam.bSAM(optim_param, Ndata=num_classes * args.dat_per_cls, lr=args.lr_init, 
+                            betas=(args.momentum, args.beta2), weight_decay=args.wd, rho=args.rho,
+                            noise_scale=args.noise_scale, s_init=args.s_init, damping=args.damping)
+        
     return optimizer
 
 
@@ -290,7 +318,7 @@ def get_scheduler(args, optimizer):
             
     elif args.scheduler == "cos_decay":
         from timm.scheduler.cosine_lr import CosineLRScheduler
-        if args.optim in ["sgd", "adam"]:
+        if args.optim in ["sgd", "adam", "bsam"]:
             scheduler_ = CosineLRScheduler(optimizer = optimizer,
                                         t_initial= args.epochs,
                                         lr_min=args.lr_min,
@@ -325,7 +353,7 @@ def get_scaler(args):
             first_step_scaler = None
             second_step_scaler = None
 
-        elif args.optim in ["sam", "fsam", "sabma"]:
+        elif args.optim in ["sam", "fsam", "bsam", "sabma"]:
             scaler = None
             first_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
             second_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
@@ -391,7 +419,7 @@ def save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_s
                             optimizer = optimizer.state_dict(),
                             # scheduler = scheduler.state_dict(),
                             )
-    elif args.optim in ["sam", "fsam"]:
+    elif args.optim in ["sam", "fsam", "bsam"]:
         if not args.no_amp:
             save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
                             epoch = best_epoch,
@@ -661,6 +689,44 @@ def train_fsam(dataloader, model, criterion, optimizer, device, first_step_scale
     }
 
 
+# Train bSAM
+def train_bsam(dataloader, model, criterion, optimizer, device):
+    loss_sum = 0.0
+    correct = 0.0
+
+    num_objects_current = 0
+
+    model.train()
+    for _, (X, y) in enumerate(dataloader):
+        X, y = X.to(device), y.to(device)
+        optimizer.zero_grad()
+        
+        ## noisy sample : p + e
+        optimizer.add_noise(zero_grad=True)
+        
+        ## perturb parameter : p + eps
+        pred = model(X)
+        loss = criterion(pred, y)        
+        loss.backward() # gradient of "p + e"
+        optimizer.first_step(zero_grad=True)
+
+        ## actual sharpness-aware update
+        pred = model(X)
+        loss = criterion(pred, y)        
+        loss.backward() # gradient of "p + eps"
+        optimizer.second_step(zero_grad=True)
+
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
+
+    return {
+        "loss": loss_sum / num_objects_current,
+        "accuracy": correct / num_objects_current * 100.0,
+    }
+    
+    
+
 # Test
 def eval(loader, model, criterion, device, num_bins=15, eps=1e-8):
     '''
@@ -776,7 +842,7 @@ def load_best_model(args, model, swag_model, num_classes):
         swag_model.load_state_dict(checkpoint["state_dict"])
         model = swag_model
         
-    elif args.method in ["vi", "ll_vi"]:
+    elif args.method in ["vi", "ll_vi"] or args.optim == 'bsam':
         model = get_backbone(args.model, num_classes, args.device, args.pre_trained)
         if args.method == "ll_vi":
             vi_utils.make_ll_vi(args, model)
@@ -843,6 +909,8 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
         bma_res = swag_utils.bma_swag(tr_loader, te_loader, model, num_classes, criterion, args.bma_num_models, bma_save_path, args.eps, args.batch_norm, num_bins=args.num_bins)       
     elif args.method in ["vi", "ll_vi"]:
         bma_res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, None, args.bma_num_models, bma_save_path, args.num_bins, args.eps)
+    elif args.optim == 'bsam':
+        bma_res = bsam_utils.bma_bsam(args, val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, None, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
     else:
         raise NotImplementedError("Add code for Bayesian Model Averaging with Temperature scaling for this method")
     bma_logits = bma_res["logits"]; bma_targets = bma_res["targets"]

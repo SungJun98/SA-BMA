@@ -3,7 +3,7 @@ import random
 import torch
 import torchvision
 from torch.utils.data import random_split
-from torchvision.datasets import CIFAR10, CIFAR100, ImageFolder
+from torchvision.datasets import CIFAR10, CIFAR100, ImageFolder, MNIST
 import torchvision.transforms as transforms
 
 from timm.data.transforms_factory import create_transform
@@ -29,7 +29,7 @@ class ExtractedDataSet(Dataset):
 """
 
 
-def create_transform_v2(data_name='cifar10', aug=True, scale=None, ratio=None,
+def create_transform_v2(data_name='cifar10', model_name='resnet18', aug=True, scale=None, ratio=None,
                     hflip=0.5, vflip=0, color_jitter=0.4, aa=None,
                     re_prob=0., re_mode='const', re_count=1):
     # Create transform for dataset
@@ -41,17 +41,34 @@ def create_transform_v2(data_name='cifar10', aug=True, scale=None, ratio=None,
                                         re_prob=re_prob, re_mode=re_mode, re_count=re_count)
             transform_test = create_transform(224)
         else:
-            transform_train = transforms.Compose([
-                            transforms.RandomCrop(32, padding=4),
-                            transforms.RandomHorizontalFlip(),
-                            transforms.ToTensor(),
-                            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-                        ])
+            if 'vit' in model_name:
+                from torchvision.transforms.functional import InterpolationMode
+                transform_train = transforms.Compose([
+                                # transforms.Resize(224),
+                                # transforms.CenterCrop(224),
+                                transforms.RandomCrop(32, padding=4),
+                                transforms.RandomHorizontalFlip(),
+                                transforms.ToTensor(),
+                                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+                            ])
 
-            transform_test = transforms.Compose([
-                            transforms.ToTensor(),
-                            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-                        ])
+                transform_test = transforms.Compose([
+                                # transforms.Resize(224),
+                                transforms.ToTensor(),
+                                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+                            ])
+            else:
+                transform_train = transforms.Compose([
+                                transforms.RandomCrop(32, padding=4),
+                                transforms.RandomHorizontalFlip(),
+                                transforms.ToTensor(),
+                                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+                            ])
+
+                transform_test = transforms.Compose([
+                                transforms.ToTensor(),
+                                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+                            ])
     elif data_name in ['imagenet']:
         if aug:
             print("Deactivate Higher Augmentation for ImageNet")
@@ -71,6 +88,10 @@ def create_transform_v2(data_name='cifar10', aug=True, scale=None, ratio=None,
             transforms.ToTensor(),
             normalize,
             ])
+    
+    elif data_name in ['mnist']:
+        transform_train = transforms.ToTensor()
+        transform_test = transforms.ToTensor()
         
     return transform_train, transform_test
 
@@ -81,7 +102,7 @@ def create_dataset(data_name='cifar10', data_path='/data1/lsj9862/data/cifar10',
             dat_per_cls=-1, seed=0, 
             transform_train=None, transform_test=None):
     # Load Data
-    if data_name in ['cifar10', 'cifar100']:
+    if data_name in ['mnist', 'cifar10', 'cifar100']:
         if data_name == 'cifar10':
             tr_data = CIFAR10(data_path, train=True, transform = transform_train,
                                                 download=True)
@@ -93,8 +114,16 @@ def create_dataset(data_name='cifar10', data_path='/data1/lsj9862/data/cifar10',
             tr_data = CIFAR100(data_path, train=True, transform = transform_train,
                                                 download=True)
             te_data = CIFAR100(data_path, train=False, transform = transform_test,
-                                                    download=True)
+                                                download=True)
             num_classes = max(te_data.targets) + 1
+            
+        elif data_name == 'mnist':
+            tr_data = MNIST(root=data_path, train=True, transform=transform_train,
+                                                download=True)
+            te_data = MNIST(root=data_path, train=False, transform=transform_test,
+                                                download=True)
+            
+            num_classes = 10
         
         # Split Validation Data
         val_data = None
@@ -142,7 +171,7 @@ def create_loader(data_name='cifar10',
                 dat_per_cls=-1,
                 ):
     
-    if data_name in ['cifar10', 'cifar100']:
+    if data_name in ['cifar10', 'cifar100', "mnist"]:
         if dat_per_cls < 0:
             tr_loader = DataLoader(tr_data,
                                     batch_size=batch_size,

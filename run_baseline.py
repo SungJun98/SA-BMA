@@ -46,7 +46,9 @@ parser.add_argument("--tol", type=int, default=30,
 ## Data ---------------------------------------------------------
 parser.add_argument(
     "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100",
-                                        "eurosat", "dtd", "oxford_flowers", "oxford_pets", "food101", "ucf101", 'fgvc_aircraft'],
+                                        "eurosat", "dtd", "oxford_flowers",
+                                        "oxford_pets", "food101", "ucf101", 'fgvc_aircraft',
+                                        'mnist'],
                     help="dataset name")
 
 parser.add_argument(
@@ -75,7 +77,7 @@ parser.add_argument("--no_aug", action="store_true", default=False,
 parser.add_argument(
     "--model",
     type=str, default='resnet18', required=True,
-    choices=['resnet18', 'resnet50', 'resnet101',
+    choices=['mlp', 'resnet18', 'resnet50', 'resnet101',
             'resnet18-noBN',
             'vitb16-i1k', "vitb16-i21k"],
     help="model name (default : resnet18)")
@@ -92,7 +94,7 @@ parser.add_argument("--save_path",
 
 ## Optimizer Hyperparameter --------------------------------------
 parser.add_argument("--optim", type=str, default="sgd",
-                    choices=["sgd", "sam", "fsam", "adam"],
+                    choices=["sgd", "sam", "fsam", "adam", "bsam"],
                     help="Optimization options")
 
 parser.add_argument("--lr_init", type=float, default=0.01,
@@ -109,6 +111,15 @@ parser.add_argument("--wd", type=float, default=5e-4, help="weight decay (defaul
 parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation ball for SAM / FSAM")
 
 parser.add_argument("--eta", type=float, default=1.0, help="diagonal fisher inverse weighting term in FSAM")
+
+parser.add_argument('--beta2', dest='beta2', type=float, default=0.999, help='momentum for variance for bSAM')
+
+parser.add_argument('--damping', dest='damping', type=float, default=0.1, help='damping to stabilize the method for bSAM')
+
+parser.add_argument("--noise_scale", type=float, default=1e-4, help="noise scale (default: 1e-4) for bSAM")
+
+parser.add_argument("--s_init", type=float, default=1.0, help="initialize variance vector (default: 1) for bSAM")
+
 
 # Scheduler
 parser.add_argument("--scheduler", type=str, default='cos_decay', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
@@ -161,7 +172,7 @@ parser.add_argument("--val_mc_num", type=int, default=1, help="number of MC samp
 parser.add_argument("--eps", type=float, default=1e-8, help="small float to calculate nll")
 parser.add_argument("--bma_num_models", type=int, default=30, help="Number of models for bma")
 parser.add_argument("--num_bins", type=int, default=15, help="bin number for ece")
-parser.add_argument("--no_save_bma", action='store_true', default=True, ## change to default=False to save bma models
+parser.add_argument("--no_save_bma", action='store_true', default=False, ## change to default=False to save bma models
             help="Deactivate saving model samples in BMA")
 #----------------------------------------------------------------
 
@@ -191,7 +202,7 @@ print("-"*30)
 #------------------------------------------------------------------
 
 # Set BMA and Save Setting-----------------------------------------
-if args.method == 'dnn':
+if args.method == 'dnn' and args.optim != 'bsam':
     args.bma_num_models = 1
 
 args.save_path = utils.set_save_path(args)
@@ -206,7 +217,7 @@ if not args.ignore_wandb:
 #------------------------------------------------------------------
 
 # Load Data --------------------------------------------------------
-if args.dataset in ['cifar10', 'cifar100']:
+if args.dataset in ['mnist', 'cifar10', 'cifar100']:
     args.data_path = os.path.join(args.data_path, args.dataset)
     tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
                                                         data_path=args.data_path,
@@ -216,9 +227,11 @@ if args.dataset in ['cifar10', 'cifar100']:
                                                         num_workers=args.num_workers,
                                                         seed=args.seed,
                                                         aug=args.aug,
+                                                        model_name=args.model
                                                         )
 elif args.dataset in ["eurosat", "dtd", "oxford_flowers", "oxford_pets", "food101", "ucf101", 'fgvc_aircraft']:
     tr_loader, val_loader, te_loader, num_classes = utils.get_dataset_dassl(args)
+    
 
 
 if args.dat_per_cls >= 0:
@@ -300,6 +313,14 @@ elif args.method == "ll_la":
     la.optimize_prior_precision(method='marglik')
     print(f"Successfully fitting the last-layer LA in model")
 
+tab_name = ["Model", "# of Tr Params"]
+num_params = 0
+for param in model.parameters():
+    num_params += param.numel()
+tab_contents= [args.model, num_params]
+table = [tab_name, tab_contents]
+print(tabulate.tabulate(table, tablefmt="simple"))
+
 print("-"*30)
 #-------------------------------------------------------------------
 
@@ -310,7 +331,7 @@ print("-"*30)
 #-------------------------------------------------------------------
 
 # Set Optimizer--------------------------------------
-optimizer = utils.get_optimizer(args, model)
+optimizer = utils.get_optimizer(args, model, num_classes)
 print(f"Set {args.optim} optimizer with lr_init {args.lr_init} / wd {args.wd} / momentum {args.momentum}")
 print("-"*30)
 #----------------------------------------------------------------
@@ -399,6 +420,9 @@ if args.method not in ["la", "ll_la"]:
                 tr_res = utils.train_sam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
             elif args.optim == "fsam":
                 tr_res = utils.train_fsam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
+            elif args.optim == 'bsam':
+                tr_res = utils.train_bsam(tr_loader, model, criterion, optimizer, args.device)
+
 
         ## valid
         if args.method in ["vi", "ll_vi"]:
@@ -478,7 +502,7 @@ if args.method not in ["la", "ll_la"]:
 
                 # save state_dict
                 os.makedirs(args.save_path, exist_ok=True)
-                if args.method in ["vi", "ll_vi"]:
+                if args.method in ["vi", "ll_vi"] or args.optim=="bsam":
                     mean, variance = vi_utils.save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
                 elif args.method == "dnn":
                     utils.save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
@@ -531,7 +555,7 @@ if args.method not in ["la", "ll_la"]:
             [best_epoch, format(res_ts['accuracy'], '.2f'), format(res_ts['nll'],'.4f'), format(res_ts['ece'], '.4f'), format(temperature.item(), '.4f')]]
     print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
 else:
-    import pdb;pdb.set_trace()
+    raise NotImplementedError()
     res_ts ={"accuracy":-9999, "nll":-9999, "ece":-9999}
 
 
@@ -547,7 +571,7 @@ if not args.ignore_wandb:
 
 
 #### Bayesian Model Averaging
-if args.method in ["swag", "ll_swag", "vi", "ll_vi"]:
+if args.method in ["swag", "ll_swag", "vi", "ll_vi"] or args.optim == 'bsam':
     utils.set_seed(args.seed)
     bma_save_path = f"{args.save_path}/bma_models"
     os.makedirs(bma_save_path, exist_ok=True) 

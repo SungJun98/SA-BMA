@@ -5,7 +5,7 @@ import numpy as np
 
 
 # %%
-PATH = f"/data2/lsj9862/flat_models/seed_2/cifar100/10shot/pretrained_resnet18/sabma-sabma/cos_decay_1e-08/10_1e-07/0.05_0.0005_0.9_-1_0.01_0.0_0.0001/bma_models/performance/performance.pt"
+PATH = f"/data2/lsj9862/flat_models/seed_0/cifar10/scratch_resnet18-noBN/swag-sgd/cos_decay_1e-08/10_1e-07/0.05_0.001_20_161_1/bma_models/mset_4/performance/performance.pt"
 BNN = True
 performance = torch.load(PATH)
 
