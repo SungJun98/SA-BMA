@@ -49,8 +49,12 @@ parser.add_argument("--tol", type=int, default=30,
 
 ## Data ---------------------------------------------------------
 parser.add_argument(
-    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "imagenet"],
-                    help="dataset name")
+    "--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100",
+                                        "eurosat", "dtd", "oxford_flowers",
+                                        "oxford_pets", "food101", "ucf101", 'fgvc_aircraft',
+                                        'mnist'],
+            help="dataset name")
+
 
 parser.add_argument(
     "--data_path",
@@ -78,9 +82,9 @@ parser.add_argument("--no_aug", action="store_true", default=False,
 parser.add_argument(
     "--model",
     type=str, default='resnet18', required=True,
-    choices=['resnet18', 'resnet50', 'resnet101',
-             'resnet50-clip', 'resnet101-clip', 'vitb16-clip',
-            'resnet18-noBN', "vitb16-i21k"],
+    choices=['mlp', 'resnet18', 'resnet50', 'resnet101',
+            'resnet18-noBN',
+            'vitb16-i1k', "vitb16-i21k"],
     help="model name (default : resnet18)")
 
 parser.add_argument(
@@ -95,7 +99,7 @@ parser.add_argument("--save_path",
 
 ## Optimizer Hyperparameter --------------------------------------
 parser.add_argument("--optim", type=str, default="sgd",
-                    choices=["sgd", "sam", "adam"],
+                    choices=["sgd", "sam", "fsam", "adam", "bsam"],
                     help="Optimization options")
 
 parser.add_argument("--lr_init", type=float, default=0.01,
@@ -109,7 +113,17 @@ parser.add_argument("--epochs", type=int, default=100, metavar="N",
 
 parser.add_argument("--wd", type=float, default=5e-4, help="weight decay (default: 5e-4)")
 
-parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation ball for SAM / BSAM")
+parser.add_argument("--rho", type=float, default=0.05, help="size of pertubation ball for SAM / FSAM")
+
+parser.add_argument("--eta", type=float, default=1.0, help="diagonal fisher inverse weighting term in FSAM")
+
+parser.add_argument('--beta2', dest='beta2', type=float, default=0.999, help='momentum for variance for bSAM')
+
+parser.add_argument('--damping', dest='damping', type=float, default=0.1, help='damping to stabilize the method for bSAM')
+
+parser.add_argument("--noise_scale", type=float, default=1e-4, help="noise scale (default: 1e-4) for bSAM")
+
+parser.add_argument("--s_init", type=float, default=1.0, help="initialize variance vector (default: 1) for bSAM")
 
 # Scheduler
 parser.add_argument("--scheduler", type=str, default='cos_decay', choices=['constant', "step_lr", "cos_anneal", "swag_lr", "cos_decay"])
@@ -166,19 +180,6 @@ parser.add_argument("--no_save_bma", action='store_true', default=False,
             help="Deactivate saving model samples in BMA")
 #----------------------------------------------------------------
 
-## OOD test -----------------------------------------------------
-parser.add_argument("--corrupt_option",
-    default=['brightness.npy','contrast.npy','defocus_blur.npy','elastic_transform.npy','fog.npy',
-    'frost.npy','gaussian_blur.npy','gaussian_noise.npy','glass_blur.npy','impulse_noise.npy','jpeg_compression.npy',
-    'motion_blur.npy','pixelate.npy','saturate.npy','shot_noise.npy','snow.npy','spatter.npy','speckle_noise.npy','zoom_blur.npy'],
-    help='corruption option of CIFAR10/100-C'
-        )
-parser.add_argument("--severity",
-    default=1,
-    type=int,
-    help='Severity of corruptness in CIFAR10/100-C (1 to 5)')
-#----------------------------------------------------------------
-
 args = parser.parse_args()
 #----------------------------------------------------------------
 
@@ -221,7 +222,8 @@ if not args.ignore_wandb:
 
 # Load Data --------------------------------------------------------
 args.data_path = os.path.join(args.data_path, args.dataset)
-tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
+if args.dataset in ['mnist', 'cifar10', 'cifar100']:
+    tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.dataset,
                                                         data_path=args.data_path,
                                                         dat_per_cls=args.dat_per_cls,
                                                         use_validation=args.use_validation,
@@ -230,6 +232,8 @@ tr_loader, val_loader, te_loader, num_classes = utils.get_dataset(dataset=args.d
                                                         seed=args.seed,
                                                         aug=args.aug,
                                                         )
+elif args.dataset in ["eurosat", "dtd", "oxford_flowers", "oxford_pets", "food101", "ucf101", 'fgvc_aircraft']:
+    tr_loader, val_loader, te_loader, num_classes = utils.get_dataset_dassl(args)
 
 if args.dat_per_cls >= 0:
     print(f"Load Data : {args.dataset}-{args.dat_per_cls}shot")
@@ -392,11 +396,17 @@ if args.method not in ["la", "ll_la"]:
                 tr_res = vi_utils.train_vi_sgd(tr_loader, model, criterion, optimizer, args.device, scaler, args.batch_size, args.kl_beta)
             elif args.optim == "sam":
                 tr_res = vi_utils.train_vi_sam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler, args.batch_size, args.kl_beta)
+            elif args.optim == "fsam":
+                raise NotImplementedError("No code for fsam with VI yet")
         else:
             if args.optim in ["sgd", "adam"]:
                 tr_res = utils.train_sgd(tr_loader, model, criterion, optimizer, args.device, scaler)
             elif args.optim == "sam":
                 tr_res = utils.train_sam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
+            elif args.optim == "fsam":
+                tr_res = utils.train_fsam(tr_loader, model, criterion, optimizer, args.device, first_step_scaler, second_step_scaler)
+            elif args.optim == 'bsam':
+                tr_res = utils.train_bsam(tr_loader, model, criterion, optimizer, args.device)
 
         ## valid
         if args.method in ["vi", "ll_vi"]:
@@ -406,7 +416,6 @@ if args.method not in ["la", "ll_la"]:
 
         ## swag valid
         if (args.method in ["swag", "ll_swag"]) and ((epoch + 1) > args.swa_start) and ((epoch + 1 - args.swa_start) % args.swa_c_epochs == 0):
-
             swag_model.collect_model(model)
             swag_model.sample(0.0)
             
@@ -477,7 +486,7 @@ if args.method not in ["la", "ll_la"]:
 
                 # save state_dict
                 os.makedirs(args.save_path, exist_ok=True)
-                if args.method in ["vi", "ll_vi"]:
+                if args.method in ["vi", "ll_vi"] or args.optim=='bsam':
                     mean, variance = vi_utils.save_best_vi_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
                 elif args.method == "dnn":
                     utils.save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_scaler, second_step_scaler)
@@ -505,7 +514,13 @@ else:
 ##### Get test nll, Entropy, ece, Reliability Diagram on best model
 ## Load Distributional shifted data
 ### Load Best Model
-model, mean, variance, best_epoch = utils.load_best_model(args, model, swag_model, num_classes)
+if args.method not in ["la", "ll_la"]:
+    model, mean, variance, best_epoch = utils.load_best_model(args, model, swag_model, num_classes)
+else:
+    model = la
+    mean = None
+    variance = None
+    best_epoch = 0
 
 
 #### MAP
@@ -518,11 +533,15 @@ table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece"],
 print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
 
 ## Temperature Scaled Results
-res_ts, temperature = utils.ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, variance, criterion)
-print(f"2) Scaled Results:")
-table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
-        [best_epoch, format(res_ts['accuracy'], '.2f'), format(res_ts['nll'],'.4f'), format(res_ts['ece'], '.4f'), format(temperature.item(), '.4f')]]
-print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
+if args.method not in ["la", "ll_la"]:
+    res_ts, temperature = utils.ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, variance, criterion)
+    print(f"2) Scaled Results:")
+    table = [["Best Epoch", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
+            [best_epoch, format(res_ts['accuracy'], '.2f'), format(res_ts['nll'],'.4f'), format(res_ts['ece'], '.4f'), format(temperature.item(), '.4f')]]
+    print(tabulate.tabulate(table, tablefmt="simple", floatfmt="8.4f"))
+else:
+    raise NotImplementedError()
+    res_ts ={"accuracy":-9999, "nll":-9999, "ece":-9999}
 
 
 if not args.ignore_wandb:

@@ -5,6 +5,7 @@ import utils.sam.sam_utils as sam_utils
 import utils.utils as utils
 from bayesian_torch.models.dnn_to_bnn import get_kl_loss
 from utils import temperature_scaling as ts
+import torchvision
 
 def get_vi_mean_vector(model):
     """
@@ -32,7 +33,10 @@ def get_vi_variance_vector(model):
 
 def make_ll_vi(args, model):
     from bayesian_torch.models.dnn_to_bnn import dnn_to_bnn
-    bayesian_last_layer = torch.nn.Sequential(list(model.children())[-1])
+    if 'resnet' in args.model:
+        bayesian_last_layer = torch.nn.Sequential(list(model.children())[-1])
+    else:
+        bayesian_last_layer = model.heads.head
     const_bnn_prior_parameters = {
         "prior_mu": args.vi_prior_mu,
         "prior_sigma": args.vi_prior_sigma,
@@ -43,7 +47,41 @@ def make_ll_vi(args, model):
         "moped_delta": args.vi_moped_delta,
     }
     dnn_to_bnn(bayesian_last_layer, const_bnn_prior_parameters)
-    model.head = bayesian_last_layer.to(args.device)
+    if 'resnet' in args.model:
+        model.fc = bayesian_last_layer.to(args.device)
+    elif 'vitb16-i1k' == args.model:
+        model.heads.head = bayesian_last_layer.to(args.device)
+    else:
+        raise NotImplementedError()
+
+
+def dnn_to_bnn_vit16i1k(model, const_bnn_prior_parameters):
+    from bayesian_torch.models.dnn_to_bnn import dnn_to_bnn, bnn_linear_layer, bnn_conv_layer
+    
+    ## modified dnn_to_bnn() [https://github.com/IntelLabs/bayesian-torch/blob/main/bayesian_torch/models/dnn_to_bnn.py#L127]
+    for name, value in list(model._modules.items()):
+        if model._modules[name]._modules:
+            dnn_to_bnn_vit16i1k(model._modules[name], const_bnn_prior_parameters)
+        elif "Conv" in model._modules[name].__class__.__name__:
+            setattr(
+                model,
+                name,
+                bnn_conv_layer(
+                    const_bnn_prior_parameters,
+                    model._modules[name]))
+        elif "Linear" in model._modules[name].__class__.__name__:
+            if "NonDynamicallyQuantizableLinear" in model._modules[name].__class__.__name__:
+                pass
+            else:
+                setattr(
+                    model,
+                    name,
+                    bnn_linear_layer(
+                        const_bnn_prior_parameters,
+                        model._modules[name]))
+        else:
+            pass
+
 
 
 def load_vi(model, checkpoint):   
@@ -77,8 +115,12 @@ def train_vi_sgd(dataloader, model, criterion, optimizer, device, scaler, batch_
     num_batches = len(dataloader)
 
     model.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
+    for batch_idx, batch in enumerate(dataloader):
+        try:
+            X = batch["img"].to(device)
+            y = batch["label"].to(device)
+        except:
+            X, y = batch[0].to(device), batch[1].to(device)
 
         if scaler is not None:
             with torch.cuda.amp.autocast():
@@ -118,8 +160,12 @@ def train_vi_sam(dataloader, model, criterion, optimizer, device, first_step_sca
     num_batches = len(dataloader)
 
     model.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
+    for batch_idx, batch in enumerate(dataloader):
+        try:
+            X = batch["img"].to(device)
+            y = batch["label"].to(device)
+        except:
+            X, y = batch[0].to(device), batch[1].to(device)
         optimizer.zero_grad()
 
         if first_step_scaler is not None:
@@ -231,14 +277,11 @@ def bma_vi(val_loader, te_loader, mean, variance, model, method, criterion, num_
     for p in model.parameters():
         model_shape.append(p.shape)
         
-    if "last_layer" in method:
+    if "ll_" in method:
         tr_layer = "last_layer"
         model_shape = model_shape[-2:]
         for name, _ in model.named_modules():
             tr_layer_name = name
-    elif "last_block" in method:
-        tr_layer = "last_block"
-        raise NotImplementedError("Add code for last block vi")
     else:
         tr_layer = "full_layer"
         tr_layer_name = None

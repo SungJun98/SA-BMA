@@ -12,9 +12,11 @@ import torch.nn.functional as F
 from utils.sam import sam, sam_utils
 from utils.swag import swag_utils
 from utils.vi import vi_utils
+from utils.la import la_utils
 from utils import temperature_scaling as ts
+from utils.bsam import bsam, bsam_utils
 
-from utils.models import resnet_noBN
+from utils.models import resnet_noBN, mlp, vit_light, simple_vit
 import torchvision.models as torch_models
 import timm
 
@@ -67,14 +69,19 @@ def set_save_path(args):
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
     elif args.method in ["vi", "ll_vi"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}_{args.kl_beta}"
-    elif args.method in ["sabtl"]:
+    elif args.method in ['mcmc', 'emcmc']:
+        save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.n_cycle}_{args.temp}_{args.eta}"
+    elif args.method in ["sabma"]:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.momentum}_{args.low_rank}"
     else:
         save_path_ = f"{save_path_}/{args.lr_init}_{args.wd}_{args.momentum}"
         
-    if args.optim not in ["sgd", "adam"]:
+    if args.optim in ["sam", "fsam", "bsam"]:
         save_path_ = f"{save_path_}_{args.rho}"
-        
+        if args.optim in ["fsam"]:
+            save_path_ = f"{save_path_}_{args.eta}"
+        elif args.optim in ["bsam"]:
+            save_path_ = f"{save_path_}_{args.beta2}_{args.damping}_{args.noise_scale}_{args.s_init}"
     if args.optim in ["sabma"]:
         save_path_ = f"{save_path_}_{args.kl_eta}_{args.alpha}"
     
@@ -88,6 +95,13 @@ def set_wandb_runname(args):
     '''
 
     method = args.method
+    if args.method == 'sabma':
+        if args.tr_layer == 'll':
+            method = 'll_' + method
+            
+        if args.diag_only:
+            method = 'diag_' + method
+        
 
     ### pre-trained / linear_probe / scratch
     if args.pre_trained:
@@ -114,13 +128,19 @@ def set_wandb_runname(args):
         run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.max_num_models}_{args.swa_start}_{args.swa_c_epochs}"
     elif args.method in ["vi", "ll_vi"]:
         run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.vi_prior_sigma}_{args.vi_posterior_rho_init}_{args.vi_moped_delta}"
-    elif args.method in ["sabtl"]:
+    elif args.method in ['mcmc', 'emcmc']:    
+        run_name_ = f"{run_name_}_{args.lr_init}_{args.wd}_{args.n_cycle}_{args.temp}_{args.eta}"
+    elif args.method in ["sabma"]:
         run_name_ = f"{run_name_}/{args.lr_init}_{args.wd}_{args.momentum}_{args.low_rank}"
     else:
         run_name_ = f"{run_name_}/{args.lr_init}_{args.wd}_{args.momentum}"
         
-    if args.optim not in ["sgd", "adam"]:
+    if args.optim in ["sam", "fsam", "bsam"]:
         run_name_ = f"{run_name_}_{args.rho}"
+        if args.optim in ["fsam"]:
+            run_name_ = f"{run_name_}_{args.eta}"
+        elif args.optim in ["bsam"]:
+            run_name_ = f"{run_name_}_{args.beta2}_{args.damping}_{args.noise_scale}_{args.s_init}"
     
     if args.optim in ["sabma"]:
         run_name_ = f"{run_name_}_{args.kl_eta}_{args.alpha}"
@@ -136,13 +156,14 @@ def get_dataset(dataset='cifar10',
                 num_workers=4,
                 seed=0,
                 aug=True,
+                model_name='resnet18'
                 ):
     
     import utils.data.data as data
     
     ## Define Transform
-    transform_train, transform_test = data.create_transform_v2(data_name=dataset, aug=aug)
-    
+    transform_train, transform_test = data.create_transform_v2(data_name=dataset, aug=aug, model_name=model_name)
+        
     ## Load Data
     tr_data, val_data, te_data, num_classes = data.create_dataset(data_name=dataset, data_path=data_path,
                                         use_validation=use_validation,
@@ -156,8 +177,47 @@ def get_dataset(dataset='cifar10',
                                             use_validation=use_validation,
                                             batch_size=batch_size, num_workers=num_workers, dat_per_cls=dat_per_cls,
                                             )
-        
 
+    return tr_loader, val_loader, te_loader, num_classes
+
+
+
+def get_dataset_dassl(args):
+    from my_dassl.data import DataManager
+    from my_dassl.config import get_cfg_default
+    
+    import my_dassl.datasets.oxford_pets
+    import my_dassl.datasets.oxford_flowers
+    import my_dassl.datasets.fgvc_aircraft
+    import my_dassl.datasets.dtd
+    import my_dassl.datasets.eurosat
+    import my_dassl.datasets.stanford_cars
+    import my_dassl.datasets.food101
+    import my_dassl.datasets.sun397
+    import my_dassl.datasets.caltech101
+    import my_dassl.datasets.ucf101
+    import my_dassl.datasets.imagenet
+    import my_dassl.datasets.svhn
+    import my_dassl.datasets.resisc45
+    import my_dassl.datasets.clevr
+
+    import my_dassl.datasets.locmnist
+    
+    cfg = get_cfg_default()
+    
+    dataset_config_file = f'./my_dassl/datasets/config/{args.dataset}.yaml'
+    cfg.SEED = args.seed
+    cfg.merge_from_file(dataset_config_file)
+    cfg.DATASET.ROOT = args.data_path
+    cfg.DATASET.NUM_SHOTS = args.dat_per_cls
+    cfg.DATASET.SUBSAMPLE_CLASSES = "all"
+    
+    dm = DataManager(cfg)
+    tr_loader = dm.train_loader_x
+    val_loader = dm.val_loader
+    te_loader = dm.test_loader
+    num_classes = dm.num_classes
+    
     return tr_loader, val_loader, te_loader, num_classes
 
 
@@ -176,11 +236,24 @@ def get_backbone(model_name, num_classes, device, pre_trained=True):
     elif model_name == "resnet18-noBN":
         model = resnet_noBN.resnet18(num_classes=num_classes)
     
-    ## ViT-B/16-ImageNet21K
+    ## ViT-B/16 pre-trained on ImageNet21K
     elif model_name == "vitb16-i21k":
         model = timm.create_model('vit_base_patch16_224_in21k', pretrained=pre_trained)
         model.head = torch.nn.Linear(768, num_classes)
-        
+    
+    ## ViT-B/16 pre-trained on ImageNet11K
+    elif model_name == 'vitb16-i1k':
+        if pre_trained == True:
+            model = torch_models.vit_b_16(weights='IMAGENET1K_V1')
+            model.heads.head = torch.nn.Linear(768, num_classes)
+        else:
+            model = vit_light.ViT_light(num_classes=num_classes)
+            print("[Warning] You load light version of ViT-B/16 for scratch training")
+    
+    ## mlp
+    elif model_name == 'mlp':
+        model = mlp.MLP(input_size=784, hidden_size=32, output_size=10) ## for MNIST
+    
     else:
         raise NotImplementedError("No code for the backbone")
     
@@ -192,7 +265,7 @@ def get_backbone(model_name, num_classes, device, pre_trained=True):
     return model
 
 
-def get_optimizer(args, model):
+def get_optimizer(args, model, num_classes=10):
     '''
     Define optimizer
     '''
@@ -216,6 +289,18 @@ def get_optimizer(args, model):
         optimizer = sam.SAM(optim_param, base_optimizer, rho=args.rho, lr=args.lr_init, momentum=args.momentum,
                         weight_decay=args.wd)
         
+    elif args.optim == "fsam":
+        base_optimizer = torch.optim.SGD
+        optimizer = sam.FSAM(optim_param, base_optimizer, rho=args.rho, eta=args.eta, lr=args.lr_init, momentum=args.momentum,
+                        weight_decay=args.wd)
+        
+    elif args.optim == "bsam":
+        if args.dat_per_cls < 0:
+            args.dat_per_cls = 5000 if args.dataset == 'cifar10' else 500
+        optimizer = bsam.bSAM(optim_param, Ndata=num_classes * args.dat_per_cls, lr=args.lr_init, 
+                            betas=(args.momentum, args.beta2), weight_decay=args.wd, rho=args.rho,
+                            noise_scale=args.noise_scale, s_init=args.s_init, damping=args.damping)
+        
     return optimizer
 
 
@@ -228,12 +313,12 @@ def get_scheduler(args, optimizer):
         from timm.scheduler.step_lr import StepLRScheduler
         if args.optim in ['sgd', "adam"]:
             scheduler_ = StepLRScheduler(optimizer, decay_rate=0.2, )
-        elif args.optim in ['sam', 'sabma']:
+        elif args.optim in ['sam', 'fsam', 'sabma']:
             scheduler_ = StepLRScheduler(optimizer.base_optimizer, decay_rate=0.2, )
             
     elif args.scheduler == "cos_decay":
         from timm.scheduler.cosine_lr import CosineLRScheduler
-        if args.optim in ["sgd", "adam"]:
+        if args.optim in ["sgd", "adam", "bsam"]:
             scheduler_ = CosineLRScheduler(optimizer = optimizer,
                                         t_initial= args.epochs,
                                         lr_min=args.lr_min,
@@ -243,7 +328,7 @@ def get_scheduler(args, optimizer):
                                         warmup_t=args.warmup_t,
                                         warmup_lr_init=args.warmup_lr_init,
                                             )
-        elif args.optim in ["sam", "sabma"]:
+        elif args.optim in ["sam", "fsam", "sabma"]:
             scheduler_ = CosineLRScheduler(optimizer = optimizer.base_optimizer,
                                         t_initial= args.epochs,
                                         lr_min=args.lr_min,
@@ -268,7 +353,7 @@ def get_scaler(args):
             first_step_scaler = None
             second_step_scaler = None
 
-        elif args.optim in ["sam", "sabma"]:
+        elif args.optim in ["sam", "fsam", "bsam", "sabma"]:
             scaler = None
             first_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
             second_step_scaler = torch.cuda.amp.GradScaler(2 ** 8)
@@ -334,7 +419,7 @@ def save_best_dnn_model(args, best_epoch, model, optimizer, scaler, first_step_s
                             optimizer = optimizer.state_dict(),
                             # scheduler = scheduler.state_dict(),
                             )
-    elif args.optim == "sam":
+    elif args.optim in ["sam", "fsam", "bsam"]:
         if not args.no_amp:
             save_checkpoint(file_path = f"{args.save_path}/{args.method}-{args.optim}_best_val.pt",
                             epoch = best_epoch,
@@ -408,8 +493,12 @@ def train_sgd(dataloader, model, criterion, optimizer, device, scaler):
     num_batches = len(dataloader)
 
     model.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
+    for batch_idx, batch in enumerate(dataloader):
+        try:
+            X = batch["img"].to(device)
+            y = batch["label"].to(device)
+        except:
+            X, y = batch[0].to(device), batch[1].to(device)
 
         if scaler is not None:
             with torch.cuda.amp.autocast():
@@ -446,8 +535,12 @@ def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler
     num_batches = len(dataloader)
 
     model.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
+    for batch_idx, batch in enumerate(dataloader):
+        try:
+            X = batch["img"].to(device)
+            y = batch["label"].to(device)
+        except:
+            X, y = batch[0].to(device), batch[1].to(device)
         optimizer.zero_grad()
 
         if first_step_scaler is not None:
@@ -489,10 +582,6 @@ def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler
             second_step_scaler.step(optimizer)
             second_step_scaler.update()
             
-            # Calculate loss and accuracy
-            correct += (model(X).argmax(1) == y).type(torch.float).sum().item()
-            loss_sum += loss.data.item() * X.size(0)
-            num_objects_current += X.size(0)
         
         else:
             ## first forward & backward
@@ -506,10 +595,11 @@ def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler
             loss = criterion(pred, y)
             loss.backward()
             optimizer.second_step(zero_grad=True, amp=False)   
-                       
-            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-            loss_sum += loss.data.item() * X.size(0)
-            num_objects_current += X.size(0)
+        
+        # Calculate loss and accuracy              
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
                       
     return {
         "loss": loss_sum / num_objects_current,
@@ -517,6 +607,125 @@ def train_sam(dataloader, model, criterion, optimizer, device, first_step_scaler
     }
 
 
+
+# train FSAM
+def train_fsam(dataloader, model, criterion, optimizer, device, first_step_scaler, second_step_scaler):
+    # https://github.com/davda54/sam/issues/7
+    loss_sum = 0.0
+    correct = 0.0
+
+    num_objects_current = 0
+    num_batches = len(dataloader)
+
+    model.train()
+    for batch_idx, batch in enumerate(dataloader):
+        try:
+            X = batch["img"].to(device)
+            y = batch["label"].to(device)
+        except:
+            X, y = batch[0].to(device), batch[1].to(device)
+        optimizer.zero_grad()
+
+        if first_step_scaler is not None:
+            sam_utils.enable_running_stats(model)
+            ### first forward-backward pass
+            with torch.cuda.amp.autocast():
+                pred = model(X)
+                loss = criterion(pred, y)
+            first_step_scaler.scale(loss).backward()
+            
+            first_step_scaler.unscale_(optimizer)
+            
+            optimizer_state = first_step_scaler._per_optimizer_states[id(optimizer)]
+            
+            inf_grad_cnt = sum(v.item() for v in optimizer_state["found_inf_per_device"].values())      # Check if any gradients are inf/nan
+            
+            if inf_grad_cnt == 0:
+                # if valid graident, apply sam_first_step
+                optimizer.first_step(zero_grad=True)
+                sam_first_step_applied = True
+            else:
+                # if invalid graident, skip sam and revert to single optimization step
+                optimizer.zero_grad()
+                sam_first_step_applied = False
+
+            first_step_scaler.update()
+
+            sam_utils.disable_running_stats(model)
+            
+            ### second forward-backward pass
+            with torch.cuda.amp.autocast():
+                pred = model(X)
+                loss = criterion(pred, y)
+            second_step_scaler.scale(loss).backward()
+
+            if sam_first_step_applied:
+                optimizer.second_step()
+            
+            second_step_scaler.step(optimizer)
+            second_step_scaler.update()
+        
+        else:
+            ## first forward & backward
+            pred = model(X)
+            loss = criterion(pred, y)        
+            loss.backward()
+            optimizer.first_step(zero_grad=True, amp=False)
+            
+            ## second forward-backward pass
+            pred = model(X)
+            loss = criterion(pred, y)
+            loss.backward()
+            optimizer.second_step(zero_grad=True, amp=False)   
+            
+        # Calculate loss and accuracy               
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
+                      
+    return {
+        "loss": loss_sum / num_objects_current,
+        "accuracy": correct / num_objects_current * 100.0,
+    }
+
+
+# Train bSAM
+def train_bsam(dataloader, model, criterion, optimizer, device):
+    loss_sum = 0.0
+    correct = 0.0
+
+    num_objects_current = 0
+
+    model.train()
+    for _, (X, y) in enumerate(dataloader):
+        X, y = X.to(device), y.to(device)
+        optimizer.zero_grad()
+        
+        ## noisy sample : p + e
+        optimizer.add_noise(zero_grad=True)
+        
+        ## perturb parameter : p + eps
+        pred = model(X)
+        loss = criterion(pred, y)        
+        loss.backward() # gradient of "p + e"
+        optimizer.first_step(zero_grad=True)
+
+        ## actual sharpness-aware update
+        pred = model(X)
+        loss = criterion(pred, y)        
+        loss.backward() # gradient of "p + eps"
+        optimizer.second_step(zero_grad=True)
+
+        correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        loss_sum += loss.data.item() * X.size(0)
+        num_objects_current += X.size(0)
+
+    return {
+        "loss": loss_sum / num_objects_current,
+        "accuracy": correct / num_objects_current * 100.0,
+    }
+    
+    
 
 # Test
 def eval(loader, model, criterion, device, num_bins=15, eps=1e-8):
@@ -532,8 +741,13 @@ def eval(loader, model, criterion, device, num_bins=15, eps=1e-8):
     model.eval()
     offset = 0
     with torch.no_grad():
-        for _, (input, target) in enumerate(loader):
-            input, target = input.to(device), target.to(device)
+        for batch_idx, batch in enumerate(loader):
+            try:
+                input = batch["img"].to(device)
+                target = batch["label"].to(device)
+            except:
+                input, target = batch[0].to(device), batch[1].to(device)
+        
             pred = model(input)
             loss = criterion(pred, target)
             loss_sum += loss.item() * input.size(0)
@@ -628,7 +842,7 @@ def load_best_model(args, model, swag_model, num_classes):
         swag_model.load_state_dict(checkpoint["state_dict"])
         model = swag_model
         
-    elif args.method in ["vi", "ll_vi"]:
+    elif args.method in ["vi", "ll_vi"] or args.optim == 'bsam':
         model = get_backbone(args.model, num_classes, args.device, args.pre_trained)
         if args.method == "ll_vi":
             vi_utils.make_ll_vi(args, model)
@@ -651,7 +865,9 @@ def no_ts_map_estimation(args, te_loader, num_classes, model, mean, variance, cr
         model.sample(0)
         res = eval(te_loader, model, criterion, args.device)
     elif args.method in ["vi", "ll_vi"]:
-        res = vi_utils.bma_vi(None, te_loader, None, mean, variance, model, args.method, criterion, num_classes, temperature=None, bma_num_models=1,  bma_save_path=None, num_bins=args.num_bins, eps=args.eps)  
+        res = vi_utils.bma_vi(None, te_loader, mean, variance, model, args.method, criterion, num_classes, temperature=None, bma_num_models=1,  bma_save_path=None, num_bins=args.num_bins, eps=args.eps)  
+    elif args.method in ["la", "ll_la"]:
+        res = la_utils.eval_la(te_loader, model, criterion, args.device)
     else:
         res = eval(te_loader, model, criterion, args.device)
     
@@ -672,10 +888,11 @@ def ts_map_estimation(args, val_loader, te_loader, num_classes, model, mean, var
         res = eval(te_loader, scaled_model, criterion, args.device)   
         
     elif args.method in ["vi", "ll_vi"]:
-        res = vi_utils.bma_vi(val_loader, te_loader, None, mean, variance, model, args.method, criterion, num_classes, temperature='local', bma_num_models=1,  bma_save_path=None, num_bins=args.num_bins, eps=args.eps)
+        res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, temperature='local', bma_num_models=1,  bma_save_path=None, num_bins=args.num_bins, eps=args.eps)
         temperature = res["temperature"]
     else:
-        raise NotImplementedError("Need Code for temperature scaling on this method")
+        pass
+        print("No Code for temperature scaling on this method")
 
     if save:
         save_reliability_diagram(args.method, args.optim, args.save_path, res['unc'], False)
@@ -692,6 +909,8 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
         bma_res = swag_utils.bma_swag(tr_loader, te_loader, model, num_classes, criterion, args.bma_num_models, bma_save_path, args.eps, args.batch_norm, num_bins=args.num_bins)       
     elif args.method in ["vi", "ll_vi"]:
         bma_res = vi_utils.bma_vi(val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, None, args.bma_num_models, bma_save_path, args.num_bins, args.eps)
+    elif args.optim == 'bsam':
+        bma_res = bsam_utils.bma_bsam(args, val_loader, te_loader, mean, variance, model, args.method, criterion, num_classes, None, args.bma_num_models,  bma_save_path, args.num_bins, args.eps)
     else:
         raise NotImplementedError("Add code for Bayesian Model Averaging with Temperature scaling for this method")
     bma_logits = bma_res["logits"]; bma_targets = bma_res["targets"]
@@ -705,58 +924,40 @@ def bma(args, tr_loader, val_loader, te_loader, num_classes, model, mean, varian
     table = [["Num BMA models", "Test Accuracy", "Test NLL", "Test Ece"],
             [args.bma_num_models, format(bma_accuracy, '.4f'), format(bma_nll, '.4f'), format(bma_ece, '.4f')]]
     print(tabulate.tabulate(table, tablefmt="simple"))
-    table = [["Num BMA models", "OOD Accuracy", "OOD NLL", "OOD Ece"],
-            [args.bma_num_models, format(bma_res["ood_accuracy"], '.4f'), format(bma_res["ood_nll"], '.4f'), format(bma_res["ood_ece"], '.4f')]]
-    print(tabulate.tabulate(table, tablefmt="simple"))
-    
     
     ## Adjust temperature scaling on bma logits
-    bma_logits_ts = torch.tensor(bma_logits) / temperature.cpu()
-    bma_predictions_ts = F.softmax(bma_logits_ts, dim=1).detach().numpy()
+    if temperature is not None:
+        bma_logits_ts = torch.tensor(bma_logits) / temperature.cpu()
+        bma_predictions_ts = F.softmax(bma_logits_ts, dim=1).detach().numpy()
+        
+        bma_accuracy_ts = np.mean(np.argmax(bma_predictions_ts, axis=1) == bma_targets) * 100
+        bma_nll_ts = -np.mean(np.log(bma_predictions_ts[np.arange(bma_predictions_ts.shape[0]), bma_targets] + args.eps))
+        bma_unc_ts = calibration_curve(bma_predictions_ts, bma_targets, args.num_bins)
+        bma_ece_ts = bma_unc_ts['ece']
     
-    bma_accuracy_ts = np.mean(np.argmax(bma_predictions_ts, axis=1) == bma_targets) * 100
-    bma_nll_ts = -np.mean(np.log(bma_predictions_ts[np.arange(bma_predictions_ts.shape[0]), bma_targets] + args.eps))
-    bma_unc_ts = calibration_curve(bma_predictions_ts, bma_targets, args.num_bins)
-    bma_ece_ts = bma_unc_ts['ece']
     
-    
-    print(f"4) Calibrated BMA Results:")
-    table = [["Num BMA models", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
-            [args.bma_num_models, format(bma_accuracy_ts, '.4f'), format(bma_nll_ts, '.4f'), format(bma_ece_ts, '.4f'), format(temperature.item(), '.4f')]]
-    print(tabulate.tabulate(table, tablefmt="simple"))
-    
+        print(f"4) Calibrated BMA Results:")
+        table = [["Num BMA models", "Test Accuracy", "Test NLL", "Test Ece", "Temperature"],
+                [args.bma_num_models, format(bma_accuracy_ts, '.4f'), format(bma_nll_ts, '.4f'), format(bma_ece_ts, '.4f'), format(temperature.item(), '.4f')]]
+        print(tabulate.tabulate(table, tablefmt="simple"))
+    else:
+        bma_accuracy_ts = 0.0
+        bma_nll_ts = 0.0
+        bma_ece_ts = 0.0
+        temperature = torch.tensor(1.0)
+
     if not args.ignore_wandb:
         wandb.run.summary['bma accuracy'] = bma_accuracy
         wandb.run.summary['bma nll'] = bma_nll
         wandb.run.summary['bma ece'] = bma_ece
-    
-        wandb.run.summary['bma accuracy w/ ts'] = bma_accuracy_ts
-        wandb.run.summary['bma nll w/ ts'] = bma_nll_ts
-        wandb.run.summary['bma ece w/ ts'] = bma_ece_ts
-        wandb.run.summary['bma temperature'] = temperature.item()
-    
+
+        if temperature is not None:
+            wandb.run.summary['bma accuracy w/ ts'] = bma_accuracy_ts
+            wandb.run.summary['bma nll w/ ts'] = bma_nll_ts
+            wandb.run.summary['bma ece w/ ts'] = bma_ece_ts
+            wandb.run.summary['bma temperature'] = temperature.item()
+        
     # if not bma_save_path is not None:    
     #     save_reliability_diagram(args.method, args.optim, args.save_path, bma_res['unc'], True)
     
     return bma_res, bma_accuracy, bma_nll, bma_ece, bma_accuracy_ts, bma_nll_ts, bma_ece_ts, temperature.item()
-
-
-
-def topk_accuracy(output, target, topk=(1,5)):
-    """Compute the top-k accuracy for the specified values of k"""
-    with torch.no_grad():
-        output = torch.tensor(output).float()
-        target = torch.tensor(target).float()
-        
-        maxk = max(topk)
-        batch_size = target.size(0)
-
-        _, pred = output.topk(maxk, 1, True, True)
-        pred = pred.t()
-        correct = pred.eq(target.view(1, -1).expand_as(pred))
-
-        topk_acc = []
-        for k in topk:
-            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
-            topk_acc.append(correct_k.mul_(100.0 / batch_size))
-        return topk_acc
